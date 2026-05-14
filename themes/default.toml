@@ -1,0 +1,47 @@
+name = "default"
+
+[colors]
+background = "#0b0b1a"
+foreground = "#e6e6f0"
+primary = "#9d7cf2"
+secondary = "#5fb3d8"
+accent = "#f0b67f"
+muted = "#6a6a85"
+border = "#2a2a44"
+border_focused = "#9d7cf2"
+progress_filled = "#9d7cf2"
+progress_empty = "#2a2a44"
+
+[symbols]
+play = "▶"
+pause = "⏸"
+stop = "■"
+next = "⏭"
+prev = "⏮"
+shuffle = "⇄"
+repeat = "↻"
+volume = "♪"
+progress_fill = "━"
+progress_empty = "─"
+progress_head = "●"
+
+[ascii]
+logo = """
+ ███▄    █  ▒█████  ▄████▄  ▄▄▄█████▓ █    ██  ███▄    █ ▓█████
+ ██ ▀█   █ ▒██▒  ██▒▒██▀ ▀█  ▓  ██▒ ▓▒ ██  ▓██▒ ██ ▀█   █ ▓█   ▀
+▓██  ▀█ ██▒▒██░  ██▒▒▓█    ▄ ▒ ▓██░ ▒░▓██  ▒██░▓██  ▀█ ██▒▒███
+▓██▒  ▐▌██▒▒██   ██░▒▓▓▄ ▄██▒░ ▓██▓ ░ ▓▓█  ░██░▓██▒  ▐▌██▒▒▓█  ▄
+▒██░   ▓██░░ ████▓▒░▒ ▓███▀ ░  ▒██▒ ░ ▒▒█████▓ ▒██░   ▓██░░▒████▒
+"""
+playing = """
+   ♪  ♫  ♪  ♫
+  ╱╲╱╲╱╲╱╲╱╲
+ ╱  ▶ NOW  ╲
+╱  PLAYING  ╲
+"""
+paused = """
+   ·  ·  ·  ·
+  ┄┄┄┄┄┄┄┄┄┄
+   ⏸ PAUSED
+  ┄┄┄┄┄┄┄┄┄┄
+"""
