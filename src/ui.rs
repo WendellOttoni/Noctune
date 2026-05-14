@@ -67,8 +67,14 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from("  Modes & playlists"),
         Line::from("    Shift+S    toggle shuffle"),
         Line::from("    r          cycle repeat (off/all/one)"),
+        Line::from("    o          cycle sort (title/artist/album)"),
+        Line::from("    Shift+T    sleep timer (30 min)"),
         Line::from("    w          save queue as .m3u"),
         Line::from("    Shift+L    load latest .m3u"),
+        Line::from(""),
+        Line::from("  Spotify (set client_id in config first)"),
+        Line::from("    Shift+P    open browser login (OAuth PKCE)"),
+        Line::from("    @          toggle play/pause on Spotify"),
     ];
 
     let p = Paragraph::new(Text::from(lines))
@@ -277,10 +283,45 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(20), Constraint::Length(24)])
+        .split(inner);
+    let content_area = columns[0];
+    let art_area = columns[1];
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
-        .split(inner);
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(content_area);
+
+    let art_text = if app.player.current().is_none() {
+        ""
+    } else if app.player.is_paused() {
+        app.theme.ascii.paused.as_str()
+    } else {
+        app.theme.ascii.playing.as_str()
+    };
+    if !art_text.trim().is_empty() {
+        let lines: Vec<Line> = art_text
+            .lines()
+            .map(|l| {
+                Line::from(Span::styled(
+                    l.to_string(),
+                    Style::default().fg(parse_color(&app.theme.colors.primary)),
+                ))
+            })
+            .collect();
+        let art = Paragraph::new(Text::from(lines))
+            .alignment(Alignment::Center);
+        f.render_widget(art, art_area);
+    }
 
     let title = app
         .player
@@ -329,18 +370,48 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
     )]));
     f.render_widget(time, chunks[2]);
 
-    let vol_pct = (app.player.volume() * 100.0).round() as u32;
-    let vol = Paragraph::new(Line::from(vec![
+    let vol = build_volume_bar(app.player.volume(), 20, &app.theme);
+    f.render_widget(Paragraph::new(vol), chunks[3]);
+
+    let lyric_text = app
+        .lyrics
+        .as_ref()
+        .and_then(|l| l.current_index(elapsed).map(|i| l.lines[i].text.clone()))
+        .unwrap_or_default();
+    if !lyric_text.is_empty() {
+        let lyric = Paragraph::new(Line::from(Span::styled(
+            format!(" ♪ {}", lyric_text),
+            Style::default()
+                .fg(parse_color(&app.theme.colors.accent))
+                .add_modifier(Modifier::ITALIC),
+        )));
+        f.render_widget(lyric, chunks[4]);
+    }
+}
+
+fn build_volume_bar(volume: f32, width: usize, theme: &Theme) -> Line<'static> {
+    let pct = (volume * 100.0).round() as u32;
+    let frac = (volume / 1.5).clamp(0.0, 1.0);
+    let filled = ((width as f32) * frac).round() as usize;
+    let empty = width.saturating_sub(filled);
+    Line::from(vec![
         Span::styled(
-            format!(" {} ", app.theme.symbols.volume),
-            Style::default().fg(parse_color(&app.theme.colors.accent)),
+            format!(" {} ", theme.symbols.volume),
+            Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            format!("vol {vol_pct}%"),
-            Style::default().fg(parse_color(&app.theme.colors.muted)),
+            "█".repeat(filled),
+            Style::default().fg(parse_color(&theme.colors.primary)),
         ),
-    ]));
-    f.render_widget(vol, chunks[3]);
+        Span::styled(
+            "░".repeat(empty),
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+        Span::styled(
+            format!(" {pct}%"),
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+    ])
 }
 
 fn build_progress(
@@ -401,8 +472,16 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         crate::app::RepeatMode::All => "rep:all ",
         crate::app::RepeatMode::One => "rep:one ",
     };
+    let sleep = app
+        .sleep_remaining()
+        .map(|d| {
+            let s = d.as_secs();
+            format!("zzz {:02}:{:02} ", s / 60, s % 60)
+        })
+        .unwrap_or_default();
+    let sort = format!("sort:{} ", app.sort.label());
     let hints = Paragraph::new(Span::styled(
-        format!("{shuf}{rep}[?] help [q] quit "),
+        format!("{sleep}{shuf}{rep}{sort}[?] help [q] quit "),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     ))
     .alignment(Alignment::Right);

@@ -9,6 +9,33 @@ pub struct Config {
     pub theme: String,
     pub keybinds: Keybinds,
     pub playback: Playback,
+    #[serde(default)]
+    pub spotify: SpotifyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpotifyConfig {
+    pub client_id: String,
+    pub redirect_port: u16,
+}
+
+impl Default for SpotifyConfig {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            redirect_port: 8888,
+        }
+    }
+}
+
+impl SpotifyConfig {
+    pub fn redirect_uri(&self) -> String {
+        format!("http://127.0.0.1:{}/callback", self.redirect_port)
+    }
+    #[allow(dead_code)]
+    pub fn is_configured(&self) -> bool {
+        !self.client_id.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +73,7 @@ impl Default for Config {
                 shuffle: false,
                 repeat: false,
             },
+            spotify: SpotifyConfig::default(),
         }
     }
 }

@@ -1,0 +1,38 @@
+name = "mono"
+
+[colors]
+background = "#0a0a0a"
+foreground = "#e0e0e0"
+primary = "#ffffff"
+secondary = "#a0a0a0"
+accent = "#ffffff"
+muted = "#505050"
+border = "#303030"
+border_focused = "#ffffff"
+progress_filled = "#ffffff"
+progress_empty = "#303030"
+
+[symbols]
+play = "▶"
+pause = "‖"
+stop = "■"
+next = ">>"
+prev = "<<"
+shuffle = "~"
+repeat = "@"
+volume = "·"
+progress_fill = "━"
+progress_empty = "·"
+progress_head = "│"
+
+[ascii]
+logo = """
+n o c t u n e
+─────────────
+"""
+playing = """
+▶ playing
+"""
+paused = """
+‖ paused
+"""

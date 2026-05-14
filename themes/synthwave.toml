@@ -1,0 +1,47 @@
+name = "synthwave"
+
+[colors]
+background = "#1a0033"
+foreground = "#ffffff"
+primary = "#ff2bd5"
+secondary = "#00fff0"
+accent = "#ffd166"
+muted = "#8a5fb3"
+border = "#3d1a66"
+border_focused = "#ff2bd5"
+progress_filled = "#ff2bd5"
+progress_empty = "#3d1a66"
+
+[symbols]
+play = "▶"
+pause = "❚❚"
+stop = "■"
+next = "⏭"
+prev = "⏮"
+shuffle = "⇄"
+repeat = "↻"
+volume = "♥"
+progress_fill = "═"
+progress_empty = "─"
+progress_head = "◆"
+
+[ascii]
+logo = """
+███╗   ██╗ ██████╗  ██████╗████████╗██╗   ██╗███╗   ██╗███████╗
+████╗  ██║██╔═══██╗██╔════╝╚══██╔══╝██║   ██║████╗  ██║██╔════╝
+██╔██╗ ██║██║   ██║██║        ██║   ██║   ██║██╔██╗ ██║█████╗
+██║╚██╗██║██║   ██║██║        ██║   ██║   ██║██║╚██╗██║██╔══╝
+██║ ╚████║╚██████╔╝╚██████╗   ██║   ╚██████╔╝██║ ╚████║███████╗
+"""
+playing = """
+   ▲▲▲ NEON DRIVE ▲▲▲
+  ╱╲╱╲╱╲╱╲╱╲╱╲╱╲╱╲
+ ▶ ▷ ▶ ▷ ▶ ▷ ▶ ▷ ▶
+  ╲╱╲╱╲╱╲╱╲╱╲╱╲╱
+"""
+paused = """
+   ░░░ STANDBY ░░░
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+   ❚❚    ❚❚    ❚❚
+  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+"""

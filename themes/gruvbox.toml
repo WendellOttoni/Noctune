@@ -1,0 +1,47 @@
+name = "gruvbox"
+
+[colors]
+background = "#282828"
+foreground = "#ebdbb2"
+primary = "#fabd2f"
+secondary = "#83a598"
+accent = "#fb4934"
+muted = "#928374"
+border = "#3c3836"
+border_focused = "#fabd2f"
+progress_filled = "#b8bb26"
+progress_empty = "#3c3836"
+
+[symbols]
+play = "▶"
+pause = "⏸"
+stop = "■"
+next = "⏭"
+prev = "⏮"
+shuffle = "⇄"
+repeat = "↻"
+volume = "♪"
+progress_fill = "█"
+progress_empty = "░"
+progress_head = "▌"
+
+[ascii]
+logo = """
+ _   _  ___   ____ _____ _   _ _   _ _____
+| \\ | |/ _ \\ / ___|_   _| | | | \\ | | ____|
+|  \\| | | | | |     | | | | | |  \\| |  _|
+| |\\  | |_| | |___  | | | |_| | |\\  | |___
+|_| \\_|\\___/ \\____| |_|  \\___/|_| \\_|_____|
+"""
+playing = """
+   ♫ ♪ ♫ ♪ ♫
+  ┌─────────┐
+  │ ▶ NOW   │
+  └─────────┘
+"""
+paused = """
+   ·  ·  ·
+  ┌─────────┐
+  │ ⏸ HOLD  │
+  └─────────┘
+"""

@@ -43,6 +43,29 @@ On first launch, Noctune writes a default `config.toml` and `themes/default.toml
 | `r`                | Cycle repeat mode (off / all / one)     |
 | `w`                | Save queue as `.m3u`                    |
 | `Shift+L`          | Load most recent `.m3u` from playlists dir |
+| `o`                | Cycle sort mode (title / artist / album) |
+| `Shift+T`          | Toggle 30-min sleep timer               |
+| `Mouse wheel`      | Scroll selection                        |
+| `Shift+P`          | Spotify login (OAuth PKCE)              |
+| `@`                | Toggle Spotify play/pause               |
+
+Keybinds in the `[keybinds]` section of `config.toml` override the defaults (e.g. `quit = "Ctrl+x"`). Modifier prefixes: `Ctrl+`, `Shift+`, `Alt+`. Special names: `space`, `enter`, `tab`, `esc`, `backspace`, `up`/`down`/`left`/`right`.
+
+## Spotify integration (remote-control)
+
+Noctune can control your active Spotify Connect device via the Web API (no audio is decoded by Noctune — playback happens wherever Spotify is open).
+
+1. Create an app at https://developer.spotify.com/dashboard
+2. Add redirect URI `http://127.0.0.1:8888/callback`
+3. Put the Client ID in `config.toml`:
+   ```toml
+   [spotify]
+   client_id = "your_client_id"
+   redirect_port = 8888
+   ```
+4. Press `Shift+P` in Noctune — browser opens, you authorize, tokens are stored in `spotify-tokens.json` next to the config.
+
+Embedded playback (Librespot) tracked in [#24](https://github.com/WendellOttoni/Noctune/issues/24). YouTube Music in [#25](https://github.com/WendellOttoni/Noctune/issues/25).
 
 ## Customizing themes
 
@@ -50,9 +73,13 @@ Copy `themes/default.toml` to `themes/<your-theme>.toml`, edit colors, symbols, 
 
 ## Roadmap
 
-- Streaming sources (Bandcamp / SoundCloud / radio streams)
+- Embedded Spotify playback via Librespot (Premium required) — [#24](https://github.com/WendellOttoni/Noctune/issues/24)
+- YouTube Music via yt-dlp / ytmusicapi — [#25](https://github.com/WendellOttoni/Noctune/issues/25)
+- HTTP radio streaming (Icecast/Shoutcast) — [#20](https://github.com/WendellOttoni/Noctune/issues/20)
+- Crossfade between tracks — [#26](https://github.com/WendellOttoni/Noctune/issues/26)
+- 3-band EQ — [#27](https://github.com/WendellOttoni/Noctune/issues/27)
+- Album/artist hierarchical view — [#18](https://github.com/WendellOttoni/Noctune/issues/18)
+- Click-to-play (currently only scroll works) — [#11](https://github.com/WendellOttoni/Noctune/issues/11)
 - Lua-scripted layouts
-- Better metadata caching (avoid re-probing the whole library each launch)
-- Embedded cover art preview (chafa-style)
 
 See open issues at https://github.com/WendellOttoni/Noctune/issues

@@ -2,8 +2,12 @@ use anyhow::Result;
 
 mod app;
 mod audio;
+mod cache;
 mod config;
+mod keybinds;
+mod lyrics;
 mod metadata;
+mod spotify;
 mod theme;
 mod tui;
 mod ui;

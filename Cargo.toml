@@ -18,6 +18,7 @@ symphonia = { version = "0.5", features = ["all"] }
 
 # Config & themes
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
 
 # Utils
@@ -28,6 +29,13 @@ walkdir = "2"
 unicode-width = "0.2"
 rustfft = "6"
 parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+url = "2"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+tiny_http = "0.12"
+webbrowser = "1"
 
 [profile.release]
 lto = true
