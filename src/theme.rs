@@ -65,6 +65,7 @@ impl Theme {
         }
     }
 
+    #[allow(dead_code)]
     pub fn style(&self, color: &str) -> Style {
         Style::default().fg(parse_color(color))
     }

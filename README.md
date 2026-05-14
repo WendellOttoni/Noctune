@@ -23,19 +23,26 @@ On first launch, Noctune writes a default `config.toml` and `themes/default.toml
 
 ## Keybindings
 
-| Key             | Action                  |
-| --------------- | ----------------------- |
-| `q` / `Ctrl+C`  | Quit                    |
-| `Tab`           | Switch focus            |
-| `↑`/`↓` or `j`/`k` | Move selection       |
-| `Enter`         | Play selection          |
-| `a`             | Add to queue            |
-| `d`             | Remove from queue       |
-| `c`             | Clear queue + stop      |
-| `Space`         | Play / pause            |
-| `n` / `p`       | Next / previous         |
-| `s`             | Stop                    |
-| `+` / `-`       | Volume up / down        |
+| Key                | Action                                  |
+| ------------------ | --------------------------------------- |
+| `q` / `Ctrl+C`     | Quit                                    |
+| `?`                | Help overlay                            |
+| `Tab`              | Switch focus                            |
+| `↑`/`↓` or `j`/`k` | Move selection                          |
+| `Enter`            | Play selection                          |
+| `a`                | Add to queue                            |
+| `d`                | Remove from queue                       |
+| `c`                | Clear queue + stop                      |
+| `/`                | Search library (Enter confirms, Esc clears) |
+| `Space`            | Play / pause                            |
+| `n` / `p`          | Next / previous                         |
+| `s`                | Stop                                    |
+| `←` / `→`          | Seek -5s / +5s                          |
+| `+` / `-`          | Volume up / down                        |
+| `Shift+S`          | Toggle shuffle                          |
+| `r`                | Cycle repeat mode (off / all / one)     |
+| `w`                | Save queue as `.m3u`                    |
+| `Shift+L`          | Load most recent `.m3u` from playlists dir |
 
 ## Customizing themes
 
@@ -43,8 +50,9 @@ Copy `themes/default.toml` to `themes/<your-theme>.toml`, edit colors, symbols, 
 
 ## Roadmap
 
-- Seek + accurate track duration (Symphonia metadata)
-- Persistent playlists
-- ASCII waveform / spectrum visualizer
-- Streaming sources
+- Streaming sources (Bandcamp / SoundCloud / radio streams)
 - Lua-scripted layouts
+- Better metadata caching (avoid re-probing the whole library each launch)
+- Embedded cover art preview (chafa-style)
+
+See open issues at https://github.com/WendellOttoni/Noctune/issues

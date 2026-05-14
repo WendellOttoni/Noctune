@@ -81,6 +81,10 @@ pub fn themes_dir() -> Result<PathBuf> {
     Ok(project_dirs()?.config_dir().join("themes"))
 }
 
+pub fn playlists_dir() -> Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().join("playlists"))
+}
+
 fn default_music_dirs() -> Vec<PathBuf> {
     directories::UserDirs::new()
         .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))

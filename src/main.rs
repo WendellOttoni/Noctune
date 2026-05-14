@@ -3,6 +3,7 @@ use anyhow::Result;
 mod app;
 mod audio;
 mod config;
+mod metadata;
 mod theme;
 mod tui;
 mod ui;

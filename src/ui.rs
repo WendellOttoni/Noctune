@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use std::time::Duration;
@@ -31,6 +31,55 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_visualizer(f, chunks[2], app);
     render_now_playing(f, chunks[3], app);
     render_status(f, chunks[4], app);
+
+    if app.show_help {
+        render_help(f, area, &app.theme);
+    }
+}
+
+fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
+    let w = 56.min(area.width.saturating_sub(4));
+    let h = 22.min(area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let lines: Vec<Line> = vec![
+        Line::from("  Playback"),
+        Line::from("    Space      play / pause"),
+        Line::from("    n / p      next / previous"),
+        Line::from("    s          stop"),
+        Line::from("    ← / →      seek -5s / +5s"),
+        Line::from("    + / -      volume up / down"),
+        Line::from(""),
+        Line::from("  Library / Queue"),
+        Line::from("    Tab        switch focus"),
+        Line::from("    ↑↓ / jk    move selection"),
+        Line::from("    Enter      play"),
+        Line::from("    a / d      add / remove from queue"),
+        Line::from("    c          clear queue"),
+        Line::from("    /          search library"),
+        Line::from(""),
+        Line::from("  Modes & playlists"),
+        Line::from("    Shift+S    toggle shuffle"),
+        Line::from("    r          cycle repeat (off/all/one)"),
+        Line::from("    w          save queue as .m3u"),
+        Line::from("    Shift+L    load latest .m3u"),
+    ];
+
+    let p = Paragraph::new(Text::from(lines))
+        .style(Style::default().fg(parse_color(&theme.colors.foreground)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border(true))
+                .title(Span::styled(" Help — press any key ", theme.accent())),
+        );
+    f.render_widget(p, popup);
 }
 
 fn render_visualizer(f: &mut Frame, area: Rect, app: &App) {
@@ -137,17 +186,23 @@ fn render_main(f: &mut Frame, area: Rect, app: &mut App) {
 fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Pane::Library;
     let items: Vec<ListItem> = app
-        .library
-        .iter()
+        .visible_library()
+        .into_iter()
         .map(|t| {
             ListItem::new(Line::from(Span::styled(
-                t.title.clone(),
+                t.display(),
                 Style::default().fg(parse_color(&app.theme.colors.foreground)),
             )))
         })
         .collect();
 
-    let title = format!(" Library ({}) ", app.library.len());
+    let total = app.library.len();
+    let shown = items.len();
+    let title = if app.search_active() || !app.search_query().is_empty() {
+        format!(" Library [{}/{}] /{} ", shown, total, app.search_query())
+    } else {
+        format!(" Library ({}) ", total)
+    };
     let list = List::new(items)
         .block(
             Block::default()
@@ -190,7 +245,7 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
             };
             ListItem::new(Line::from(vec![
                 Span::styled(prefix, style),
-                Span::styled(t.title.clone(), style),
+                Span::styled(t.display(), style),
             ]))
         })
         .collect();
@@ -230,7 +285,7 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
     let title = app
         .player
         .current()
-        .map(|t| t.title.clone())
+        .map(|t| t.display())
         .unwrap_or_else(|| "— nothing playing —".into());
 
     let state_sym = if app.player.current().is_none() {
@@ -256,11 +311,20 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(header, chunks[0]);
 
     let elapsed = app.player.elapsed();
-    let progress_line = build_progress(elapsed, chunks[1].width.saturating_sub(2) as usize, &app.theme);
+    let total = app.player.current().and_then(|t| t.duration);
+    let progress_line = build_progress(
+        elapsed,
+        total,
+        chunks[1].width.saturating_sub(2) as usize,
+        &app.theme,
+    );
     f.render_widget(Paragraph::new(progress_line), chunks[1]);
 
+    let total_str = total
+        .map(format_duration)
+        .unwrap_or_else(|| "--:--".to_string());
     let time = Paragraph::new(Line::from(vec![Span::styled(
-        format!(" {}", format_duration(elapsed)),
+        format!(" {} / {}", format_duration(elapsed), total_str),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     )]));
     f.render_widget(time, chunks[2]);
@@ -279,9 +343,18 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(vol, chunks[3]);
 }
 
-fn build_progress(elapsed: Duration, width: usize, theme: &Theme) -> Line<'static> {
-    let total_assumed = Duration::from_secs(240);
-    let frac = (elapsed.as_secs_f32() / total_assumed.as_secs_f32()).clamp(0.0, 1.0);
+fn build_progress(
+    elapsed: Duration,
+    total: Option<Duration>,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let total = total.unwrap_or_else(|| Duration::from_secs(240));
+    let frac = if total.is_zero() {
+        0.0
+    } else {
+        (elapsed.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+    };
     let filled = ((width as f32) * frac).round() as usize;
     let empty = width.saturating_sub(filled);
 
@@ -305,21 +378,31 @@ fn build_progress(elapsed: Duration, width: usize, theme: &Theme) -> Line<'stati
 }
 
 fn render_status(f: &mut Frame, area: Rect, app: &App) {
-    let help = " [space] play/pause  [n]ext  [p]rev  [a]dd  [d]el  [tab] focus  [q]uit ";
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(area);
 
+    let status_text = if app.search_active() {
+        format!(" /{}", app.search_query())
+    } else {
+        format!(" {}", app.status)
+    };
     let status = Paragraph::new(Span::styled(
-        format!(" {}", app.status),
+        status_text,
         Style::default().fg(parse_color(&app.theme.colors.secondary)),
     ))
     .wrap(Wrap { trim: true });
     f.render_widget(status, chunks[0]);
 
+    let shuf = if app.shuffle { "shuf " } else { "" };
+    let rep = match app.repeat {
+        crate::app::RepeatMode::Off => "",
+        crate::app::RepeatMode::All => "rep:all ",
+        crate::app::RepeatMode::One => "rep:one ",
+    };
     let hints = Paragraph::new(Span::styled(
-        help,
+        format!("{shuf}{rep}[?] help [q] quit "),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     ))
     .alignment(Alignment::Right);
