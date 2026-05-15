@@ -18,6 +18,7 @@ use crate::{
     visualizer::VizTap,
 };
 
+const MAX_UNDO_SNAPSHOTS: usize = 10;
 const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +83,7 @@ pub struct App {
     pub tap: VizTap,
     pub library: Vec<Track>,
     pub queue: Vec<Track>,
+    undo_stack: std::collections::VecDeque<UndoSnapshot>,
     pub library_state: ListState,
     pub queue_state: ListState,
     pub focus: Pane,
@@ -103,6 +105,13 @@ pub struct App {
     pub spotify: Option<crate::spotify::SpotifyApi>,
     pub layout: LayoutRects,
     pub view_mode: ViewMode,
+}
+
+#[derive(Debug, Clone)]
+struct UndoSnapshot {
+    queue: Vec<Track>,
+    queue_index: Option<usize>,
+    label: String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -179,6 +188,7 @@ impl App {
             tap,
             library,
             queue: Vec::new(),
+            undo_stack: std::collections::VecDeque::with_capacity(MAX_UNDO_SNAPSHOTS),
             library_state,
             queue_state: ListState::default(),
             focus: Pane::Library,
@@ -427,6 +437,7 @@ impl App {
             Action::Enqueue => self.enqueue_selection(),
             Action::RemoveQueueItem => self.remove_from_queue(),
             Action::ClearQueue => self.clear_queue(),
+            Action::UndoQueueAction => self.undo_queue_action(),
             Action::SpotifyLogin => self.spotify_login(),
             Action::SpotifyToggle => self.spotify_toggle(),
             Action::ToggleView => {
@@ -602,6 +613,7 @@ impl App {
         match self.focus {
             Pane::Library => {
                 if let Some(t) = self.selected_library_track() {
+                    self.undo_stack.clear();
                     self.queue.push(t);
                     let idx = self.queue.len() - 1;
                     self.queue_index = Some(idx);
@@ -634,7 +646,14 @@ impl App {
         if self.focus == Pane::Queue {
             if let Some(i) = self.queue_state.selected() {
                 if i < self.queue.len() {
+                    let label = format!("removed {}", self.queue[i].display());
+                    self.push_undo_snapshot(label);
                     self.queue.remove(i);
+                    if self.queue_index == Some(i) {
+                        self.queue_index = None;
+                    } else if self.queue_index.is_some_and(|idx| idx > i) {
+                        self.queue_index = self.queue_index.map(|idx| idx - 1);
+                    }
                     if self.queue.is_empty() {
                         self.queue_state.select(None);
                     } else {
@@ -646,10 +665,40 @@ impl App {
     }
 
     fn clear_queue(&mut self) {
+        if self.queue.is_empty() {
+            return;
+        }
+        self.push_undo_snapshot(format!("cleared queue ({} tracks)", self.queue.len()));
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
         self.player.stop();
+    }
+
+    fn push_undo_snapshot(&mut self, label: String) {
+        self.undo_stack.push_back(UndoSnapshot {
+            queue: self.queue.clone(),
+            queue_index: self.queue_index,
+            label,
+        });
+        while self.undo_stack.len() > MAX_UNDO_SNAPSHOTS {
+            self.undo_stack.pop_front();
+        }
+    }
+
+    fn undo_queue_action(&mut self) {
+        let Some(snapshot) = self.undo_stack.pop_back() else {
+            self.status = "Nothing to undo.".into();
+            return;
+        };
+        self.queue = snapshot.queue;
+        self.queue_index = snapshot.queue_index.filter(|i| *i < self.queue.len());
+        self.queue_state.select(if self.queue.is_empty() {
+            None
+        } else {
+            Some(self.queue_index.unwrap_or(0).min(self.queue.len() - 1))
+        });
+        self.status = format!("Undo: {}", snapshot.label);
     }
 
     fn play_current(&mut self) {
@@ -790,6 +839,7 @@ impl App {
             return;
         };
         let mut loaded = 0usize;
+        let original_queue_len = self.queue.len();
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -805,6 +855,11 @@ impl App {
                 self.queue.push(Track::from_path_with_meta(p));
                 loaded += 1;
             }
+        }
+        if loaded > 0 {
+            let loaded_tracks = self.queue.split_off(original_queue_len);
+            self.push_undo_snapshot(format!("loaded playlist ({} tracks)", loaded));
+            self.queue.extend(loaded_tracks);
         }
         if loaded > 0 && self.queue_state.selected().is_none() {
             self.queue_state.select(Some(0));
