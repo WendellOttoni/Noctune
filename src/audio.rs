@@ -2,12 +2,13 @@ use anyhow::{anyhow, Context, Result};
 use rodio::{source::Source, Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::{
     fs::File,
-    io::BufReader,
+    io::{BufReader, Cursor},
     path::PathBuf,
     time::{Duration, Instant},
 };
 
 use crate::{
+    eq::{EqHandle, EqSource},
     metadata::{probe, TrackMeta},
     visualizer::{VizSource, VizTap},
 };
@@ -21,6 +22,7 @@ pub struct Player {
     started_at: Option<Instant>,
     paused_offset: Duration,
     tap: VizTap,
+    eq: EqHandle,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +85,7 @@ impl Player {
             started_at: None,
             paused_offset: Duration::ZERO,
             tap: VizTap::new(),
+            eq: EqHandle::new(),
         })
     }
 
@@ -90,37 +93,70 @@ impl Player {
         self.tap.clone()
     }
 
+    pub fn eq(&self) -> EqHandle {
+        self.eq.clone()
+    }
+
     pub fn play(&mut self, track: &Track) -> Result<()> {
         self.play_from(track, Duration::ZERO)
     }
 
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
-        let path = &track.path;
-        let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
-        let decoder = Decoder::new(BufReader::new(file))
-            .map_err(|e| anyhow!("decoding {}: {e}", path.display()))?;
-        let mut samples = decoder.convert_samples::<f32>();
-        if offset > Duration::ZERO {
-            let rate = samples.sample_rate() as u64;
-            let ch = samples.channels() as u64;
-            let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
-            for _ in 0..to_skip {
-                if samples.next().is_none() {
-                    break;
+        let path_str = track.path.to_string_lossy().to_string();
+        let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
+
+        if is_url {
+            let bytes = http_get_bytes(&path_str)?;
+            let decoder = Decoder::new(Cursor::new(bytes))
+                .map_err(|e| anyhow!("decoding {path_str}: {e}"))?;
+            let samples = decoder.convert_samples::<f32>();
+            let viz = VizSource::new(samples, self.tap.clone());
+            let eq = EqSource::new(viz, self.eq.clone());
+            let sink = Sink::try_new(&self.handle)?;
+            sink.set_volume(self.volume);
+            sink.append(eq);
+            self.sink = sink;
+        } else {
+            let file = File::open(&track.path)
+                .with_context(|| format!("opening {}", track.path.display()))?;
+            let decoder = Decoder::new(BufReader::new(file))
+                .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
+            let mut samples = decoder.convert_samples::<f32>();
+            if offset > Duration::ZERO {
+                let rate = samples.sample_rate() as u64;
+                let ch = samples.channels() as u64;
+                let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
+                for _ in 0..to_skip {
+                    if samples.next().is_none() {
+                        break;
+                    }
                 }
             }
+            let viz = VizSource::new(samples, self.tap.clone());
+            let eq = EqSource::new(viz, self.eq.clone());
+            let sink = Sink::try_new(&self.handle)?;
+            sink.set_volume(self.volume);
+            sink.append(eq);
+            self.sink = sink;
         }
-        let source = VizSource::new(samples, self.tap.clone());
-
-        let sink = Sink::try_new(&self.handle)?;
-        sink.set_volume(self.volume);
-        sink.append(source);
-        self.sink = sink;
 
         self.current = Some(track.clone());
         self.started_at = Some(Instant::now());
         self.paused_offset = offset;
         Ok(())
+    }
+
+    pub fn seek_absolute_fraction(&mut self, fraction: f32) -> Result<()> {
+        let Some(track) = self.current.clone() else { return Ok(()); };
+        let total = track
+            .duration
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if total <= 0 {
+            return Ok(());
+        }
+        let target = (total as f32 * fraction.clamp(0.0, 1.0)) as i64;
+        self.play_from(&track, Duration::from_millis(target as u64))
     }
 
     pub fn seek_relative(&mut self, delta: i64) -> Result<()> {
@@ -182,5 +218,32 @@ impl Player {
 
     pub fn current(&self) -> Option<&Track> {
         self.current.as_ref()
+    }
+}
+
+fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let resp = client
+        .get(url)
+        .send()
+        .with_context(|| format!("GET {url}"))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("{url} returned {}", resp.status()));
+    }
+    let bytes = resp.bytes()?.to_vec();
+    Ok(bytes)
+}
+
+impl Track {
+    pub fn from_url(url: String) -> Self {
+        Self {
+            path: PathBuf::from(&url),
+            title: format!("{} (stream)", url),
+            artist: None,
+            album: None,
+            duration: None,
+        }
     }
 }

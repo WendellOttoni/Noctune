@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod cache;
 mod config;
+mod eq;
 mod keybinds;
 mod lyrics;
 mod metadata;

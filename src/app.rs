@@ -101,6 +101,43 @@ pub struct App {
     pub spotify_client_id: String,
     pub spotify_redirect_uri: String,
     pub spotify: Option<crate::spotify::SpotifyApi>,
+    pub layout: LayoutRects,
+    pub view_mode: ViewMode,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LayoutRects {
+    pub library: ratatui::layout::Rect,
+    pub queue: ratatui::layout::Rect,
+    pub progress: ratatui::layout::Rect,
+    pub progress_total_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum LibraryRow {
+    Header(String),
+    Track(Track),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Flat,
+    Albums,
+}
+
+impl ViewMode {
+    pub fn toggle(self) -> Self {
+        match self {
+            ViewMode::Flat => ViewMode::Albums,
+            ViewMode::Albums => ViewMode::Flat,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            ViewMode::Flat => "flat",
+            ViewMode::Albums => "albums",
+        }
+    }
 }
 
 impl App {
@@ -161,6 +198,8 @@ impl App {
             spotify_client_id,
             spotify_redirect_uri,
             spotify,
+            layout: LayoutRects::default(),
+            view_mode: ViewMode::Flat,
         })
     }
 
@@ -173,7 +212,7 @@ impl App {
     }
 
     pub fn visible_library(&self) -> Vec<&Track> {
-        if self.search.is_empty() {
+        let base: Vec<&Track> = if self.search.is_empty() {
             self.library.iter().collect()
         } else {
             let needle = self.search.to_lowercase();
@@ -187,13 +226,38 @@ impl App {
                             .unwrap_or(false)
                 })
                 .collect()
+        };
+        base
+    }
+
+    pub fn library_rows(&self) -> Vec<LibraryRow> {
+        let visible = self.visible_library();
+        if self.view_mode == ViewMode::Flat || self.sort != SortMode::Album {
+            return visible
+                .into_iter()
+                .map(|t| LibraryRow::Track(t.clone()))
+                .collect();
         }
+        let mut out = Vec::with_capacity(visible.len() + 16);
+        let mut last_album: Option<String> = None;
+        for t in visible {
+            let album = t.album.clone().unwrap_or_else(|| "Unknown Album".into());
+            if last_album.as_deref() != Some(album.as_str()) {
+                out.push(LibraryRow::Header(album.clone()));
+                last_album = Some(album);
+            }
+            out.push(LibraryRow::Track(t.clone()));
+        }
+        out
     }
 
     fn selected_library_track(&self) -> Option<Track> {
-        let visible = self.visible_library();
+        let rows = self.library_rows();
         let idx = self.library_state.selected()?;
-        visible.get(idx).map(|t| (*t).clone())
+        match rows.get(idx)? {
+            LibraryRow::Track(t) => Some(t.clone()),
+            LibraryRow::Header(_) => None,
+        }
     }
 
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
@@ -365,6 +429,39 @@ impl App {
             Action::ClearQueue => self.clear_queue(),
             Action::SpotifyLogin => self.spotify_login(),
             Action::SpotifyToggle => self.spotify_toggle(),
+            Action::ToggleView => {
+                self.view_mode = self.view_mode.toggle();
+                self.library_state.select(if self.visible_library().is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+                self.status = format!("View: {}", self.view_mode.label());
+            }
+            Action::EqLowUp => {
+                self.player.eq().adjust_low(1.0);
+                self.status = "EQ low +1 dB".into();
+            }
+            Action::EqLowDown => {
+                self.player.eq().adjust_low(-1.0);
+                self.status = "EQ low -1 dB".into();
+            }
+            Action::EqMidUp => {
+                self.player.eq().adjust_mid(1.0);
+                self.status = "EQ mid +1 dB".into();
+            }
+            Action::EqMidDown => {
+                self.player.eq().adjust_mid(-1.0);
+                self.status = "EQ mid -1 dB".into();
+            }
+            Action::EqHighUp => {
+                self.player.eq().adjust_high(1.0);
+                self.status = "EQ high +1 dB".into();
+            }
+            Action::EqHighDown => {
+                self.player.eq().adjust_high(-1.0);
+                self.status = "EQ high -1 dB".into();
+            }
         }
     }
 
@@ -430,25 +527,75 @@ impl App {
         match m.kind {
             MouseEventKind::ScrollUp => self.move_selection(-1),
             MouseEventKind::ScrollDown => self.move_selection(1),
+            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                self.handle_click(m.column, m.row);
+            }
             _ => {}
         }
     }
 
-    fn move_selection(&mut self, delta: i32) {
-        let len = match self.focus {
-            Pane::Library => self.visible_library().len(),
-            Pane::Queue => self.queue.len(),
-        };
-        let state = match self.focus {
-            Pane::Library => &mut self.library_state,
-            Pane::Queue => &mut self.queue_state,
-        };
-        if len == 0 {
+    fn handle_click(&mut self, x: u16, y: u16) {
+        let lib = self.layout.library;
+        let q = self.layout.queue;
+        let prog = self.layout.progress;
+
+        if rect_contains(lib, x, y) {
+            self.focus = Pane::Library;
+            let row = (y - lib.y) as usize;
+            let rows = self.library_rows();
+            if let Some(item) = rows.get(row) {
+                if matches!(item, LibraryRow::Track(_)) {
+                    self.library_state.select(Some(row));
+                    self.activate_selection();
+                }
+            }
             return;
         }
-        let cur = state.selected().unwrap_or(0) as i32;
-        let new = (cur + delta).rem_euclid(len as i32) as usize;
-        state.select(Some(new));
+        if rect_contains(q, x, y) {
+            self.focus = Pane::Queue;
+            let row = (y - q.y) as usize;
+            if row < self.queue.len() {
+                self.queue_state.select(Some(row));
+                self.queue_index = Some(row);
+                self.play_current();
+            }
+            return;
+        }
+        if rect_contains(prog, x, y) && prog.width > 0 {
+            let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
+            if let Err(e) = self.player.seek_absolute_fraction(frac) {
+                self.status = format!("Seek error: {e}");
+            }
+        }
+    }
+
+    fn move_selection(&mut self, delta: i32) {
+        match self.focus {
+            Pane::Library => {
+                let rows = self.library_rows();
+                if rows.is_empty() {
+                    return;
+                }
+                let mut cur = self.library_state.selected().unwrap_or(0) as i32;
+                let len = rows.len() as i32;
+                for _ in 0..len {
+                    cur = (cur + delta).rem_euclid(len);
+                    if matches!(rows[cur as usize], LibraryRow::Track(_)) {
+                        self.library_state.select(Some(cur as usize));
+                        return;
+                    }
+                }
+            }
+            Pane::Queue => {
+                let len = self.queue.len();
+                if len == 0 {
+                    return;
+                }
+                let cur = self.queue_state.selected().unwrap_or(0) as i32;
+                let new = (cur + delta).rem_euclid(len as i32) as usize;
+                self.queue_state.select(Some(new));
+            }
+        }
     }
 
     fn activate_selection(&mut self) {
@@ -648,6 +795,11 @@ impl App {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
+            if line.starts_with("http://") || line.starts_with("https://") {
+                self.queue.push(Track::from_url(line.to_string()));
+                loaded += 1;
+                continue;
+            }
             let p = std::path::PathBuf::from(line);
             if p.exists() {
                 self.queue.push(Track::from_path_with_meta(p));
@@ -659,6 +811,10 @@ impl App {
         }
         self.status = format!("Loaded {} tracks from {}", loaded, path.display());
     }
+}
+
+fn rect_contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
+    r.width > 0 && r.height > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
 
 fn pseudo_random(modulo: usize) -> usize {

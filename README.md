@@ -46,6 +46,11 @@ On first launch, Noctune writes a default `config.toml` and `themes/default.toml
 | `o`                | Cycle sort mode (title / artist / album) |
 | `Shift+T`          | Toggle 30-min sleep timer               |
 | `Mouse wheel`      | Scroll selection                        |
+| `Mouse click`      | Play library / queue row, or seek on progress bar |
+| `Shift+V`          | Toggle flat / album view (uses Album sort) |
+| `1` / `2`          | EQ low band -/+ 1 dB                    |
+| `3` / `4`          | EQ mid band -/+ 1 dB                    |
+| `5` / `6`          | EQ high band -/+ 1 dB                   |
 | `Shift+P`          | Spotify login (OAuth PKCE)              |
 | `@`                | Toggle Spotify play/pause               |
 
@@ -66,6 +71,10 @@ Noctune can control your active Spotify Connect device via the Web API (no audio
 4. Press `Shift+P` in Noctune — browser opens, you authorize, tokens are stored in `spotify-tokens.json` next to the config.
 
 Embedded playback (Librespot) tracked in [#24](https://github.com/WendellOttoni/Noctune/issues/24). YouTube Music in [#25](https://github.com/WendellOttoni/Noctune/issues/25).
+
+## Radio / HTTP streaming
+
+Add HTTP audio URLs to a `.m3u` in the playlists directory and load with `Shift+L`. Current implementation downloads the full response before playing — fine for finite HTTP files, **not** for endless Icecast/Shoutcast streams (rodio's Decoder requires Seek). True streaming tracked in [#20](https://github.com/WendellOttoni/Noctune/issues/20).
 
 ## Customizing themes
 

@@ -30,6 +30,13 @@ pub enum Action {
     ClearQueue,
     SpotifyLogin,
     SpotifyToggle,
+    ToggleView,
+    EqLowUp,
+    EqLowDown,
+    EqMidUp,
+    EqMidDown,
+    EqHighUp,
+    EqHighDown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,6 +139,13 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('c')), Action::ClearQueue),
             (KeyChord::new(KeyCode::Char('P')), Action::SpotifyLogin),
             (KeyChord::new(KeyCode::Char('@')), Action::SpotifyToggle),
+            (KeyChord::new(KeyCode::Char('V')), Action::ToggleView),
+            (KeyChord::new(KeyCode::Char('1')), Action::EqLowDown),
+            (KeyChord::new(KeyCode::Char('2')), Action::EqLowUp),
+            (KeyChord::new(KeyCode::Char('3')), Action::EqMidDown),
+            (KeyChord::new(KeyCode::Char('4')), Action::EqMidUp),
+            (KeyChord::new(KeyCode::Char('5')), Action::EqHighDown),
+            (KeyChord::new(KeyCode::Char('6')), Action::EqHighUp),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

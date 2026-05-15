@@ -75,6 +75,16 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from("  Spotify (set client_id in config first)"),
         Line::from("    Shift+P    open browser login (OAuth PKCE)"),
         Line::from("    @          toggle play/pause on Spotify"),
+        Line::from(""),
+        Line::from("  View & mouse"),
+        Line::from("    Shift+V    toggle flat / album view"),
+        Line::from("    Click      play library / queue row"),
+        Line::from("    Click bar  seek to position"),
+        Line::from(""),
+        Line::from("  EQ (-12..+12 dB)"),
+        Line::from("    1 / 2      low  -/+"),
+        Line::from("    3 / 4      mid  -/+"),
+        Line::from("    5 / 6      high -/+"),
     ];
 
     let p = Paragraph::new(Text::from(lines))
@@ -191,19 +201,28 @@ fn render_main(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Pane::Library;
-    let items: Vec<ListItem> = app
-        .visible_library()
-        .into_iter()
-        .map(|t| {
-            ListItem::new(Line::from(Span::styled(
+    let rows = app.library_rows();
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|row| match row {
+            crate::app::LibraryRow::Track(t) => ListItem::new(Line::from(Span::styled(
                 t.display(),
                 Style::default().fg(parse_color(&app.theme.colors.foreground)),
-            )))
+            ))),
+            crate::app::LibraryRow::Header(album) => ListItem::new(Line::from(Span::styled(
+                format!("── {} ──", album),
+                Style::default()
+                    .fg(parse_color(&app.theme.colors.accent))
+                    .add_modifier(Modifier::BOLD),
+            ))),
         })
         .collect();
 
     let total = app.library.len();
-    let shown = items.len();
+    let shown = rows
+        .iter()
+        .filter(|r| matches!(r, crate::app::LibraryRow::Track(_)))
+        .count();
     let title = if app.search_active() || !app.search_query().is_empty() {
         format!(" Library [{}/{}] /{} ", shown, total, app.search_query())
     } else {
@@ -224,6 +243,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         )
         .highlight_symbol(" ▶ ");
 
+    app.layout.library = inner_rect(area);
     f.render_stateful_widget(list, area, &mut app.library_state);
 }
 
@@ -271,10 +291,20 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
         )
         .highlight_symbol(" ▶ ");
 
+    app.layout.queue = inner_rect(area);
     f.render_stateful_widget(list, area, &mut app.queue_state);
 }
 
-fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
+fn inner_rect(r: Rect) -> Rect {
+    Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(2),
+    }
+}
+
+fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(app.theme.border(false))
@@ -360,6 +390,8 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &App) {
         &app.theme,
     );
     f.render_widget(Paragraph::new(progress_line), chunks[1]);
+    app.layout.progress = chunks[1];
+    app.layout.progress_total_ms = total.map(|d| d.as_millis() as u64).unwrap_or(0);
 
     let total_str = total
         .map(format_duration)
