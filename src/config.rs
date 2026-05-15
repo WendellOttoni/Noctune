@@ -11,6 +11,19 @@ pub struct Config {
     pub playback: Playback,
     #[serde(default)]
     pub spotify: SpotifyConfig,
+    #[serde(default)]
+    pub visualizer: VisualizerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisualizerConfig {
+    pub sensitivity: f32,
+}
+
+impl Default for VisualizerConfig {
+    fn default() -> Self {
+        Self { sensitivity: 1.0 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,11 +87,21 @@ impl Default for Config {
                 repeat: false,
             },
             spotify: SpotifyConfig::default(),
+            visualizer: VisualizerConfig::default(),
         }
     }
 }
 
 impl Config {
+    pub fn save(&self) -> Result<()> {
+        let path = config_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+        fs::write(&path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
+
     pub fn load_or_default() -> Result<Self> {
         let path = config_path()?;
         if path.exists() {

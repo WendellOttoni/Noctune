@@ -7,8 +7,7 @@ use std::{path::PathBuf, time::Duration};
 use walkdir::WalkDir;
 
 use crate::{
-    audio::Player,
-    audio::Track,
+    audio::{CrossfadeStatus, Player, Track},
     cache::{cache_path, MetadataCache},
     config::Config,
     keybinds::{Action, Bindings},
@@ -103,6 +102,16 @@ pub struct App {
     pub spotify: Option<crate::spotify::SpotifyApi>,
     pub layout: LayoutRects,
     pub view_mode: ViewMode,
+    pub pending_crossfade_idx: Option<usize>,
+    pub url_input: String,
+    pub url_editing: bool,
+    pub eq_preset_idx: usize,
+    pub show_info: bool,
+    pub theme_names: Vec<String>,
+    pub theme_idx: usize,
+    pub last_drag_seek: Option<std::time::Instant>,
+    pub pending_url: Option<String>,
+    pub clear_confirm_until: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -142,7 +151,7 @@ impl ViewMode {
 
 impl App {
     pub fn new(config: Config, theme: Theme) -> Result<Self> {
-        let player = Player::new(config.playback.default_volume)?;
+        let player = Player::new(config.playback.default_volume, config.visualizer.sensitivity)?;
         let tap = player.tap();
 
         let cache_file = cache_path();
@@ -200,6 +209,16 @@ impl App {
             spotify,
             layout: LayoutRects::default(),
             view_mode: ViewMode::Flat,
+            pending_crossfade_idx: None,
+            url_input: String::new(),
+            url_editing: false,
+            eq_preset_idx: 0,
+            show_info: false,
+            theme_names: Vec::new(),
+            theme_idx: 0,
+            last_drag_seek: None,
+            pending_url: None,
+            clear_confirm_until: None,
         })
     }
 
@@ -276,13 +295,53 @@ impl App {
     }
 
     fn tick(&mut self) -> Result<()> {
+        if let Some(url) = self.pending_url.take() {
+            self.load_url(url);
+            return Ok(());
+        }
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
                 self.player.stop();
                 self.sleep_until = None;
                 self.status = "Sleep timer reached — playback stopped.".into();
+                return Ok(());
             }
         }
+
+        // Advance active crossfade each tick
+        if self.player.is_crossfading() {
+            if let CrossfadeStatus::Complete = self.player.update_crossfade() {
+                if let Some(idx) = self.pending_crossfade_idx.take() {
+                    self.queue_index = Some(idx);
+                    self.queue_state.select(Some(idx));
+                    if let Some(t) = self.player.current().cloned() {
+                        self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                        self.status = format!("Playing: {}", t.display());
+                        self.push_history(t);
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        // Try to start a crossfade when close to end (not for repeat:one)
+        if !matches!(self.repeat, RepeatMode::One) {
+            if let Some(remaining) = self.player.remaining() {
+                let xfade = Duration::from_secs_f32(self.player.crossfade_secs);
+                if remaining > Duration::ZERO && remaining <= xfade {
+                    let cur = self.queue_index.unwrap_or(0);
+                    if let Some(next_idx) = self.pick_next_index(cur) {
+                        if let Some(track) = self.queue.get(next_idx).cloned() {
+                            if self.player.begin_crossfade(&track).is_ok() {
+                                self.pending_crossfade_idx = Some(next_idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Regular end detection (covers repeat:one and tracks with no duration)
         if self.player.is_empty() && self.player.current().is_some() {
             self.advance();
         }
@@ -322,6 +381,32 @@ impl App {
 
         if self.show_help {
             self.show_help = false;
+            return;
+        }
+        if self.show_info {
+            self.show_info = false;
+            return;
+        }
+
+        if self.url_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.url_input.clear();
+                    self.url_editing = false;
+                }
+                KeyCode::Enter => {
+                    let url = self.url_input.trim().to_string();
+                    self.url_input.clear();
+                    self.url_editing = false;
+                    if !url.is_empty() {
+                        self.status = format!("Loading {url}…");
+                        self.pending_url = Some(url);
+                    }
+                }
+                KeyCode::Backspace => { self.url_input.pop(); }
+                KeyCode::Char(c) => { self.url_input.push(c); }
+                _ => {}
+            }
             return;
         }
 
@@ -462,6 +547,167 @@ impl App {
                 self.player.eq().adjust_high(-1.0);
                 self.status = "EQ high -1 dB".into();
             }
+            Action::OpenUrl => {
+                self.url_editing = true;
+                self.status = "Paste URL (YouTube, YT Music, Spotify) — Enter to load, Esc to cancel".into();
+            }
+            Action::EqPreset => {
+                let presets = crate::eq::PRESETS;
+                self.eq_preset_idx = (self.eq_preset_idx + 1) % presets.len();
+                let (name, state) = presets[self.eq_preset_idx];
+                self.player.eq().set(state);
+                self.status = format!("EQ preset: {name}");
+            }
+            Action::Rescan => self.rescan_library(),
+            Action::TrackInfo => self.show_info = true,
+            Action::CycleTheme => self.cycle_theme(),
+            Action::VizSensUp => self.adjust_viz_sensitivity(crate::visualizer::SENS_STEP),
+            Action::VizSensDown => self.adjust_viz_sensitivity(-crate::visualizer::SENS_STEP),
+        }
+    }
+
+    fn adjust_viz_sensitivity(&mut self, delta: f32) {
+        let new_val = self.tap.adjust_sensitivity(delta);
+        self.config.visualizer.sensitivity = new_val;
+        self.status = format!("Visualizer sensitivity: ×{:.1}", new_val);
+        if let Err(e) = self.config.save() {
+            self.status = format!("sensitivity saved in memory only ({e})");
+        }
+    }
+
+    fn cycle_theme(&mut self) {
+        if self.theme_names.is_empty() {
+            let dir = match crate::config::themes_dir() {
+                Ok(d) => d,
+                Err(e) => { self.status = format!("themes dir: {e}"); return; }
+            };
+            let mut names: Vec<String> = std::fs::read_dir(&dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().and_then(|s| s.to_str()) == Some("toml") {
+                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    } else { None }
+                })
+                .collect();
+            names.sort();
+            if names.is_empty() {
+                names.push("default".to_string());
+            }
+            self.theme_idx = names.iter().position(|n| n == &self.theme.name).unwrap_or(0);
+            self.theme_names = names;
+        }
+        if self.theme_names.is_empty() { return; }
+        self.theme_idx = (self.theme_idx + 1) % self.theme_names.len();
+        let name = &self.theme_names[self.theme_idx];
+        match crate::theme::Theme::load(name) {
+            Ok(t) => {
+                self.theme = t;
+                self.status = format!("Theme: {name}");
+            }
+            Err(e) => self.status = format!("Theme load error: {e}"),
+        }
+    }
+
+    fn rescan_library(&mut self) {
+        self.status = "Rescanning library…".into();
+        let cache_file = cache_path();
+        let mut cache = cache_file
+            .as_ref()
+            .map(|p| MetadataCache::load(p))
+            .unwrap_or_default();
+        self.library = scan_library(&self.config.music_dirs, &mut cache);
+        if let Some(p) = &cache_file {
+            cache.save(p);
+        }
+        sort_tracks(&mut self.library, self.sort);
+        self.library_state.select(if self.library.is_empty() { None } else { Some(0) });
+        self.status = format!("Library rescanned: {} tracks", self.library.len());
+    }
+
+    fn load_url(&mut self, url: String) {
+        // Spotify URLs
+        if url.contains("spotify.com") || url.starts_with("spotify:") {
+            self.load_spotify_url(url);
+            return;
+        }
+        // YouTube / YT Music
+        if crate::ytdlp::is_youtube_url(&url) {
+            self.status = "Fetching YouTube metadata…".into();
+            match crate::ytdlp::fetch_tracks(&url) {
+                Ok(tracks) if tracks.is_empty() => {
+                    self.status = "yt-dlp returned no tracks for that URL.".into();
+                }
+                Ok(tracks) => {
+                    let n = tracks.len();
+                    let was_empty = self.queue.is_empty();
+                    self.queue.extend(tracks);
+                    if was_empty {
+                        self.queue_state.select(Some(0));
+                    }
+                    self.status = format!("Added {n} track(s) from YouTube to queue.");
+                }
+                Err(e) => self.status = format!("yt-dlp error: {e}"),
+            }
+            return;
+        }
+        // Generic HTTP URL (e.g. direct audio stream or M3U)
+        if url.starts_with("http://") || url.starts_with("https://") {
+            self.queue.push(crate::audio::Track::from_url(url.clone()));
+            if self.queue_state.selected().is_none() {
+                self.queue_state.select(Some(self.queue.len().saturating_sub(1)));
+            }
+            self.status = format!("Added stream URL to queue.");
+            return;
+        }
+        self.status = format!("Unrecognised URL scheme: {url}");
+    }
+
+    fn load_spotify_url(&mut self, url: String) {
+        let Some(api) = self.spotify.as_mut() else {
+            self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+            return;
+        };
+
+        // Parse: spotify.com/{type}/{id} or spotify:{type}:{id}
+        let (kind, id) = if let Some(path) = url.strip_prefix("spotify:") {
+            let mut parts = path.splitn(2, ':');
+            let k = parts.next().unwrap_or("").to_string();
+            let i = parts.next().unwrap_or("").to_string();
+            (k, i)
+        } else {
+            // https://open.spotify.com/{type}/{id}?...
+            let trimmed = url.split('?').next().unwrap_or(&url);
+            let segs: Vec<&str> = trimmed.rsplit('/').take(2).collect();
+            let i = segs.first().copied().unwrap_or("").to_string();
+            let k = segs.get(1).copied().unwrap_or("").to_string();
+            (k, i)
+        };
+
+        let result = match kind.as_str() {
+            "track" => api.track_by_id(&id).map(|t| vec![t]),
+            "playlist" => api.playlist_tracks(&id),
+            "album" => api.album_tracks(&id),
+            other => Err(anyhow::anyhow!("Unsupported Spotify type: {other}")),
+        };
+
+        match result {
+            Ok(tracks) if tracks.is_empty() => {
+                self.status = "Spotify: no tracks found.".into();
+            }
+            Ok(tracks) => {
+                let n = tracks.len();
+                let was_empty = self.queue.is_empty();
+                self.queue.extend(tracks);
+                if was_empty {
+                    self.queue_state.select(Some(0));
+                }
+                self.status = format!("Loaded {n} Spotify track(s) — plays on connected device.");
+            }
+            Err(e) => self.status = format!("Spotify error: {e}"),
         }
     }
 
@@ -530,8 +776,33 @@ impl App {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                 self.handle_click(m.column, m.row);
             }
+            MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+                self.handle_drag(m.column, m.row);
+            }
+            MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                self.last_drag_seek = None;
+            }
             _ => {}
         }
+    }
+
+    fn handle_drag(&mut self, x: u16, y: u16) {
+        let prog = self.layout.progress;
+        if !rect_contains(prog, x, y) || prog.width == 0 {
+            return;
+        }
+        // Debounce: max one seek every 120ms during a drag
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_drag_seek {
+            if now.duration_since(last) < Duration::from_millis(120) {
+                return;
+            }
+        }
+        let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
+        if let Err(e) = self.player.seek_absolute_fraction(frac) {
+            self.status = format!("Seek error: {e}");
+        }
+        self.last_drag_seek = Some(now);
     }
 
     fn handle_click(&mut self, x: u16, y: u16) {
@@ -646,24 +917,55 @@ impl App {
     }
 
     fn clear_queue(&mut self) {
+        let now = std::time::Instant::now();
+        let confirmed = self
+            .clear_confirm_until
+            .map(|until| now < until)
+            .unwrap_or(false);
+        if !confirmed {
+            self.clear_confirm_until = Some(now + Duration::from_secs(3));
+            self.status = format!("Press c again within 3s to clear {} tracks", self.queue.len());
+            return;
+        }
+        self.clear_confirm_until = None;
+        let n = self.queue.len();
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
         self.player.stop();
+        self.status = format!("Queue cleared ({n} tracks).");
     }
 
     fn play_current(&mut self) {
-        if let Some(i) = self.queue_index {
-            if let Some(t) = self.queue.get(i).cloned() {
-                match self.player.play(&t) {
+        let Some(i) = self.queue_index else { return };
+        let Some(t) = self.queue.get(i).cloned() else { return };
+
+        let path_str = t.path.to_string_lossy();
+        if path_str.starts_with("spotify:track:") {
+            // Route to Spotify Connect
+            let uri = path_str.to_string();
+            if let Some(api) = self.spotify.as_mut() {
+                match api.play_uri(&uri) {
                     Ok(_) => {
-                        self.status = format!("Playing: {}", t.display());
-                        self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                        self.status = format!("Spotify ▶ {}", t.display());
                         self.push_history(t);
                     }
-                    Err(e) => self.status = format!("Error: {e}"),
+                    Err(e) => self.status = format!("Spotify play error: {e}"),
                 }
+            } else {
+                self.status = "Not logged in to Spotify. Press Shift+P first.".into();
             }
+            return;
+        }
+
+        // Local file or HTTP/YouTube stream
+        match self.player.play(&t) {
+            Ok(_) => {
+                self.status = format!("Playing: {}", t.display());
+                self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                self.push_history(t);
+            }
+            Err(e) => self.status = format!("Error: {e}"),
         }
     }
 

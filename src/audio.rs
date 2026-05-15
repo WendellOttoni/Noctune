@@ -13,6 +13,12 @@ use crate::{
     visualizer::{VizSource, VizTap},
 };
 
+pub enum CrossfadeStatus {
+    None,
+    InProgress,
+    Complete,
+}
+
 pub struct Player {
     _stream: OutputStream,
     handle: OutputStreamHandle,
@@ -23,6 +29,12 @@ pub struct Player {
     paused_offset: Duration,
     tap: VizTap,
     eq: EqHandle,
+    // crossfade state
+    fade_sink: Option<Sink>,
+    fade_current: Option<Track>,
+    fade_started_at: Option<Instant>,
+    crossfade_start: Option<Instant>,
+    pub crossfade_secs: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -71,7 +83,7 @@ impl Track {
 }
 
 impl Player {
-    pub fn new(volume: f32) -> Result<Self> {
+    pub fn new(volume: f32, viz_sensitivity: f32) -> Result<Self> {
         let (stream, handle) = OutputStream::try_default()
             .context("could not open default audio output")?;
         let sink = Sink::try_new(&handle)?;
@@ -84,8 +96,13 @@ impl Player {
             volume,
             started_at: None,
             paused_offset: Duration::ZERO,
-            tap: VizTap::new(),
+            tap: VizTap::new(viz_sensitivity),
             eq: EqHandle::new(),
+            fade_sink: None,
+            fade_current: None,
+            fade_started_at: None,
+            crossfade_start: None,
+            crossfade_secs: 3.0,
         })
     }
 
@@ -101,12 +118,24 @@ impl Player {
         self.play_from(track, Duration::ZERO)
     }
 
+    fn cancel_crossfade(&mut self) {
+        self.fade_sink = None;
+        self.fade_current = None;
+        self.fade_started_at = None;
+        self.crossfade_start = None;
+    }
+
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
+        self.cancel_crossfade();
         let path_str = track.path.to_string_lossy().to_string();
         let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
 
         if is_url {
-            let bytes = http_get_bytes(&path_str)?;
+            let bytes = if crate::ytdlp::is_youtube_url(&path_str) {
+                crate::ytdlp::download_audio_bytes(&path_str)?
+            } else {
+                http_get_bytes(&path_str)?
+            };
             let decoder = Decoder::new(Cursor::new(bytes))
                 .map_err(|e| anyhow!("decoding {path_str}: {e}"))?;
             let samples = decoder.convert_samples::<f32>();
@@ -188,10 +217,75 @@ impl Player {
     }
 
     pub fn stop(&mut self) {
+        self.cancel_crossfade();
         self.sink.stop();
         self.current = None;
         self.started_at = None;
         self.paused_offset = Duration::ZERO;
+    }
+
+    pub fn remaining(&self) -> Option<Duration> {
+        let total = self.current.as_ref()?.duration?;
+        Some(total.saturating_sub(self.elapsed()))
+    }
+
+    pub fn is_crossfading(&self) -> bool {
+        self.crossfade_start.is_some()
+    }
+
+    pub fn begin_crossfade(&mut self, track: &Track) -> Result<()> {
+        let path_str = track.path.to_string_lossy();
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            return Ok(());
+        }
+
+        let file = File::open(&track.path)
+            .with_context(|| format!("opening {}", track.path.display()))?;
+        let decoder = Decoder::new(BufReader::new(file))
+            .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
+        let samples = decoder.convert_samples::<f32>();
+        let viz = VizSource::new(samples, self.tap.clone());
+        let eq = EqSource::new(viz, self.eq.clone());
+
+        let new_sink = Sink::try_new(&self.handle)?;
+        new_sink.set_volume(0.0);
+        new_sink.append(eq);
+
+        self.fade_sink = Some(new_sink);
+        self.fade_current = Some(track.clone());
+        self.fade_started_at = Some(Instant::now());
+        self.crossfade_start = Some(Instant::now());
+        Ok(())
+    }
+
+    pub fn update_crossfade(&mut self) -> CrossfadeStatus {
+        let Some(start) = self.crossfade_start else {
+            return CrossfadeStatus::None;
+        };
+        let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs).clamp(0.0, 1.0);
+
+        self.sink.set_volume(self.volume * (1.0 - progress));
+        if let Some(sink) = &self.fade_sink {
+            sink.set_volume(self.volume * progress);
+        }
+
+        if progress >= 1.0 || self.sink.empty() {
+            if let (Some(new_sink), Some(new_track)) =
+                (self.fade_sink.take(), self.fade_current.take())
+            {
+                new_sink.set_volume(self.volume);
+                let played = self.fade_started_at.map(|t| t.elapsed()).unwrap_or_default();
+                self.sink = new_sink;
+                self.current = Some(new_track);
+                self.paused_offset = played;
+                self.started_at = Some(Instant::now());
+            }
+            self.fade_started_at = None;
+            self.crossfade_start = None;
+            CrossfadeStatus::Complete
+        } else {
+            CrossfadeStatus::InProgress
+        }
     }
 
     pub fn is_paused(&self) -> bool {

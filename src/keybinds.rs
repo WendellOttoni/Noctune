@@ -37,6 +37,13 @@ pub enum Action {
     EqMidDown,
     EqHighUp,
     EqHighDown,
+    OpenUrl,
+    EqPreset,
+    Rescan,
+    TrackInfo,
+    CycleTheme,
+    VizSensUp,
+    VizSensDown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -146,6 +153,13 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('4')), Action::EqMidUp),
             (KeyChord::new(KeyCode::Char('5')), Action::EqHighDown),
             (KeyChord::new(KeyCode::Char('6')), Action::EqHighUp),
+            (KeyChord::new(KeyCode::Char('i')), Action::OpenUrl),
+            (KeyChord::new(KeyCode::Char('0')), Action::EqPreset),
+            (KeyChord::new(KeyCode::Char('R')), Action::Rescan),
+            (KeyChord::new(KeyCode::Char('I')), Action::TrackInfo),
+            (KeyChord::new(KeyCode::BackTab), Action::CycleTheme),
+            (KeyChord::new(KeyCode::Char('[')), Action::VizSensDown),
+            (KeyChord::new(KeyCode::Char(']')), Action::VizSensUp),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

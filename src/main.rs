@@ -13,6 +13,7 @@ mod theme;
 mod tui;
 mod ui;
 mod visualizer;
+mod ytdlp;
 
 fn main() -> Result<()> {
     let config = config::Config::load_or_default()?;

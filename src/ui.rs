@@ -21,7 +21,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             Constraint::Length(8),
             Constraint::Min(10),
             Constraint::Length(10),
-            Constraint::Length(6),
+            Constraint::Length(8),
             Constraint::Length(1),
         ])
         .split(area);
@@ -35,6 +35,79 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         render_help(f, area, &app.theme);
     }
+    if app.show_info {
+        render_track_info(f, area, app);
+    }
+}
+
+fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
+    let Some(track) = app.player.current() else {
+        return;
+    };
+    let meta = crate::metadata::probe_full(&track.path);
+
+    let row = |label: &str, value: String| -> Line<'static> {
+        Line::from(vec![
+            Span::styled(
+                format!("  {:<14}", label),
+                Style::default().fg(parse_color(&app.theme.colors.muted)),
+            ),
+            Span::styled(value, Style::default().fg(parse_color(&app.theme.colors.foreground))),
+        ])
+    };
+    let dash = "—".to_string();
+
+    let dur_str = meta.duration
+        .map(|d| {
+            let s = d.as_secs();
+            format!("{:02}:{:02}", s / 60, s % 60)
+        })
+        .unwrap_or_else(|| dash.clone());
+
+    let rate_str = meta.sample_rate
+        .map(|r| format!("{} Hz", r))
+        .unwrap_or_else(|| dash.clone());
+    let chans_str = meta.channels
+        .map(|c| format!("{}", c))
+        .unwrap_or_else(|| dash.clone());
+    let bits_str = meta.bits_per_sample
+        .map(|b| format!("{} bit", b))
+        .unwrap_or_else(|| dash.clone());
+
+    let lines: Vec<Line> = vec![
+        row("Title",        meta.title.unwrap_or_else(|| track.title.clone())),
+        row("Artist",       meta.artist.unwrap_or_else(|| dash.clone())),
+        row("Album Artist", meta.album_artist.unwrap_or_else(|| dash.clone())),
+        row("Album",        meta.album.unwrap_or_else(|| dash.clone())),
+        row("Year",         meta.year.unwrap_or_else(|| dash.clone())),
+        row("Genre",        meta.genre.unwrap_or_else(|| dash.clone())),
+        row("Track #",      meta.track_number.unwrap_or_else(|| dash.clone())),
+        Line::from(""),
+        row("Duration",     dur_str),
+        row("Codec",        meta.codec.unwrap_or_else(|| dash.clone())),
+        row("Sample rate",  rate_str),
+        row("Channels",     chans_str),
+        row("Bit depth",    bits_str),
+        Line::from(""),
+        row("Path",         track.path.display().to_string()),
+    ];
+
+    let w = 72.min(area.width.saturating_sub(4));
+    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+    let p = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(app.theme.border(true))
+            .title(Span::styled(" Track info — press any key ", app.theme.accent())),
+    );
+    f.render_widget(p, popup);
 }
 
 fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
@@ -85,6 +158,18 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from("    1 / 2      low  -/+"),
         Line::from("    3 / 4      mid  -/+"),
         Line::from("    5 / 6      high -/+"),
+        Line::from("    0          cycle preset (Flat/Bass/Vocal/Treble/Loud)"),
+        Line::from(""),
+        Line::from("  Library"),
+        Line::from("    Shift+R    rescan music_dirs"),
+        Line::from("    Shift+I    track info popup"),
+        Line::from("    Shift+Tab  cycle themes"),
+        Line::from(""),
+        Line::from("  Online"),
+        Line::from("    i          open URL (YouTube, YT Music, Spotify)"),
+        Line::from(""),
+        Line::from("  Visualizer"),
+        Line::from("    [ / ]      sensitivity -/+ (×0.1..×3.0)"),
     ];
 
     let p = Paragraph::new(Text::from(lines))
@@ -99,10 +184,11 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
 }
 
 fn render_visualizer(f: &mut Frame, area: Rect, app: &App) {
+    let title = format!(" Spectrum (×{:.1}) ", app.tap.sensitivity());
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(app.theme.border(false))
-        .title(Span::styled(" Spectrum ", app.theme.accent()));
+        .title(Span::styled(title, app.theme.accent()));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -205,10 +291,22 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     let items: Vec<ListItem> = rows
         .iter()
         .map(|row| match row {
-            crate::app::LibraryRow::Track(t) => ListItem::new(Line::from(Span::styled(
-                t.display(),
-                Style::default().fg(parse_color(&app.theme.colors.foreground)),
-            ))),
+            crate::app::LibraryRow::Track(t) => {
+                let dur = t
+                    .duration
+                    .map(|d| {
+                        let s = d.as_secs();
+                        format!("  {:02}:{:02}", s / 60, s % 60)
+                    })
+                    .unwrap_or_default();
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        t.display(),
+                        Style::default().fg(parse_color(&app.theme.colors.foreground)),
+                    ),
+                    Span::styled(dur, Style::default().fg(parse_color(&app.theme.colors.muted))),
+                ]))
+            }
             crate::app::LibraryRow::Header(album) => ListItem::new(Line::from(Span::styled(
                 format!("── {} ──", album),
                 Style::default()
@@ -233,7 +331,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(app.theme.border(focused))
-                .title(Span::styled(title, app.theme.accent())),
+                .title(Span::styled(title.clone(), app.theme.accent())),
         )
         .highlight_style(
             Style::default()
@@ -244,7 +342,24 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         .highlight_symbol(" ▶ ");
 
     app.layout.library = inner_rect(area);
-    f.render_stateful_widget(list, area, &mut app.library_state);
+    if rows.is_empty() {
+        let msg = if !app.search_query().is_empty() {
+            format!(" No matches for /{}\n\n Press Esc to clear the search.", app.search_query())
+        } else {
+            " Library is empty.\n\n Add paths to music_dirs in your config.toml\n or press Shift+R to rescan.\n Press i to paste a YouTube / Spotify URL.".to_string()
+        };
+        let empty = Paragraph::new(msg)
+            .style(Style::default().fg(parse_color(&app.theme.colors.muted)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(app.theme.border(focused))
+                    .title(Span::styled(title, app.theme.accent())),
+            );
+        f.render_widget(empty, area);
+    } else {
+        f.render_stateful_widget(list, area, &mut app.library_state);
+    }
 }
 
 fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
@@ -282,7 +397,7 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(app.theme.border(focused))
-                .title(Span::styled(title, app.theme.accent())),
+                .title(Span::styled(title.clone(), app.theme.accent())),
         )
         .highlight_style(
             Style::default()
@@ -292,7 +407,20 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
         .highlight_symbol(" ▶ ");
 
     app.layout.queue = inner_rect(area);
-    f.render_stateful_widget(list, area, &mut app.queue_state);
+    if app.queue.is_empty() {
+        let msg = " Queue is empty.\n\n Press Enter on a library item to play,\n or a to enqueue without playing.";
+        let empty = Paragraph::new(msg)
+            .style(Style::default().fg(parse_color(&app.theme.colors.muted)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(app.theme.border(focused))
+                    .title(Span::styled(title, app.theme.accent())),
+            );
+        f.render_widget(empty, area);
+    } else {
+        f.render_stateful_widget(list, area, &mut app.queue_state);
+    }
 }
 
 fn inner_rect(r: Rect) -> Rect {
@@ -328,15 +456,16 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
+            Constraint::Length(1),
         ])
         .split(content_area);
 
-    let art_text = if app.player.current().is_none() {
-        ""
+    let art_text: String = if app.player.current().is_none() {
+        String::new()
     } else if app.player.is_paused() {
-        app.theme.ascii.paused.as_str()
+        app.theme.ascii.paused.clone()
     } else {
-        app.theme.ascii.playing.as_str()
+        animated_playing_art(app.player.elapsed())
     };
     if !art_text.trim().is_empty() {
         let lines: Vec<Line> = art_text
@@ -367,6 +496,12 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
         app.theme.symbols.play.clone()
     };
 
+    let queue_pos = match app.queue_index {
+        Some(i) if !app.queue.is_empty() => {
+            format!("  [{}/{}]", i + 1, app.queue.len())
+        }
+        _ => String::new(),
+    };
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             format!(" {state_sym}  "),
@@ -377,6 +512,10 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
             Style::default()
                 .fg(parse_color(&app.theme.colors.foreground))
                 .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            queue_pos,
+            Style::default().fg(parse_color(&app.theme.colors.muted)),
         ),
     ]));
     f.render_widget(header, chunks[0]);
@@ -405,6 +544,10 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
     let vol = build_volume_bar(app.player.volume(), 20, &app.theme);
     f.render_widget(Paragraph::new(vol), chunks[3]);
 
+    let eq = app.player.eq().snapshot();
+    let eq_line = build_eq_row(&eq, &app.theme);
+    f.render_widget(Paragraph::new(eq_line), chunks[4]);
+
     let lyric_text = app
         .lyrics
         .as_ref()
@@ -417,8 +560,41 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
                 .fg(parse_color(&app.theme.colors.accent))
                 .add_modifier(Modifier::ITALIC),
         )));
-        f.render_widget(lyric, chunks[4]);
+        f.render_widget(lyric, chunks[5]);
     }
+}
+
+const PLAY_FRAMES: &[&str] = &[
+    "\n   ♪  ♫  ♪  ♫\n  ╱╲╱╲╱╲╱╲╱╲\n ╱  ▶ NOW  ╲\n╱  PLAYING  ╲\n",
+    "\n    ♫  ♪  ♫  ♪\n   ╲╱╲╱╲╱╲╱╲╱\n  ╱  ▶ NOW  ╲\n ╱  PLAYING  ╲\n",
+    "\n   ♬  ♪  ♬  ♩\n  ╱╲╱╲╱╲╱╲╱╲\n ╱  ▶ NOW  ╲\n╱  PLAYING  ╲\n",
+    "\n    ♩  ♬  ♩  ♬\n   ╲╱╲╱╲╱╲╱╲╱\n  ╱  ▶ NOW  ╲\n ╱  PLAYING  ╲\n",
+];
+
+fn animated_playing_art(elapsed: Duration) -> String {
+    let idx = (elapsed.as_millis() / 250) as usize % PLAY_FRAMES.len();
+    PLAY_FRAMES[idx].to_string()
+}
+
+fn build_eq_row(eq: &crate::eq::EqState, theme: &Theme) -> Line<'static> {
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let primary = parse_color(&theme.colors.primary);
+
+    let band = |label: &str, db: f32| -> Vec<Span<'static>> {
+        let color = if db == 0.0 { muted } else if db > 0.0 { accent } else { primary };
+        vec![
+            Span::styled(format!("{}: ", label), Style::default().fg(muted)),
+            Span::styled(format!("{:+.0}dB", db), Style::default().fg(color)),
+            Span::raw("  "),
+        ]
+    };
+
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(" ≡ EQ  ".to_string(), Style::default().fg(muted))];
+    spans.extend(band("L", eq.low_db));
+    spans.extend(band("M", eq.mid_db));
+    spans.extend(band("H", eq.high_db));
+    Line::from(spans)
 }
 
 fn build_volume_bar(volume: f32, width: usize, theme: &Theme) -> Line<'static> {
@@ -461,22 +637,27 @@ fn build_progress(
     let filled = ((width as f32) * frac).round() as usize;
     let empty = width.saturating_sub(filled);
 
-    let fill = theme.symbols.progress_fill.repeat(filled);
-    let empt = theme.symbols.progress_empty.repeat(empty);
+    let filled_color = Style::default().fg(parse_color(&theme.colors.progress_filled));
+    let empty_color = Style::default().fg(parse_color(&theme.colors.progress_empty));
+    let head_color = Style::default().fg(parse_color(&theme.colors.accent));
+
+    let (fill, head, empt) = if filled == 0 {
+        (String::new(), String::new(), theme.symbols.progress_empty.repeat(empty))
+    } else if filled >= width {
+        (theme.symbols.progress_fill.repeat(width), String::new(), String::new())
+    } else {
+        (
+            theme.symbols.progress_fill.repeat(filled.saturating_sub(1)),
+            theme.symbols.progress_head.clone(),
+            theme.symbols.progress_empty.repeat(empty),
+        )
+    };
 
     Line::from(vec![
-        Span::styled(
-            " ".to_string(),
-            Style::default(),
-        ),
-        Span::styled(
-            fill,
-            Style::default().fg(parse_color(&theme.colors.progress_filled)),
-        ),
-        Span::styled(
-            empt,
-            Style::default().fg(parse_color(&theme.colors.progress_empty)),
-        ),
+        Span::raw(" "),
+        Span::styled(fill, filled_color),
+        Span::styled(head, head_color),
+        Span::styled(empt, empty_color),
     ])
 }
 
@@ -486,7 +667,9 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(area);
 
-    let status_text = if app.search_active() {
+    let status_text = if app.url_editing {
+        format!(" URL> {}_", app.url_input)
+    } else if app.search_active() {
         format!(" /{}", app.search_query())
     } else {
         format!(" {}", app.status)
