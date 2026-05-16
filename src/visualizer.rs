@@ -171,6 +171,33 @@ impl VizTap {
         (bass, mid, treble)
     }
 
+    /// Returns up to `n` evenly-spaced recent samples from the ring, in order.
+    pub fn raw_snapshot(&self, n: usize) -> Vec<f32> {
+        let ring = self.ring.lock();
+        let mut out = Vec::with_capacity(n);
+        let step = (FFT_SIZE as f32 / n as f32).max(1.0);
+        for i in 0..n {
+            let offset = FFT_SIZE - 1 - (i as f32 * step) as usize;
+            let idx = (ring.write + RING_SIZE - 1 - offset) % RING_SIZE;
+            out.push(ring.buf[idx]);
+        }
+        out.reverse();
+        out
+    }
+
+    /// Returns RMS level in [0, 1] for the most recent 1024 samples.
+    pub fn rms_level(&self) -> f32 {
+        let ring = self.ring.lock();
+        let n = 1024usize;
+        let sum_sq: f32 = (0..n)
+            .map(|i| {
+                let idx = (ring.write + RING_SIZE - n + i) % RING_SIZE;
+                ring.buf[idx].powi(2)
+            })
+            .sum();
+        (sum_sq / n as f32).sqrt().clamp(0.0, 1.0)
+    }
+
     fn push_mono(&self, s: f32) {
         self.ring.lock().push(s);
     }

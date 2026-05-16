@@ -99,6 +99,30 @@ impl ReplayGainMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VizMode {
+    Spectrum,
+    Waveform,
+    VuMeter,
+}
+
+impl VizMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            VizMode::Spectrum => VizMode::Waveform,
+            VizMode::Waveform => VizMode::VuMeter,
+            VizMode::VuMeter => VizMode::Spectrum,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            VizMode::Spectrum => "spectrum",
+            VizMode::Waveform => "waveform",
+            VizMode::VuMeter => "vu-meter",
+        }
+    }
+}
+
 pub struct App {
     #[allow(dead_code)]
     pub config: Config,
@@ -148,6 +172,7 @@ pub struct App {
     pub show_audio_panel: bool,
     pub audio_panel_row: usize,
     pub replaygain_mode: ReplayGainMode,
+    pub viz_mode: VizMode,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -292,6 +317,7 @@ impl App {
             show_audio_panel: false,
             audio_panel_row: 0,
             replaygain_mode: ReplayGainMode::Track,
+            viz_mode: VizMode::Spectrum,
             playlist_name_editing: false,
             playlist_name_input: String::new(),
             show_playlist_browser: false,
@@ -786,6 +812,10 @@ impl App {
             Action::ReplayGain => {
                 self.replaygain_mode = self.replaygain_mode.cycle();
                 self.status = format!("ReplayGain: {}", self.replaygain_mode.label());
+            }
+            Action::CycleVizMode => {
+                self.viz_mode = self.viz_mode.cycle();
+                self.status = format!("Visualizer: {}", self.viz_mode.label());
             }
         }
     }
