@@ -64,6 +64,7 @@ impl PlayHistory {
         self.get(path).play_count
     }
 
+    #[allow(dead_code)]
     pub fn last_played(&self, path: &Path) -> u64 {
         self.get(path).last_played
     }

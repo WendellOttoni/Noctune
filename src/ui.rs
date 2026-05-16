@@ -659,8 +659,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .map(|row| match row {
             crate::app::LibraryRow::Track(t) => {
-                let rating = app.ratings.get(&t.path);
-                let fav_span = if rating == 6 {
+                let fav_span = if app.ratings.is_favorite(&t.path) {
                     Some(Span::styled("♥ ", Style::default().fg(parse_color(&app.theme.colors.accent))))
                 } else {
                     None
