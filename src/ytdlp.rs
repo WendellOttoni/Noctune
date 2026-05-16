@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use std::{path::PathBuf, process::{Command, Stdio}, time::Duration};
+use std::{path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
 
 use crate::audio::{SymphoniaSource, Track};
 
@@ -36,7 +36,7 @@ fn ffmpeg_available() -> bool {
 /// Matroska/WebM container before piping — no temp file required and no panic risk.
 /// Without ffmpeg, falls back to progressive format 18/22 (non-DASH mp4).
 /// The spawned process is killed automatically when the source is dropped.
-pub fn spawn_yt_dlp(youtube_url: &str) -> Result<SymphoniaSource> {
+pub fn spawn_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
     let format_selector = if ffmpeg_available() {
         "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio"
     } else {
@@ -52,11 +52,11 @@ pub fn spawn_yt_dlp(youtube_url: &str) -> Result<SymphoniaSource> {
             youtube_url,
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;
 
-    SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new())
+    SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new(), stream_err)
         .map_err(|e| anyhow!("yt-dlp stream: {e}"))
 }
 

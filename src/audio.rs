@@ -6,6 +6,7 @@ use std::{
     io::{Cursor, Read},
     path::{Path, PathBuf},
     process::Child,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use symphonia::core::{
@@ -94,9 +95,32 @@ impl SymphoniaSource {
         Self::from_mss(mss, hint, None)
     }
 
-    pub fn from_child(mut child: Child, hint: Hint) -> Result<Self> {
+    pub fn from_child(
+        mut child: Child,
+        hint: Hint,
+        stream_err: Arc<Mutex<Option<String>>>,
+    ) -> Result<Self> {
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("yt-dlp stdout not piped"))?;
-        let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(stdout))), Default::default());
+        // Drain stderr in a background thread; write the last non-empty line to the error slot
+        // so the app can surface it in the status bar.
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let mut last = String::new();
+                for line in BufReader::new(stderr).lines().flatten() {
+                    if !line.trim().is_empty() {
+                        last = line;
+                    }
+                }
+                if !last.is_empty() {
+                    *stream_err.lock().unwrap() = Some(format!("yt-dlp: {last}"));
+                }
+            });
+        }
+        let mss = MediaSourceStream::new(
+            Box::new(ReadOnlySource::new(SyncWrap(stdout))),
+            Default::default(),
+        );
         Self::from_mss(mss, hint, Some(child))
     }
 
@@ -104,6 +128,15 @@ impl SymphoniaSource {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(p) => p,
+                Err(SymphoniaError::IoError(ref e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    return false;
+                }
+                Err(SymphoniaError::ResetRequired) => {
+                    let _ = self.decoder.reset();
+                    continue;
+                }
                 Err(_) => return false,
             };
             if packet.track_id() != self.track_id {
@@ -182,6 +215,8 @@ pub struct Player {
     pub crossfade_secs: f32,
     // gapless state
     pub gapless_queued: Option<Track>,
+    // last error from a streaming source (yt-dlp stderr)
+    stream_err: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +299,7 @@ impl Player {
             crossfade_start: None,
             crossfade_secs: 3.0,
             gapless_queued: None,
+            stream_err: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -273,6 +309,11 @@ impl Player {
 
     pub fn eq(&self) -> EqHandle {
         self.eq.clone()
+    }
+
+    /// Returns and clears the last error message from a streaming source, if any.
+    pub fn take_stream_error(&self) -> Option<String> {
+        self.stream_err.lock().unwrap().take()
     }
 
     pub fn play(&mut self, track: &Track) -> Result<()> {
@@ -316,7 +357,7 @@ impl Player {
 
         if is_url {
             let source = if crate::ytdlp::is_youtube_url(&path_str) {
-                crate::ytdlp::spawn_yt_dlp(&path_str)?
+                crate::ytdlp::spawn_yt_dlp(&path_str, self.stream_err.clone())?
             } else {
                 let bytes = http_get_bytes(&path_str)?;
                 SymphoniaSource::from_reader(Cursor::new(bytes), Hint::new())?

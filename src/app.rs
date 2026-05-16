@@ -737,6 +737,9 @@ impl App {
                 }
             }
         }
+        if let Some(err) = self.player.take_stream_error() {
+            self.status = err;
+        }
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
                 self.player.stop();
