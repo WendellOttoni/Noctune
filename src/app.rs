@@ -116,6 +116,7 @@ pub struct App {
     pub tick_count: u64,
     pub pending_rescan: bool,
     pub queue_undo: Option<(Vec<Track>, Option<usize>)>,
+    pub hover_x: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -230,6 +231,7 @@ impl App {
             tick_count: 0,
             pending_rescan: false,
             queue_undo: None,
+            hover_x: None,
         })
     }
 
@@ -834,6 +836,14 @@ impl App {
             MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
                 self.last_drag_seek = None;
             }
+            MouseEventKind::Moved => {
+                let prog = self.layout.progress;
+                if m.row >= prog.y && m.row < prog.y + prog.height && prog.width > 0 {
+                    self.hover_x = Some(m.column);
+                } else {
+                    self.hover_x = None;
+                }
+            }
             _ => {}
         }
     }
@@ -846,7 +856,7 @@ impl App {
         // Debounce: max one seek every 120ms during a drag
         let now = std::time::Instant::now();
         if let Some(last) = self.last_drag_seek {
-            if now.duration_since(last) < Duration::from_millis(120) {
+            if now.duration_since(last) < Duration::from_millis(50) {
                 return;
             }
         }

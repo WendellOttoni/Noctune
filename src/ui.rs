@@ -469,26 +469,22 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
         ])
         .split(content_area);
 
-    let art_text: String = if app.player.current().is_none() {
-        String::new()
-    } else if app.player.is_paused() {
-        app.theme.ascii.paused.clone()
-    } else {
-        animated_playing_art(app.player.elapsed())
-    };
-    if !art_text.trim().is_empty() {
-        let lines: Vec<Line> = art_text
-            .lines()
-            .map(|l| {
-                Line::from(Span::styled(
-                    l.to_string(),
-                    Style::default().fg(parse_color(&app.theme.colors.primary)),
-                ))
-            })
-            .collect();
-        let art = Paragraph::new(Text::from(lines))
-            .alignment(Alignment::Center);
-        f.render_widget(art, art_area);
+    if app.player.current().is_some() {
+        if app.player.is_paused() {
+            let art_text = app.theme.ascii.paused.clone();
+            if !art_text.trim().is_empty() {
+                let lines: Vec<Line> = art_text
+                    .lines()
+                    .map(|l| Line::from(Span::styled(
+                        l.to_string(),
+                        Style::default().fg(parse_color(&app.theme.colors.primary)),
+                    )))
+                    .collect();
+                f.render_widget(Paragraph::new(Text::from(lines)).alignment(Alignment::Center), art_area);
+            }
+        } else {
+            render_spectrum_art(f, art_area, app);
+        }
     }
 
     let title = app
@@ -544,10 +540,21 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
     let total_str = total
         .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
-    let time = Paragraph::new(Line::from(vec![Span::styled(
-        format!(" {} / {}", format_duration(elapsed), total_str),
-        Style::default().fg(parse_color(&app.theme.colors.muted)),
-    )]));
+    let hover_seek = app.hover_x.and_then(|hx| {
+        let prog = app.layout.progress;
+        if prog.width == 0 { return None; }
+        let total_dur = total?;
+        let frac = (hx.saturating_sub(prog.x)) as f32 / prog.width as f32;
+        let secs = (total_dur.as_secs_f32() * frac.clamp(0.0, 1.0)) as u64;
+        Some(format!("  → {:02}:{:02}", secs / 60, secs % 60))
+    }).unwrap_or_default();
+    let time = Paragraph::new(Line::from(vec![
+        Span::styled(
+            format!(" {} / {}", format_duration(elapsed), total_str),
+            Style::default().fg(parse_color(&app.theme.colors.muted)),
+        ),
+        Span::styled(hover_seek, Style::default().fg(parse_color(&app.theme.colors.accent))),
+    ]));
     f.render_widget(time, chunks[2]);
 
     let vol = build_volume_bar(app.player.volume(), 20, &app.theme);
@@ -573,16 +580,82 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 
-const PLAY_FRAMES: &[&str] = &[
-    "\n   ♪  ♫  ♪  ♫\n  ╱╲╱╲╱╲╱╲╱╲\n ╱  ▶ NOW  ╲\n╱  PLAYING  ╲\n",
-    "\n    ♫  ♪  ♫  ♪\n   ╲╱╲╱╲╱╲╱╲╱\n  ╱  ▶ NOW  ╲\n ╱  PLAYING  ╲\n",
-    "\n   ♬  ♪  ♬  ♩\n  ╱╲╱╲╱╲╱╲╱╲\n ╱  ▶ NOW  ╲\n╱  PLAYING  ╲\n",
-    "\n    ♩  ♬  ♩  ♬\n   ╲╱╲╱╲╱╲╱╲╱\n  ╱  ▶ NOW  ╲\n ╱  PLAYING  ╲\n",
-];
+fn render_spectrum_art(f: &mut Frame, area: Rect, app: &App) {
+    if area.height < 3 || area.width < 8 {
+        return;
+    }
 
-fn animated_playing_art(elapsed: Duration) -> String {
-    let idx = (elapsed.as_millis() / 250) as usize % PLAY_FRAMES.len();
-    PLAY_FRAMES[idx].to_string()
+    let h = area.height as usize;
+    let bar_rows = h.saturating_sub(2); // top row: notes, bottom row: label
+
+    let primary = parse_color(&app.theme.colors.primary);
+    let secondary = parse_color(&app.theme.colors.secondary);
+    let accent = parse_color(&app.theme.colors.accent);
+    let muted = parse_color(&app.theme.colors.muted);
+
+    let bars = app.tap.compute_bars(6);
+    let (_, _, treble) = app.tap.spectrum_bands();
+
+    let elapsed = app.player.elapsed();
+    let tick = (elapsed.as_millis() / 300) as usize;
+
+    // Top row: animated note symbols driven by treble energy
+    const NOTES: &[&str] = &["♪", "♫", "♬", "♩"];
+    let note_count = (treble * 4.0).ceil() as usize + 1;
+    let note_str: String = (0..note_count)
+        .map(|i| NOTES[(tick + i) % NOTES.len()])
+        .collect::<Vec<_>>()
+        .join(" ");
+    let note_line = Line::from(Span::styled(note_str, Style::default().fg(accent)));
+    f.render_widget(
+        Paragraph::new(note_line).alignment(Alignment::Center),
+        Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+    );
+
+    // Bar chart rows (rows 1 .. h-1)
+    let n_bars = bars.len();
+    let bar_w: usize = 2;
+    let gap: usize = 1;
+    let total_bar_w = n_bars * bar_w + (n_bars - 1) * gap;
+    let pad: usize = (area.width as usize).saturating_sub(total_bar_w) / 2;
+
+    let block_chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let step = 1.0 / bar_rows as f32;
+
+    for row in 0..bar_rows {
+        let y = area.y + 1 + row as u16;
+        let row_from_bottom = bar_rows - 1 - row;
+        let threshold = row_from_bottom as f32 / bar_rows as f32;
+
+        let mut spans: Vec<Span> = vec![Span::raw(" ".repeat(pad))];
+        for (i, &val) in bars.iter().enumerate() {
+            let ch: String = if val >= threshold + step {
+                "█".repeat(bar_w)
+            } else if val > threshold {
+                let frac = (val - threshold) / step;
+                let idx = ((frac * block_chars.len() as f32) as usize).min(block_chars.len() - 1);
+                std::iter::repeat(block_chars[idx]).take(bar_w).collect()
+            } else {
+                " ".repeat(bar_w)
+            };
+            let color = if val > 0.75 { accent } else if val > 0.4 { primary } else { secondary };
+            spans.push(Span::styled(ch, Style::default().fg(color)));
+            if i + 1 < n_bars {
+                spans.push(Span::raw(" "));
+            }
+        }
+        f.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect { x: area.x, y, width: area.width, height: 1 },
+        );
+    }
+
+    // Bottom row: label
+    let label = Line::from(Span::styled("▶ NOW PLAY", Style::default().fg(muted)));
+    f.render_widget(
+        Paragraph::new(label).alignment(Alignment::Center),
+        Rect { x: area.x, y: area.y + h as u16 - 1, width: area.width, height: 1 },
+    );
 }
 
 fn build_eq_row(eq: &crate::eq::EqState, theme: &Theme) -> Line<'static> {

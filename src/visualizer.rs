@@ -162,6 +162,15 @@ impl VizTap {
         bars
     }
 
+    /// Returns (bass, mid, treble) energy levels in [0, 1] from a 6-band snapshot.
+    pub fn spectrum_bands(&self) -> (f32, f32, f32) {
+        let bars = self.compute_bars(6);
+        let bass = (bars[0] + bars[1]) / 2.0;
+        let mid = (bars[2] + bars[3]) / 2.0;
+        let treble = (bars[4] + bars[5]) / 2.0;
+        (bass, mid, treble)
+    }
+
     fn push_mono(&self, s: f32) {
         self.ring.lock().push(s);
     }
