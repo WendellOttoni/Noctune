@@ -756,7 +756,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         format!(" URL> {}_", app.url_input)
     } else if app.search_active() {
         format!(" /{}", app.search_query())
-    } else if app.loading {
+    } else if app.is_loading() {
         format!(" {} {}", spinner_char, app.status)
     } else {
         format!(" {}", app.status)

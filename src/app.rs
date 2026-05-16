@@ -6,6 +6,8 @@ use ratatui::widgets::ListState;
 use std::{path::PathBuf, time::Duration};
 use walkdir::WalkDir;
 
+use notify::Watcher as _;
+
 use crate::{
     audio::{CrossfadeStatus, Player, Track},
     cache::{cache_path, MetadataCache},
@@ -112,9 +114,11 @@ pub struct App {
     pub last_drag_seek: Option<std::time::Instant>,
     pub clear_confirm_until: Option<std::time::Instant>,
     pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
-    pub loading: bool,
+    pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
+    pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    pub _fs_watcher: Option<notify::RecommendedWatcher>,
+    pub rescan_debounce_until: Option<std::time::Instant>,
     pub tick_count: u64,
-    pub pending_rescan: bool,
     pub queue_undo: Option<(Vec<Track>, Option<usize>)>,
     pub hover_x: Option<u16>,
 }
@@ -162,16 +166,6 @@ impl App {
         let player = Player::new(config.playback.default_volume, config.visualizer.sensitivity)?;
         let tap = player.tap();
 
-        let cache_file = cache_path();
-        let mut cache = cache_file
-            .as_ref()
-            .map(|p| MetadataCache::load(p))
-            .unwrap_or_default();
-        let library = scan_library(&config.music_dirs, &mut cache);
-        if let Some(p) = &cache_file {
-            cache.save(p);
-        }
-
         let config_shuffle = config.playback.shuffle;
         let config_repeat = config.playback.repeat;
         let config_keybinds = config.keybinds.clone();
@@ -184,9 +178,29 @@ impl App {
             .filter(|_| !spotify_client_id.is_empty())
             .and_then(|t| crate::spotify::SpotifyApi::new(spotify_client_id.clone(), t).ok());
 
-        let mut library_state = ListState::default();
-        if !library.is_empty() {
-            library_state.select(Some(0));
+        // Start async library scan
+        let (scan_tx, scan_rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let scan_dirs = config.music_dirs.clone();
+        std::thread::spawn(move || {
+            let cache_file = cache_path();
+            let mut cache = cache_file
+                .as_ref()
+                .map(|p| MetadataCache::load(p))
+                .unwrap_or_default();
+            let tracks = scan_library(&scan_dirs, &mut cache);
+            if let Some(p) = &cache_file {
+                cache.save(p);
+            }
+            let _ = scan_tx.send(tracks);
+        });
+
+        // Start filesystem watcher
+        let (fs_tx, fs_event_rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+        let mut _fs_watcher = notify::RecommendedWatcher::new(fs_tx, notify::Config::default()).ok();
+        if let Some(w) = &mut _fs_watcher {
+            for dir in &config.music_dirs {
+                let _ = w.watch(dir.as_path(), notify::RecursiveMode::Recursive);
+            }
         }
 
         Ok(Self {
@@ -194,13 +208,13 @@ impl App {
             theme,
             player,
             tap,
-            library,
+            library: Vec::new(),
             queue: Vec::new(),
-            library_state,
+            library_state: ListState::default(),
             queue_state: ListState::default(),
             focus: Pane::Library,
             queue_index: None,
-            status: "Noctune ready. Press ? for help.".into(),
+            status: "Scanning library…".into(),
             should_quit: false,
             search: String::new(),
             search_editing: false,
@@ -227,12 +241,18 @@ impl App {
             last_drag_seek: None,
             clear_confirm_until: None,
             url_rx: None,
-            loading: false,
+            scan_rx: Some(scan_rx),
+            fs_event_rx: Some(fs_event_rx),
+            _fs_watcher,
+            rescan_debounce_until: None,
             tick_count: 0,
-            pending_rescan: false,
             queue_undo: None,
             hover_x: None,
         })
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.url_rx.is_some() || self.scan_rx.is_some()
     }
 
     pub fn search_active(&self) -> bool {
@@ -318,11 +338,55 @@ impl App {
     fn tick(&mut self) -> Result<()> {
         self.tick_count = self.tick_count.wrapping_add(1);
 
-        if self.pending_rescan {
-            self.pending_rescan = false;
-            self.rescan_library();
-            self.loading = false;
-            return Ok(());
+        // Poll completed library scan
+        if let Some(rx) = &self.scan_rx {
+            match rx.try_recv() {
+                Ok(mut tracks) => {
+                    sort_tracks(&mut tracks, self.sort);
+                    let n = tracks.len();
+                    self.library = tracks;
+                    self.library_state.select(if self.library.is_empty() { None } else { Some(0) });
+                    self.status = format!("Library: {n} tracks.");
+                    self.scan_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.status = "Library scan failed.".into();
+                    self.scan_rx = None;
+                }
+            }
+        }
+
+        // Drain filesystem events and set debounce timer
+        if let Some(rx) = &self.fs_event_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(Ok(event)) => {
+                        let relevant = matches!(
+                            event.kind,
+                            notify::EventKind::Create(_)
+                                | notify::EventKind::Remove(_)
+                                | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                        );
+                        if relevant {
+                            self.rescan_debounce_until = Some(
+                                std::time::Instant::now() + Duration::from_secs(2),
+                            );
+                        }
+                    }
+                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                }
+            }
+        }
+
+        // Trigger debounced rescan
+        if let Some(until) = self.rescan_debounce_until {
+            if std::time::Instant::now() >= until && self.scan_rx.is_none() {
+                self.rescan_debounce_until = None;
+                self.start_async_scan();
+                self.status = "Library changed — rescanning…".into();
+            }
         }
 
         if let Some(rx) = &self.url_rx {
@@ -335,18 +399,15 @@ impl App {
                         self.queue_state.select(Some(0));
                     }
                     self.status = format!("Added {n} track(s) to queue.");
-                    self.loading = false;
                     self.url_rx = None;
                 }
                 Ok(Err(e)) => {
                     self.status = format!("Load error: {e}");
-                    self.loading = false;
                     self.url_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.status = "URL load failed (worker disconnected).".into();
-                    self.loading = false;
                     self.url_rx = None;
                 }
             }
@@ -612,11 +673,7 @@ impl App {
                 self.player.eq().set(state);
                 self.status = format!("EQ preset: {name}");
             }
-            Action::Rescan => {
-                self.status = "Rescanning library…".into();
-                self.loading = true;
-                self.pending_rescan = true;
-            }
+            Action::Rescan => self.start_async_scan(),
             Action::TrackInfo => self.show_info = true,
             Action::CycleTheme => self.cycle_theme(),
             Action::VizSensUp => self.adjust_viz_sensitivity(crate::visualizer::SENS_STEP),
@@ -685,20 +742,27 @@ impl App {
         }
     }
 
-    fn rescan_library(&mut self) {
-        self.status = "Rescanning library…".into();
-        let cache_file = cache_path();
-        let mut cache = cache_file
-            .as_ref()
-            .map(|p| MetadataCache::load(p))
-            .unwrap_or_default();
-        self.library = scan_library(&self.config.music_dirs, &mut cache);
-        if let Some(p) = &cache_file {
-            cache.save(p);
+    fn start_async_scan(&mut self) {
+        if self.scan_rx.is_some() {
+            self.status = "Scan already in progress…".into();
+            return;
         }
-        sort_tracks(&mut self.library, self.sort);
-        self.library_state.select(if self.library.is_empty() { None } else { Some(0) });
-        self.status = format!("Library rescanned: {} tracks", self.library.len());
+        let dirs = self.config.music_dirs.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        self.scan_rx = Some(rx);
+        self.status = "Scanning library…".into();
+        std::thread::spawn(move || {
+            let cache_file = cache_path();
+            let mut cache = cache_file
+                .as_ref()
+                .map(|p| MetadataCache::load(p))
+                .unwrap_or_default();
+            let tracks = scan_library(&dirs, &mut cache);
+            if let Some(p) = &cache_file {
+                cache.save(p);
+            }
+            let _ = tx.send(tracks);
+        });
     }
 
     fn start_url_load(&mut self, url: String) {
@@ -732,14 +796,12 @@ impl App {
 
         let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
         self.url_rx = Some(rx);
-        self.loading = true;
 
         // Spotify
         if url.contains("spotify.com") || url.starts_with("spotify:") {
             let Some(api) = self.spotify.clone() else {
                 self.status = "Not logged in to Spotify. Press Shift+P first.".into();
                 self.url_rx = None;
-                self.loading = false;
                 return;
             };
             let (kind, id) = parse_spotify_url(&url);
