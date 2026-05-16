@@ -1,0 +1,14 @@
+{
+  "version": "0.1.0",
+  "description": "TUI music player for the terminal",
+  "homepage": "https://github.com/WendellOttoni/Noctune",
+  "license": "MIT",
+  "url": "https://github.com/WendellOttoni/Noctune/releases/download/v0.1.0/noctune-windows-x64.exe",
+  "bin": [["noctune-windows-x64.exe", "noctune"]],
+  "checkver": {
+    "github": "https://github.com/WendellOttoni/Noctune"
+  },
+  "autoupdate": {
+    "url": "https://github.com/WendellOttoni/Noctune/releases/download/v$version/noctune-windows-x64.exe"
+  }
+}

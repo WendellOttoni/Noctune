@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
 license = "MIT"
-repository = "https://github.com/wendellocf/noctune"
+repository = "https://github.com/WendellOttoni/Noctune"
 
 [dependencies]
 # TUI
