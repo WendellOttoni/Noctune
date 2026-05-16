@@ -90,6 +90,14 @@ impl SymphoniaSource {
         Self::from_mss(mss, hint, None)
     }
 
+    pub fn from_bytes(bytes: Vec<u8>, hint: Hint) -> Result<Self> {
+        // Cursor<Vec<u8>> implements MediaSource with is_seekable=true, which allows
+        // format readers that require seeking (e.g. MP4/M4A moov atom lookup).
+        let mss = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+        Self::from_mss(mss, hint, None)
+    }
+
+    #[allow(dead_code)]
     pub fn from_reader<R: Read + Send + 'static>(reader: R, hint: Hint) -> Result<Self> {
         let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(reader))), Default::default());
         Self::from_mss(mss, hint, None)
@@ -360,7 +368,7 @@ impl Player {
                 crate::ytdlp::spawn_yt_dlp(&path_str, self.stream_err.clone())?
             } else {
                 let bytes = http_get_bytes(&path_str)?;
-                SymphoniaSource::from_reader(Cursor::new(bytes), Hint::new())?
+                SymphoniaSource::from_bytes(bytes, Hint::new())?
             };
             let viz = VizSource::new(source, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());

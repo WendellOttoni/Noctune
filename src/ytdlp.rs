@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::{io::Cursor, path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
+use std::{path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
 
 use crate::audio::{SymphoniaSource, Track};
 
@@ -91,7 +91,8 @@ fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String
             let bytes = std::fs::read(&path)
                 .with_context(|| format!("reading {}", path.display()))?;
             let _ = std::fs::remove_file(&path);
-            return SymphoniaSource::from_reader(Cursor::new(bytes), symphonia::core::probe::Hint::new())
+            let hint = symphonia::core::probe::Hint::new();
+            return SymphoniaSource::from_bytes(bytes, hint)
                 .map_err(|e| anyhow!("decode: {e}"));
         }
     }
