@@ -37,6 +37,8 @@ pub struct Player {
     fade_started_at: Option<Instant>,
     crossfade_start: Option<Instant>,
     pub crossfade_secs: f32,
+    // gapless state
+    pub gapless_queued: Option<Track>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +120,7 @@ impl Player {
             fade_started_at: None,
             crossfade_start: None,
             crossfade_secs: 3.0,
+            gapless_queued: None,
         })
     }
 
@@ -140,8 +143,32 @@ impl Player {
         self.crossfade_start = None;
     }
 
+    /// Appends the next track to the sink queue for gapless playback.
+    /// Only works for local files; URLs are skipped.
+    pub fn enqueue_next(&mut self, track: &Track) -> Result<()> {
+        let path_str = track.path.to_string_lossy();
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            return Ok(());
+        }
+        let file = File::open(&track.path)
+            .with_context(|| format!("opening {}", track.path.display()))?;
+        let decoder = Decoder::new(BufReader::new(file))
+            .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
+        let samples = decoder.convert_samples::<f32>();
+        let viz = VizSource::new(samples, self.tap.clone());
+        let eq = EqSource::new(viz, self.eq.clone());
+        self.sink.append(eq);
+        self.gapless_queued = Some(track.clone());
+        Ok(())
+    }
+
+    pub fn sink_queue_len(&self) -> usize {
+        self.sink.len()
+    }
+
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
         self.cancel_crossfade();
+        self.gapless_queued = None;
         let path_str = track.path.to_string_lossy().to_string();
         let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
 
@@ -233,6 +260,7 @@ impl Player {
 
     pub fn stop(&mut self) {
         self.cancel_crossfade();
+        self.gapless_queued = None;
         self.sink.stop();
         self.current = None;
         self.started_at = None;

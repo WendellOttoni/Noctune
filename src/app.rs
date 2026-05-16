@@ -192,6 +192,7 @@ pub struct App {
     pub show_device_selector: bool,
     pub device_list: Vec<String>,
     pub device_selector_row: usize,
+    pending_gapless_idx: Option<usize>,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -386,6 +387,7 @@ impl App {
             show_device_selector: false,
             device_list: Vec::new(),
             device_selector_row: 0,
+            pending_gapless_idx: None,
         })
     }
 
@@ -766,6 +768,54 @@ impl App {
                         if let Some(track) = self.queue.get(next_idx).cloned() {
                             if self.player.begin_crossfade(&track).is_ok() {
                                 self.pending_crossfade_idx = Some(next_idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Gapless: detect when queued track becomes active (sink_queue_len drops to 1)
+        if self.player.gapless_queued.is_some() && self.player.sink_queue_len() <= 1 {
+            if let Some(next_track) = self.player.gapless_queued.take() {
+                if let Some(idx) = self.pending_gapless_idx.take() {
+                    self.queue_index = Some(idx);
+                    self.queue_state.select(Some(idx));
+                }
+                self.lyrics = crate::lyrics::Lyrics::for_track(&next_track.path);
+                self.status = format!("Playing: {}", next_track.display());
+                self.current_play_recorded = false;
+                let artist = next_track.artist.clone().unwrap_or_default();
+                let title = next_track.title.clone();
+                let ts = crate::lastfm::now_unix();
+                self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
+                self.lastfm_scrobbled = false;
+                if let Some(lfm) = self.lastfm.clone() {
+                    let a = artist.clone();
+                    let ti = title.clone();
+                    std::thread::spawn(move || { let _ = lfm.update_now_playing(&a, &ti); });
+                }
+                if let Some(tx) = &self.discord_tx {
+                    let _ = tx.send(crate::discord::Cmd::Update { title, artist, start_secs: ts as i64 });
+                }
+                self.push_history(next_track);
+            }
+        }
+
+        // Gapless: pre-enqueue next track when approaching end (only when crossfade is off)
+        if self.player.crossfade_secs == 0.0
+            && self.player.gapless_queued.is_none()
+            && self.pending_crossfade_idx.is_none()
+            && !matches!(self.repeat, RepeatMode::One)
+        {
+            if let Some(remaining) = self.player.remaining() {
+                if remaining > Duration::ZERO && remaining <= Duration::from_secs(2) {
+                    let cur = self.queue_index.unwrap_or(0);
+                    if let Some(next_idx) = self.pick_next_index(cur) {
+                        if let Some(track) = self.queue.get(next_idx).cloned() {
+                            if self.player.enqueue_next(&track).is_ok() {
+                                self.pending_gapless_idx = Some(next_idx);
+                                self.player.rg_scale = rg_scale(&track, self.replaygain_mode);
                             }
                         }
                     }
