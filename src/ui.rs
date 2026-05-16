@@ -18,7 +18,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.mini_mode {
         render_mini(f, area, app);
         if app.show_help {
-            render_help(f, area, &app.theme);
+            render_help(f, area, app.help_scroll, &app.theme);
         }
         return;
     }
@@ -45,7 +45,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_status(f, chunks[4], app);
 
     if app.show_help {
-        render_help(f, area, &app.theme);
+        render_help(f, area, app.help_scroll, &app.theme);
     }
     if app.show_info {
         render_track_info(f, area, app);
@@ -617,9 +617,9 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
-    let w = 58.min(area.width.saturating_sub(4));
-    let h = 42.min(area.height.saturating_sub(4));
+fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
+    let w = 62.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(2).max(6);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -701,8 +701,9 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
-                .title(Span::styled(" Help — press any key ", theme.accent())),
+                .title(Span::styled(" Help  ↑↓ scroll · any other key closes ", theme.accent())),
         )
+        .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
     f.render_widget(p, popup);
 }
@@ -770,30 +771,72 @@ fn render_viz_spectrum(f: &mut Frame, inner: Rect, app: &App) {
 fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
     let w = inner.width as usize;
     let h = inner.height as usize;
-    let samples = app.tap.raw_snapshot(w);
+    if w == 0 || h < 3 {
+        return;
+    }
+
+    // 1. Smoothing + interpolation + peak decay via waveform_data()
+    let (samples, peaks) = app.tap.waveform_data(w);
     let mid = h / 2;
-    let accent = parse_color(&app.theme.colors.accent);
-    let primary = parse_color(&app.theme.colors.primary);
-    let muted = parse_color(&app.theme.colors.muted);
+    let half_f = mid as f32;
+
+    let accent   = parse_color(&app.theme.colors.accent);
+    let primary  = parse_color(&app.theme.colors.primary);
+    let secondary = parse_color(&app.theme.colors.secondary);
+    let muted    = parse_color(&app.theme.colors.muted);
+
+    // 3. Unicode density — 9 levels: space + ▁▂▃▄▅▆▇█
+    let sub: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
     for row in 0..h {
-        let mut spans: Vec<Span> = Vec::with_capacity(w);
-        for (col, &s) in samples.iter().enumerate() {
-            let sample_row = mid as i32 - (s * mid as f32) as i32;
-            let ch = if row as i32 == sample_row {
-                '█'
-            } else if row as i32 == mid as i32 && col % 8 == 0 {
-                '·'
+        let mut spans = Vec::with_capacity(w);
+
+        for col in 0..w {
+            let amplitude = samples[col].abs().clamp(0.0, 1.0);
+            let peak_amp  = peaks[col].clamp(0.0, 1.0);
+
+            // Symmetric mirror waveform: bar extends above and below center
+            // bar_f in 1/8-row units for sub-block precision
+            let bar_f    = amplitude * half_f * 8.0;
+            let bar_rows = (bar_f / 8.0) as usize;
+            let bar_sub  = (bar_f as usize) % 8; // 0-7
+
+            let dist = (row as i32 - mid as i32).unsigned_abs() as usize;
+
+            // 5. Peak decay — marker sits 1 row beyond the smoothed bar tip
+            let peak_dist = ((peak_amp * half_f).ceil() as usize + 1).min(mid.saturating_sub(1));
+            let is_peak = dist == peak_dist && row < mid && peak_amp > 0.05;
+
+            let (ch, color) = if dist < bar_rows {
+                // Bar body — dim near center, bright near tip (3. coloring gradient)
+                let t = dist as f32 / half_f.max(1.0);
+                let color = if t > 0.65 { accent }
+                    else if t > 0.3  { primary }
+                    else             { secondary };
+                ('█', color)
+            } else if dist == bar_rows && bar_sub > 0 {
+                // 3. Fractional tip with Unicode sub-block
+                let color = if amplitude > 0.65 { accent } else { primary };
+                (sub[bar_sub], color)
+            } else if dist == bar_rows + 1 && amplitude > 0.04 {
+                // 4. Glow fake — inner halo one row past tip
+                ('░', secondary)
+            } else if dist == bar_rows + 2 && amplitude > 0.15 {
+                // 4. Glow fake — outer halo two rows past tip
+                ('░', muted)
+            } else if is_peak {
+                // 5. Peak decay marker
+                ('━', accent)
+            } else if row == mid {
+                // Center reference line (dashed)
+                if col % 3 == 0 { ('·', muted) } else { (' ', muted) }
             } else {
-                ' '
+                (' ', muted)
             };
-            let color = if ch == '█' {
-                if s.abs() > 0.7 { accent } else { primary }
-            } else {
-                muted
-            };
+
             spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
         }
+
         let r = Rect { x: inner.x, y: inner.y + row as u16, width: inner.width, height: 1 };
         f.render_widget(Paragraph::new(Line::from(spans)), r);
     }

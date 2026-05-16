@@ -145,6 +145,7 @@ pub struct App {
     pub shuffle: bool,
     pub repeat: RepeatMode,
     pub show_help: bool,
+    pub help_scroll: u16,
     pub sort: SortMode,
     pub sleep_until: Option<std::time::Instant>,
     pub history: std::collections::VecDeque<Track>,
@@ -335,6 +336,7 @@ impl App {
             shuffle: config_shuffle,
             repeat: if config_repeat { RepeatMode::All } else { RepeatMode::Off },
             show_help: false,
+            help_scroll: 0,
             sort: SortMode::Title,
             sleep_until: None,
             history: std::collections::VecDeque::with_capacity(64),
@@ -891,7 +893,18 @@ impl App {
         }
 
         if self.show_help {
-            self.show_help = false;
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.help_scroll = self.help_scroll.saturating_add(1);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.help_scroll = self.help_scroll.saturating_sub(1);
+                }
+                _ => {
+                    self.show_help = false;
+                    self.help_scroll = 0;
+                }
+            }
             return;
         }
         if self.show_info {

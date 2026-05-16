@@ -47,6 +47,9 @@ struct VizState {
     sensitivity: f32,
     peak_db: f32,
     smoothed: Vec<f32>,
+    // waveform-specific state
+    wave_smooth: Vec<f32>,
+    wave_peaks: Vec<f32>,
 }
 
 impl VizState {
@@ -55,6 +58,8 @@ impl VizState {
             sensitivity: sensitivity.clamp(SENS_MIN, SENS_MAX),
             peak_db: -20.0,
             smoothed: Vec::new(),
+            wave_smooth: Vec::new(),
+            wave_peaks: Vec::new(),
         }
     }
 }
@@ -171,18 +176,49 @@ impl VizTap {
         (bass, mid, treble)
     }
 
-    /// Returns up to `n` evenly-spaced recent samples from the ring, in order.
+    /// Returns `n` evenly-spaced recent samples using linear interpolation.
     pub fn raw_snapshot(&self, n: usize) -> Vec<f32> {
         let ring = self.ring.lock();
         let mut out = Vec::with_capacity(n);
         let step = (FFT_SIZE as f32 / n as f32).max(1.0);
         for i in 0..n {
-            let offset = FFT_SIZE - 1 - (i as f32 * step) as usize;
-            let idx = (ring.write + RING_SIZE - 1 - offset) % RING_SIZE;
-            out.push(ring.buf[idx]);
+            let offset_f = FFT_SIZE as f32 - 1.0 - i as f32 * step;
+            let offset0 = offset_f.floor() as usize;
+            let offset1 = (offset0 + 1).min(FFT_SIZE - 1);
+            let t = offset_f - offset_f.floor();
+            let idx0 = (ring.write + RING_SIZE - 1 - offset0) % RING_SIZE;
+            let idx1 = (ring.write + RING_SIZE - 1 - offset1) % RING_SIZE;
+            out.push(ring.buf[idx0] * (1.0 - t) + ring.buf[idx1] * t);
         }
         out.reverse();
         out
+    }
+
+    /// Returns (smoothed_samples, peak_per_column) for waveform rendering.
+    /// Applies temporal smoothing and per-column peak decay each call.
+    pub fn waveform_data(&self, n: usize) -> (Vec<f32>, Vec<f32>) {
+        let raw = self.raw_snapshot(n);
+        let mut state = self.state.lock();
+
+        if state.wave_smooth.len() != n {
+            state.wave_smooth = raw.clone();
+            state.wave_peaks = raw.iter().map(|s| s.abs()).collect();
+            return (raw, state.wave_peaks.clone());
+        }
+
+        const SMOOTH: f32 = 0.55;
+        const PEAK_DECAY: f32 = 0.97;
+
+        for (s, &r) in state.wave_smooth.iter_mut().zip(raw.iter()) {
+            *s = r * (1.0 - SMOOTH) + *s * SMOOTH;
+        }
+        for i in 0..n {
+            let a = state.wave_smooth[i].abs();
+            let p = &mut state.wave_peaks[i];
+            if a > *p { *p = a; } else { *p *= PEAK_DECAY; }
+        }
+
+        (state.wave_smooth.clone(), state.wave_peaks.clone())
     }
 
     /// Returns RMS level in [0, 1] for the most recent 1024 samples.
