@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::{path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
+use std::{io::Cursor, path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
 
 use crate::audio::{SymphoniaSource, Track};
 
@@ -30,13 +30,20 @@ fn ffmpeg_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Spawn yt-dlp with `-o -` and build a `SymphoniaSource` from its piped stdout.
+/// Download audio and build a `SymphoniaSource`.
 ///
-/// With ffmpeg available, yt-dlp remuxes DASH segments into a streaming-friendly
-/// Matroska/WebM container before piping — no temp file required and no panic risk.
-/// Without ffmpeg, falls back to progressive format 18/22 (non-DASH mp4).
-/// The spawned process is killed automatically when the source is dropped.
+/// On Unix: spawns yt-dlp with `-o -` and pipes stdout directly — no temp file.
+/// On Windows: pipes are unreliable for binary audio output (EINVAL), so yt-dlp
+/// writes to a temp file which is read and deleted immediately after.
 pub fn spawn_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
+    if cfg!(target_os = "windows") {
+        download_via_tempfile(youtube_url, stream_err)
+    } else {
+        pipe_from_yt_dlp(youtube_url, stream_err)
+    }
+}
+
+fn pipe_from_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
     let format_selector = if ffmpeg_available() {
         "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio"
     } else {
@@ -44,13 +51,7 @@ pub fn spawn_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -
     };
 
     let child = Command::new("yt-dlp")
-        .args([
-            "-f", format_selector,
-            "--no-playlist",
-            "--no-warnings",
-            "-o", "-",
-            youtube_url,
-        ])
+        .args(["-f", format_selector, "--no-playlist", "--no-warnings", "-o", "-", youtube_url])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -58,6 +59,44 @@ pub fn spawn_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -
 
     SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new(), stream_err)
         .map_err(|e| anyhow!("yt-dlp stream: {e}"))
+}
+
+fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
+    let format_selector = if ffmpeg_available() {
+        "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio"
+    } else {
+        "18/22/best[ext=mp4][protocol^=https]"
+    };
+
+    let tmp_dir = std::env::temp_dir();
+    let hash: u64 = youtube_url
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let tmp_pattern = tmp_dir.join(format!("noctune_{hash}.%(ext)s")).to_string_lossy().to_string();
+    let tmp_base = tmp_dir.join(format!("noctune_{hash}"));
+
+    let out = Command::new("yt-dlp")
+        .args(["-f", format_selector, "--no-playlist", "--no-warnings", "-o", &tmp_pattern, youtube_url])
+        .output()
+        .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;
+
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(anyhow!("yt-dlp: {}", err.trim()));
+    }
+
+    for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
+        let path = tmp_base.with_extension(ext);
+        if path.exists() {
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
+            let _ = std::fs::remove_file(&path);
+            return SymphoniaSource::from_reader(Cursor::new(bytes), symphonia::core::probe::Hint::new())
+                .map_err(|e| anyhow!("decode: {e}"));
+        }
+    }
+
+    Err(anyhow!("yt-dlp: could not locate downloaded audio file"))
 }
 
 #[derive(Debug, Deserialize)]
