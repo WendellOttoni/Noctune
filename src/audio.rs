@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{source::Source, Decoder, OutputStream, OutputStreamHandle, Sink};
 use std::{
     fs::File,
@@ -327,6 +328,49 @@ impl Player {
     pub fn current(&self) -> Option<&Track> {
         self.current.as_ref()
     }
+
+    pub fn switch_device(&mut self, device_name: &str) -> Result<()> {
+        let host = cpal::default_host();
+        let device = host
+            .output_devices()?
+            .find(|d| d.name().as_deref().ok() == Some(device_name))
+            .ok_or_else(|| anyhow!("device not found: {device_name}"))?;
+
+        let cur = self.current.clone();
+        let offset = self.elapsed();
+        let was_paused = self.sink.is_paused();
+
+        self.stop();
+
+        let (stream, handle) = OutputStream::try_from_device(&device)
+            .context("could not open selected audio device")?;
+        let sink = Sink::try_new(&handle)?;
+        sink.set_volume(self.volume * self.rg_scale);
+
+        self._stream = stream;
+        self.handle = handle;
+        self.sink = sink;
+
+        if let Some(track) = cur {
+            self.play_from(&track, offset)?;
+            if was_paused {
+                self.sink.pause();
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn enumerate_output_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    host.output_devices()
+        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+pub fn default_device_name() -> Option<String> {
+    cpal::default_host().default_output_device()?.name().ok()
 }
 
 fn http_get_bytes(url: &str) -> Result<Vec<u8>> {

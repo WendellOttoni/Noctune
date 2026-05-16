@@ -189,6 +189,9 @@ pub struct App {
     lastfm_scrobble_info: Option<(String, String, u64)>,
     lastfm_scrobbled: bool,
     discord_tx: Option<std::sync::mpsc::Sender<crate::discord::Cmd>>,
+    pub show_device_selector: bool,
+    pub device_list: Vec<String>,
+    pub device_selector_row: usize,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -380,6 +383,9 @@ impl App {
             lastfm_scrobble_info: None,
             lastfm_scrobbled: false,
             discord_tx,
+            show_device_selector: false,
+            device_list: Vec::new(),
+            device_selector_row: 0,
         })
     }
 
@@ -841,6 +847,11 @@ impl App {
             return;
         }
 
+        if self.show_device_selector {
+            self.handle_device_selector_key(key);
+            return;
+        }
+
         if self.show_playlist_browser {
             self.handle_playlist_browser_key(key);
             return;
@@ -1093,6 +1104,7 @@ impl App {
                 self.mini_mode = !self.mini_mode;
             }
             Action::LastfmLogin => self.lastfm_login(),
+            Action::SelectDevice => self.open_device_selector(),
             Action::ToggleFavorite => {
                 let path = match self.focus {
                     Pane::Library => self.selected_library_track().map(|t| t.path),
@@ -1357,6 +1369,45 @@ impl App {
                 }
             }
             Err(e) => self.status = format!("Spotify authorize error: {e}"),
+        }
+    }
+
+    fn open_device_selector(&mut self) {
+        self.device_list = crate::audio::enumerate_output_devices();
+        let default = crate::audio::default_device_name().unwrap_or_default();
+        self.device_selector_row = self
+            .device_list
+            .iter()
+            .position(|n| *n == default)
+            .unwrap_or(0);
+        self.show_device_selector = true;
+    }
+
+    fn handle_device_selector_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('D') => {
+                self.show_device_selector = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.device_selector_row > 0 {
+                    self.device_selector_row -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.device_selector_row + 1 < self.device_list.len() {
+                    self.device_selector_row += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.show_device_selector = false;
+                if let Some(name) = self.device_list.get(self.device_selector_row).cloned() {
+                    match self.player.switch_device(&name) {
+                        Ok(_) => self.status = format!("Output device: {name}"),
+                        Err(e) => self.status = format!("Device error: {e}"),
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

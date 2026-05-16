@@ -52,6 +52,7 @@ pub enum Action {
     ToggleFavorite,
     ToggleMini,
     LastfmLogin,
+    SelectDevice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -176,6 +177,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('f')), Action::ToggleFavorite),
             (KeyChord::new(KeyCode::Char('m')), Action::ToggleMini),
             (KeyChord::new(KeyCode::Char('F')), Action::LastfmLogin),
+            (KeyChord::new(KeyCode::Char('D')), Action::SelectDevice),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

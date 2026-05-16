@@ -53,6 +53,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_playlist_browser {
         render_playlist_browser(f, area, app);
     }
+    if app.show_device_selector {
+        render_device_selector(f, area, app);
+    }
 }
 
 fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
@@ -272,6 +275,53 @@ fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let mut state = ratatui::widgets::ListState::default();
     state.select(Some(app.playlist_browser_row));
+    f.render_stateful_widget(list, popup, &mut state);
+}
+
+fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let w = 70.min(area.width.saturating_sub(4));
+    let h = (app.device_list.len() as u16 + 4).clamp(6, area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = app
+        .device_list
+        .iter()
+        .map(|name| ListItem::new(Span::styled(
+            format!("  {name}"),
+            Style::default().fg(parse_color(&theme.colors.foreground)),
+        )))
+        .collect();
+
+    let hint = Line::from(vec![
+        Span::styled("  Enter", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" select  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("Esc", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" close", Style::default().fg(parse_color(&theme.colors.muted))),
+    ]);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border(true))
+                .title(Span::styled(" Output Device ", theme.accent()))
+                .title_bottom(hint),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(parse_color(&theme.colors.secondary))
+                .fg(parse_color(&theme.colors.background)),
+        );
+
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(Some(app.device_selector_row));
     f.render_stateful_widget(list, popup, &mut state);
 }
 
