@@ -177,6 +177,10 @@ pub struct App {
     pub replaygain_mode: ReplayGainMode,
     pub viz_mode: VizMode,
     pub ratings: crate::ratings::Ratings,
+    pub play_history: crate::history::PlayHistory,
+    pub smart_expanded: [bool; 4],
+    pub play_threshold_secs: f64,
+    current_play_recorded: bool,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -204,6 +208,7 @@ pub struct LayoutRects {
 #[derive(Debug, Clone)]
 pub enum LibraryRow {
     Header(String),
+    SmartHeader { label: String, count: usize, expanded: bool },
     Track(Track),
 }
 
@@ -212,13 +217,15 @@ pub enum ViewMode {
     Flat,
     Albums,
     RecentlyPlayed,
+    Smart,
 }
 
 impl ViewMode {
     pub fn toggle(self) -> Self {
         match self {
             ViewMode::Flat => ViewMode::Albums,
-            ViewMode::Albums => ViewMode::Flat,
+            ViewMode::Albums => ViewMode::Smart,
+            ViewMode::Smart => ViewMode::Flat,
             ViewMode::RecentlyPlayed => ViewMode::Flat,
         }
     }
@@ -227,6 +234,7 @@ impl ViewMode {
             ViewMode::Flat => "flat",
             ViewMode::Albums => "albums",
             ViewMode::RecentlyPlayed => "recently played",
+            ViewMode::Smart => "smart",
         }
     }
 }
@@ -323,6 +331,10 @@ impl App {
             replaygain_mode: ReplayGainMode::Track,
             viz_mode: VizMode::Spectrum,
             ratings: crate::ratings::Ratings::load(),
+            play_history: crate::history::PlayHistory::load(),
+            smart_expanded: [true, false, false, false],
+            play_threshold_secs: 30.0,
+            current_play_recorded: false,
             playlist_name_editing: false,
             playlist_name_input: String::new(),
             show_playlist_browser: false,
@@ -346,10 +358,9 @@ impl App {
     }
 
     pub fn visible_library(&self) -> Vec<&Track> {
-        let source: Box<dyn Iterator<Item = &Track>> = if self.view_mode == ViewMode::RecentlyPlayed {
-            Box::new(self.history.iter())
-        } else {
-            Box::new(self.library.iter())
+        let source: Box<dyn Iterator<Item = &Track>> = match self.view_mode {
+            ViewMode::RecentlyPlayed => Box::new(self.history.iter()),
+            _ => Box::new(self.library.iter()),
         };
 
         if self.search.is_empty() {
@@ -370,6 +381,9 @@ impl App {
     }
 
     pub fn library_rows(&self) -> Vec<LibraryRow> {
+        if self.view_mode == ViewMode::Smart {
+            return self.smart_rows();
+        }
         let visible = self.visible_library();
         if self.view_mode == ViewMode::Flat
             || self.view_mode == ViewMode::RecentlyPlayed
@@ -393,12 +407,101 @@ impl App {
         out
     }
 
+    fn smart_rows(&self) -> Vec<LibraryRow> {
+        const LIMIT: usize = 50;
+        let track_map: std::collections::HashMap<String, &Track> = self
+            .library
+            .iter()
+            .map(|t| (t.path.display().to_string(), t))
+            .collect();
+
+        let most_played: Vec<Track> = {
+            let paths = self.play_history.most_played_paths(LIMIT);
+            paths.iter()
+                .filter_map(|(k, _)| track_map.get(k).copied().cloned().map(Some).unwrap_or(None))
+                .collect()
+        };
+
+        let recently_played: Vec<Track> = {
+            let paths = self.play_history.recently_played_paths(LIMIT);
+            paths.iter()
+                .filter_map(|k| track_map.get(k).copied().cloned().map(Some).unwrap_or(None))
+                .collect()
+        };
+
+        let never_played: Vec<Track> = {
+            let mut v: Vec<Track> = self
+                .library
+                .iter()
+                .filter(|t| self.play_history.play_count(&t.path) == 0)
+                .cloned()
+                .collect();
+            v.truncate(LIMIT);
+            v
+        };
+
+        let recently_added: Vec<Track> = {
+            let mut v: Vec<(Track, u64)> = self
+                .library
+                .iter()
+                .filter_map(|t| {
+                    let mtime = std::fs::metadata(&t.path)
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    Some((t.clone(), mtime))
+                })
+                .collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1));
+            v.truncate(LIMIT);
+            v.into_iter().map(|(t, _)| t).collect()
+        };
+
+        let categories: [(&str, &Vec<Track>, bool); 4] = [
+            ("Most Played", &most_played, self.smart_expanded[0]),
+            ("Recently Played", &recently_played, self.smart_expanded[1]),
+            ("Recently Added", &recently_added, self.smart_expanded[2]),
+            ("Never Played", &never_played, self.smart_expanded[3]),
+        ];
+
+        let mut out = Vec::new();
+        for (label, tracks, expanded) in categories {
+            out.push(LibraryRow::SmartHeader {
+                label: label.to_string(),
+                count: tracks.len(),
+                expanded,
+            });
+            if expanded {
+                for t in tracks.iter() {
+                    out.push(LibraryRow::Track(t.clone()));
+                }
+            }
+        }
+        out
+    }
+
     fn selected_library_track(&self) -> Option<Track> {
         let rows = self.library_rows();
         let idx = self.library_state.selected()?;
         match rows.get(idx)? {
             LibraryRow::Track(t) => Some(t.clone()),
-            LibraryRow::Header(_) => None,
+            LibraryRow::Header(_) | LibraryRow::SmartHeader { .. } => None,
+        }
+    }
+
+    fn toggle_smart_category(&mut self, row_idx: usize) {
+        let rows = self.library_rows();
+        let mut cat_idx = 0usize;
+        for (i, row) in rows.iter().enumerate() {
+            if let LibraryRow::SmartHeader { .. } = row {
+                if i == row_idx {
+                    self.smart_expanded[cat_idx] = !self.smart_expanded[cat_idx];
+                    return;
+                }
+                cat_idx += 1;
+            }
         }
     }
 
@@ -532,6 +635,16 @@ impl App {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Record play after 30s threshold (once per track start)
+        if !self.current_play_recorded {
+            if let Some(track) = self.player.current().cloned() {
+                if self.player.elapsed().as_secs_f64() >= self.play_threshold_secs {
+                    self.play_history.record_play(&track.path);
+                    self.current_play_recorded = true;
                 }
             }
         }
@@ -1197,9 +1310,12 @@ impl App {
                 let len = rows.len() as i32;
                 for _ in 0..len {
                     cur = (cur + delta).rem_euclid(len);
-                    if matches!(rows[cur as usize], LibraryRow::Track(_)) {
-                        self.library_state.select(Some(cur as usize));
-                        return;
+                    match &rows[cur as usize] {
+                        LibraryRow::Track(_) | LibraryRow::SmartHeader { .. } => {
+                            self.library_state.select(Some(cur as usize));
+                            return;
+                        }
+                        LibraryRow::Header(_) => {}
                     }
                 }
             }
@@ -1218,6 +1334,14 @@ impl App {
     fn activate_selection(&mut self) {
         match self.focus {
             Pane::Library => {
+                let sel = self.library_state.selected();
+                let row = sel.and_then(|i| self.library_rows().into_iter().nth(i));
+                if let Some(LibraryRow::SmartHeader { .. }) = row {
+                    if let Some(i) = sel {
+                        self.toggle_smart_category(i);
+                    }
+                    return;
+                }
                 if let Some(t) = self.selected_library_track() {
                     self.queue.push(t);
                     let idx = self.queue.len() - 1;
@@ -1300,6 +1424,7 @@ impl App {
     }
 
     fn play_current(&mut self) {
+        self.current_play_recorded = false;
         let Some(i) = self.queue_index else { return };
         let Some(t) = self.queue.get(i).cloned() else { return };
 

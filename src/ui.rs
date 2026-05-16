@@ -545,6 +545,15 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                     .fg(parse_color(&app.theme.colors.accent))
                     .add_modifier(Modifier::BOLD),
             ))),
+            crate::app::LibraryRow::SmartHeader { label, count, expanded } => {
+                let icon = if *expanded { "▼" } else { "▶" };
+                ListItem::new(Line::from(Span::styled(
+                    format!(" {} {} ({})", icon, label, count),
+                    Style::default()
+                        .fg(parse_color(&app.theme.colors.accent))
+                        .add_modifier(Modifier::BOLD),
+                )))
+            }
         })
         .collect();
 
@@ -558,6 +567,8 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         } else {
             format!(" Recently Played ({}) ", app.history.len())
         }
+    } else if app.view_mode == crate::app::ViewMode::Smart {
+        " Smart Playlists ".to_string()
     } else if app.search_active() || !app.search_query().is_empty() {
         format!(" Library [{}/{}] /{} ", shown, app.library.len(), app.search_query())
     } else {

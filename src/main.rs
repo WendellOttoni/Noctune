@@ -6,6 +6,7 @@ mod cache;
 mod config;
 mod eq;
 mod keybinds;
+mod history;
 mod lyrics;
 mod metadata;
 mod ratings;
