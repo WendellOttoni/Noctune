@@ -32,6 +32,7 @@ pub enum SortMode {
     Title,
     Artist,
     Album,
+    Rating,
 }
 
 impl SortMode {
@@ -39,7 +40,8 @@ impl SortMode {
         match self {
             SortMode::Title => SortMode::Artist,
             SortMode::Artist => SortMode::Album,
-            SortMode::Album => SortMode::Title,
+            SortMode::Album => SortMode::Rating,
+            SortMode::Rating => SortMode::Title,
         }
     }
     pub fn label(self) -> &'static str {
@@ -47,6 +49,7 @@ impl SortMode {
             SortMode::Title => "title",
             SortMode::Artist => "artist",
             SortMode::Album => "album",
+            SortMode::Rating => "rating",
         }
     }
 }
@@ -173,6 +176,7 @@ pub struct App {
     pub audio_panel_row: usize,
     pub replaygain_mode: ReplayGainMode,
     pub viz_mode: VizMode,
+    pub ratings: crate::ratings::Ratings,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -318,6 +322,7 @@ impl App {
             audio_panel_row: 0,
             replaygain_mode: ReplayGainMode::Track,
             viz_mode: VizMode::Spectrum,
+            ratings: crate::ratings::Ratings::load(),
             playlist_name_editing: false,
             playlist_name_input: String::new(),
             show_playlist_browser: false,
@@ -695,7 +700,7 @@ impl App {
             }
             Action::Sort => {
                 self.sort = self.sort.cycle();
-                sort_tracks(&mut self.library, self.sort);
+                sort_tracks_with_ratings(&mut self.library, self.sort, Some(&self.ratings));
                 self.library_state.select(if self.library.is_empty() {
                     None
                 } else {
@@ -816,6 +821,24 @@ impl App {
             Action::CycleVizMode => {
                 self.viz_mode = self.viz_mode.cycle();
                 self.status = format!("Visualizer: {}", self.viz_mode.label());
+            }
+            Action::ToggleFavorite => {
+                let path = match self.focus {
+                    Pane::Library => self.selected_library_track().map(|t| t.path),
+                    Pane::Queue => self
+                        .queue_state
+                        .selected()
+                        .and_then(|i| self.queue.get(i))
+                        .map(|t| t.path.clone()),
+                };
+                if let Some(p) = path {
+                    let fav = self.ratings.toggle_favorite(&p);
+                    self.status = if fav {
+                        "Added to favorites ♥".into()
+                    } else {
+                        "Removed from favorites".into()
+                    };
+                }
             }
         }
     }
@@ -1605,6 +1628,10 @@ fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
 }
 
 fn sort_tracks(tracks: &mut [Track], mode: SortMode) {
+    sort_tracks_with_ratings(tracks, mode, None);
+}
+
+fn sort_tracks_with_ratings(tracks: &mut [Track], mode: SortMode, ratings: Option<&crate::ratings::Ratings>) {
     match mode {
         SortMode::Title => tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
         SortMode::Artist => tracks.sort_by(|a, b| {
@@ -1617,5 +1644,12 @@ fn sort_tracks(tracks: &mut [Track], mode: SortMode) {
             let bb = b.album.as_deref().unwrap_or("~").to_lowercase();
             aa.cmp(&bb).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
         }),
+        SortMode::Rating => {
+            tracks.sort_by(|a, b| {
+                let ra = ratings.map(|r| r.get(&a.path)).unwrap_or(0);
+                let rb = ratings.map(|r| r.get(&b.path)).unwrap_or(0);
+                rb.cmp(&ra).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            });
+        }
     }
 }

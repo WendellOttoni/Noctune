@@ -517,6 +517,12 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .map(|row| match row {
             crate::app::LibraryRow::Track(t) => {
+                let rating = app.ratings.get(&t.path);
+                let fav_span = if rating == 6 {
+                    Some(Span::styled("♥ ", Style::default().fg(parse_color(&app.theme.colors.accent))))
+                } else {
+                    None
+                };
                 let dur = t
                     .duration
                     .map(|d| {
@@ -524,13 +530,14 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                         format!("  {:02}:{:02}", s / 60, s % 60)
                     })
                     .unwrap_or_default();
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        t.display(),
-                        Style::default().fg(parse_color(&app.theme.colors.foreground)),
-                    ),
-                    Span::styled(dur, Style::default().fg(parse_color(&app.theme.colors.muted))),
-                ]))
+                let mut spans = Vec::new();
+                if let Some(s) = fav_span { spans.push(s); }
+                spans.push(Span::styled(
+                    t.display(),
+                    Style::default().fg(parse_color(&app.theme.colors.foreground)),
+                ));
+                spans.push(Span::styled(dur, Style::default().fg(parse_color(&app.theme.colors.muted))));
+                ListItem::new(Line::from(spans))
             }
             crate::app::LibraryRow::Header(album) => ListItem::new(Line::from(Span::styled(
                 format!("── {} ──", album),

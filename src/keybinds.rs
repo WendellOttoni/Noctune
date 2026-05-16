@@ -49,6 +49,7 @@ pub enum Action {
     ShowAudioPanel,
     ReplayGain,
     CycleVizMode,
+    ToggleFavorite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -170,6 +171,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('e')), Action::ShowAudioPanel),
             (KeyChord::new(KeyCode::Char('G')), Action::ReplayGain),
             (KeyChord::new(KeyCode::Char('v')), Action::CycleVizMode),
+            (KeyChord::new(KeyCode::Char('f')), Action::ToggleFavorite),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

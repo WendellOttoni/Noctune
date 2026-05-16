@@ -8,6 +8,7 @@ mod eq;
 mod keybinds;
 mod lyrics;
 mod metadata;
+mod ratings;
 mod spotify;
 mod theme;
 mod tui;
