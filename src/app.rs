@@ -180,6 +180,8 @@ pub struct App {
     pub play_history: crate::history::PlayHistory,
     pub smart_expanded: [bool; 4],
     pub play_threshold_secs: f64,
+    pub browser_path: Option<PathBuf>,
+    pub browser_music_root_idx: usize,
     current_play_recorded: bool,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
@@ -210,6 +212,7 @@ pub enum LibraryRow {
     Header(String),
     SmartHeader { label: String, count: usize, expanded: bool },
     Track(Track),
+    Dir(std::path::PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +221,7 @@ pub enum ViewMode {
     Albums,
     RecentlyPlayed,
     Smart,
+    Browser,
 }
 
 impl ViewMode {
@@ -225,7 +229,8 @@ impl ViewMode {
         match self {
             ViewMode::Flat => ViewMode::Albums,
             ViewMode::Albums => ViewMode::Smart,
-            ViewMode::Smart => ViewMode::Flat,
+            ViewMode::Smart => ViewMode::Browser,
+            ViewMode::Browser => ViewMode::Flat,
             ViewMode::RecentlyPlayed => ViewMode::Flat,
         }
     }
@@ -235,6 +240,7 @@ impl ViewMode {
             ViewMode::Albums => "albums",
             ViewMode::RecentlyPlayed => "recently played",
             ViewMode::Smart => "smart",
+            ViewMode::Browser => "browser",
         }
     }
 }
@@ -335,6 +341,8 @@ impl App {
             smart_expanded: [true, false, false, false],
             play_threshold_secs: 30.0,
             current_play_recorded: false,
+            browser_path: None,
+            browser_music_root_idx: 0,
             playlist_name_editing: false,
             playlist_name_input: String::new(),
             show_playlist_browser: false,
@@ -383,6 +391,9 @@ impl App {
     pub fn library_rows(&self) -> Vec<LibraryRow> {
         if self.view_mode == ViewMode::Smart {
             return self.smart_rows();
+        }
+        if self.view_mode == ViewMode::Browser {
+            return self.browser_rows();
         }
         let visible = self.visible_library();
         if self.view_mode == ViewMode::Flat
@@ -482,12 +493,99 @@ impl App {
         out
     }
 
+    fn browser_rows(&self) -> Vec<LibraryRow> {
+        let dir = if let Some(p) = &self.browser_path {
+            p.clone()
+        } else if let Some(root) = self.config.music_dirs.get(self.browser_music_root_idx) {
+            root.clone()
+        } else {
+            return Vec::new();
+        };
+
+        let Ok(read_dir) = std::fs::read_dir(&dir) else { return Vec::new() };
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        let mut files: Vec<Track> = Vec::new();
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if AUDIO_EXTS.contains(&ext.to_lowercase().as_str()) {
+                    files.push(Track::from_path(path));
+                }
+            }
+        }
+        dirs.sort();
+        files.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+
+        let mut out = Vec::new();
+        for d in dirs {
+            out.push(LibraryRow::Dir(d));
+        }
+        for f in files {
+            out.push(LibraryRow::Track(f));
+        }
+        out
+    }
+
+    pub fn browser_current_path(&self) -> PathBuf {
+        if let Some(p) = &self.browser_path {
+            p.clone()
+        } else {
+            self.config.music_dirs
+                .get(self.browser_music_root_idx)
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    fn browser_enter(&mut self) {
+        let sel = self.library_state.selected().unwrap_or(0);
+        let rows = self.library_rows();
+        match rows.get(sel) {
+            Some(LibraryRow::Dir(p)) => {
+                self.browser_path = Some(p.clone());
+                self.library_state.select(Some(0));
+            }
+            Some(LibraryRow::Track(t)) => {
+                let t = t.clone();
+                self.queue.push(t);
+                let idx = self.queue.len() - 1;
+                self.queue_index = Some(idx);
+                self.queue_state.select(Some(idx));
+                self.play_current();
+            }
+            _ => {}
+        }
+    }
+
+    fn browser_up(&mut self) {
+        if let Some(current) = &self.browser_path {
+            let parent = current.parent().map(|p| p.to_path_buf());
+            let is_root = self.config.music_dirs
+                .get(self.browser_music_root_idx)
+                .map(|r| current == r)
+                .unwrap_or(false);
+            if is_root {
+                self.browser_path = None;
+            } else {
+                self.browser_path = parent;
+            }
+            self.library_state.select(Some(0));
+        } else if self.config.music_dirs.len() > 1 {
+            self.browser_music_root_idx =
+                (self.browser_music_root_idx + 1) % self.config.music_dirs.len();
+            self.library_state.select(Some(0));
+        }
+    }
+
     fn selected_library_track(&self) -> Option<Track> {
         let rows = self.library_rows();
         let idx = self.library_state.selected()?;
         match rows.get(idx)? {
             LibraryRow::Track(t) => Some(t.clone()),
-            LibraryRow::Header(_) | LibraryRow::SmartHeader { .. } => None,
+            LibraryRow::Header(_) | LibraryRow::SmartHeader { .. } | LibraryRow::Dir(_) => None,
         }
     }
 
@@ -774,6 +872,15 @@ impl App {
             return;
         }
 
+        // Browser: Backspace goes up a directory
+        if self.view_mode == ViewMode::Browser
+            && self.focus == Pane::Library
+            && key.code == KeyCode::Backspace
+        {
+            self.browser_up();
+            return;
+        }
+
         if let Some(action) = self.bindings.lookup(key.code, key.modifiers) {
             self.run_action(action);
         } else {
@@ -861,11 +968,11 @@ impl App {
             Action::SpotifyToggle => self.spotify_toggle(),
             Action::ToggleView => {
                 self.view_mode = self.view_mode.toggle();
-                self.library_state.select(if self.visible_library().is_empty() {
-                    None
-                } else {
-                    Some(0)
-                });
+                if self.view_mode == ViewMode::Browser {
+                    self.browser_path = None;
+                    self.browser_music_root_idx = 0;
+                }
+                self.library_state.select(Some(0));
                 self.status = format!("View: {}", self.view_mode.label());
             }
             Action::EqLowUp => {
@@ -1311,7 +1418,7 @@ impl App {
                 for _ in 0..len {
                     cur = (cur + delta).rem_euclid(len);
                     match &rows[cur as usize] {
-                        LibraryRow::Track(_) | LibraryRow::SmartHeader { .. } => {
+                        LibraryRow::Track(_) | LibraryRow::SmartHeader { .. } | LibraryRow::Dir(_) => {
                             self.library_state.select(Some(cur as usize));
                             return;
                         }
@@ -1334,6 +1441,10 @@ impl App {
     fn activate_selection(&mut self) {
         match self.focus {
             Pane::Library => {
+                if self.view_mode == ViewMode::Browser {
+                    self.browser_enter();
+                    return;
+                }
                 let sel = self.library_state.selected();
                 let row = sel.and_then(|i| self.library_rows().into_iter().nth(i));
                 if let Some(LibraryRow::SmartHeader { .. }) = row {

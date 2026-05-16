@@ -554,6 +554,15 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                         .add_modifier(Modifier::BOLD),
                 )))
             }
+            crate::app::LibraryRow::Dir(p) => {
+                let name = p.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("?");
+                ListItem::new(Line::from(Span::styled(
+                    format!("📁 {}/", name),
+                    Style::default().fg(parse_color(&app.theme.colors.accent)),
+                )))
+            }
         })
         .collect();
 
@@ -569,6 +578,10 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         }
     } else if app.view_mode == crate::app::ViewMode::Smart {
         " Smart Playlists ".to_string()
+    } else if app.view_mode == crate::app::ViewMode::Browser {
+        let path = app.browser_current_path();
+        let display = path.to_string_lossy();
+        format!(" 📁 {} ", display)
     } else if app.search_active() || !app.search_query().is_empty() {
         format!(" Library [{}/{}] /{} ", shown, app.library.len(), app.search_query())
     } else {
@@ -595,6 +608,8 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
             format!(" No matches for /{}\n\n Press Esc to clear the search.", app.search_query())
         } else if app.view_mode == crate::app::ViewMode::RecentlyPlayed {
             " No recently played tracks.\n\n Play some tracks and they will appear here.\n Press Shift+H to return to the library.".to_string()
+        } else if app.view_mode == crate::app::ViewMode::Browser {
+            " Empty directory.".to_string()
         } else {
             " Library is empty.\n\n Add paths to music_dirs in your config.toml\n or press Shift+R to rescan.\n Press i to paste a YouTube / Spotify URL.".to_string()
         };
