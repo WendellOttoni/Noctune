@@ -5,6 +5,7 @@ mod audio;
 mod cache;
 mod config;
 mod discord;
+mod radio;
 mod eq;
 mod keybinds;
 mod history;

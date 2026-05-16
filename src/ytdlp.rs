@@ -5,7 +5,12 @@ use std::{path::PathBuf, process::Command, time::Duration};
 use crate::audio::Track;
 
 pub fn is_youtube_url(url: &str) -> bool {
-    url.contains("youtube.com/") || url.contains("youtu.be/") || url.contains("music.youtube.com/")
+    url.contains("youtube.com/")
+        || url.contains("youtu.be/")
+        || url.contains("music.youtube.com/")
+        || url.starts_with("ytsearch:")
+        || url.starts_with("ytmsearch:")
+        || url.starts_with("ytsearch5:")
 }
 
 #[allow(dead_code)]
@@ -101,15 +106,22 @@ struct YtInfo {
     entry_type: Option<String>,
 }
 
-/// Fetch track metadata for a URL (single video or playlist).
+/// Fetch track metadata for a URL (single video, playlist, or search query).
 /// Stores the watch-page URL in `path`; stream URL is resolved at play time.
 pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
+    // Expand bare ytsearch: to top 5 results
+    let resolved = if url.starts_with("ytsearch:") && !url[9..].starts_with(|c: char| c.is_ascii_digit()) {
+        format!("ytsearch5:{}", &url[9..])
+    } else {
+        url.to_string()
+    };
+
     let output = Command::new("yt-dlp")
         .args([
-            "-J",                // full JSON dump
-            "--flat-playlist",   // don't resolve individual stream URLs (fast)
+            "-J",
+            "--flat-playlist",
             "--no-warnings",
-            url,
+            &resolved,
         ])
         .output()
         .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;

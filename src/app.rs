@@ -1109,7 +1109,7 @@ impl App {
             }
             Action::OpenUrl => {
                 self.url_editing = true;
-                self.status = "Paste URL (YouTube, YT Music, Spotify) — Enter to load, Esc to cancel".into();
+                self.status = "URL/search — YouTube, ytmsearch:..., Spotify, radio M3U/PLS — Enter/Esc".into();
             }
             Action::EqPreset => {
                 let presets = crate::eq::PRESETS;
@@ -1318,7 +1318,34 @@ impl App {
             return;
         }
 
-        // HTTP stream (instant — no need for a thread)
+        // Radio playlist (M3U / PLS) — fetch and parse synchronously, then enqueue streams
+        let lower = url.to_lowercase();
+        let is_playlist_file = (lower.ends_with(".m3u")
+            || lower.ends_with(".m3u8")
+            || lower.ends_with(".pls"))
+            && !url.contains("spotify.com")
+            && !url.starts_with("spotify:")
+            && !crate::ytdlp::is_youtube_url(&url);
+
+        if is_playlist_file {
+            self.status = "Loading radio playlist…".into();
+            match crate::radio::fetch_playlist(&url) {
+                Ok(tracks) if !tracks.is_empty() => {
+                    let n = tracks.len();
+                    let was_empty = self.queue.is_empty();
+                    self.queue.extend(tracks);
+                    if was_empty {
+                        self.queue_state.select(Some(0));
+                    }
+                    self.status = format!("Added {n} stream(s) from playlist.");
+                }
+                Ok(_) => self.status = "Playlist contained no playable streams.".into(),
+                Err(e) => self.status = format!("Playlist error: {e}"),
+            }
+            return;
+        }
+
+        // Plain HTTP stream (instant — no thread needed)
         if !url.contains("spotify.com")
             && !url.starts_with("spotify:")
             && !crate::ytdlp::is_youtube_url(&url)
