@@ -53,6 +53,7 @@ pub enum Action {
     ToggleMini,
     LastfmLogin,
     SelectDevice,
+    EqTuner,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -178,6 +179,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('m')), Action::ToggleMini),
             (KeyChord::new(KeyCode::Char('F')), Action::LastfmLogin),
             (KeyChord::new(KeyCode::Char('D')), Action::SelectDevice),
+            (KeyChord::new(KeyCode::Char('E')), Action::EqTuner),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

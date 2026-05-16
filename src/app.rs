@@ -192,6 +192,8 @@ pub struct App {
     pub show_device_selector: bool,
     pub device_list: Vec<String>,
     pub device_selector_row: usize,
+    pub show_eq_tuner: bool,
+    pub eq_tuner_band: usize,
     pending_gapless_idx: Option<usize>,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
@@ -387,6 +389,8 @@ impl App {
             show_device_selector: false,
             device_list: Vec::new(),
             device_selector_row: 0,
+            show_eq_tuner: false,
+            eq_tuner_band: 0,
             pending_gapless_idx: None,
         })
     }
@@ -902,6 +906,11 @@ impl App {
             return;
         }
 
+        if self.show_eq_tuner {
+            self.handle_eq_tuner_key(key);
+            return;
+        }
+
         if self.show_playlist_browser {
             self.handle_playlist_browser_key(key);
             return;
@@ -1155,6 +1164,10 @@ impl App {
             }
             Action::LastfmLogin => self.lastfm_login(),
             Action::SelectDevice => self.open_device_selector(),
+            Action::EqTuner => {
+                self.show_eq_tuner = !self.show_eq_tuner;
+                self.eq_tuner_band = 0;
+            }
             Action::ToggleFavorite => {
                 let path = match self.focus {
                     Pane::Library => self.selected_library_track().map(|t| t.path),
@@ -1483,6 +1496,51 @@ impl App {
                         Err(e) => self.status = format!("Device error: {e}"),
                     }
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_eq_tuner_key(&mut self, key: KeyEvent) {
+        let eq = self.player.eq();
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('E') => {
+                self.show_eq_tuner = false;
+            }
+            KeyCode::Left | KeyCode::Char('h') => match self.eq_tuner_band {
+                0 => eq.adjust_low(-1.0),
+                1 => eq.adjust_mid(-1.0),
+                _ => eq.adjust_high(-1.0),
+            },
+            KeyCode::Right | KeyCode::Char('l') => match self.eq_tuner_band {
+                0 => eq.adjust_low(1.0),
+                1 => eq.adjust_mid(1.0),
+                _ => eq.adjust_high(1.0),
+            },
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.eq_tuner_band > 0 {
+                    self.eq_tuner_band -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.eq_tuner_band < 2 {
+                    self.eq_tuner_band += 1;
+                }
+            }
+            KeyCode::Char('0') => {
+                let snap = eq.snapshot();
+                let presets = crate::eq::PRESETS;
+                let next = presets
+                    .iter()
+                    .position(|(_, s)| {
+                        (s.low_db - snap.low_db).abs() < 0.1
+                            && (s.mid_db - snap.mid_db).abs() < 0.1
+                            && (s.high_db - snap.high_db).abs() < 0.1
+                    })
+                    .map(|i| (i + 1) % presets.len())
+                    .unwrap_or(0);
+                eq.set(presets[next].1);
+                self.status = format!("EQ Preset: {}", presets[next].0);
             }
             _ => {}
         }

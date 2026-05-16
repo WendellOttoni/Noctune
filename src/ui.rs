@@ -56,6 +56,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_device_selector {
         render_device_selector(f, area, app);
     }
+    if app.show_eq_tuner {
+        render_eq_tuner(f, area, app);
+    }
 }
 
 fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
@@ -325,6 +328,208 @@ fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, popup, &mut state);
 }
 
+fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let eq = app.player.eq().snapshot();
+
+    const CURVE_H: usize = 13; // rows for curve (+12 to -12 dB, 2dB per row)
+    let w = 70.min(area.width.saturating_sub(4)).max(40);
+    // curve + 1 freq row + 1 blank + 3 sliders + 1 blank + 1 preset + 1 hint + 2 border
+    let h = (CURVE_H as u16 + 10).min(area.height.saturating_sub(2));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let secondary = parse_color(&theme.colors.secondary);
+
+    // curve_w: inner width minus 5-char dB label and axis bar
+    let inner_w = (w as usize).saturating_sub(2);
+    let curve_w = inner_w.saturating_sub(6).max(20);
+
+    // --- Frequency response curve ---
+    // Approximated filter responses (simplified transfer functions for display)
+    let curve_rows: Vec<usize> = (0..curve_w)
+        .map(|col| {
+            let t = col as f32 / (curve_w - 1).max(1) as f32;
+            // Log-spaced 20Hz – 20kHz
+            let freq = 20.0f32 * (1000.0f32).powf(t);
+
+            let fc_low = 200.0f32;
+            let fc_mid = 1000.0f32;
+            let fc_high = 5000.0f32;
+
+            // Low shelf: RC-like rolloff
+            let g_low = eq.low_db * fc_low * fc_low / (freq * freq + fc_low * fc_low);
+            // Peaking: bandwidth-based, peaks at fc_mid
+            let bw = freq / fc_mid - fc_mid / freq;
+            let g_mid = eq.mid_db / (1.0 + (bw * 0.9).powi(2));
+            // High shelf: RC-like highpass
+            let g_high = eq.high_db * freq * freq / (freq * freq + fc_high * fc_high);
+
+            let total = (g_low + g_mid + g_high).clamp(-12.0, 12.0);
+            let row = ((12.0 - total) / 24.0 * (CURVE_H - 1) as f32).round() as usize;
+            row.min(CURVE_H - 1)
+        })
+        .collect();
+
+    // zero is at row 6 (0dB = midpoint of 0..12)
+    let zero_row = (CURVE_H - 1) / 2;
+
+    // --- Build Lines ---
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Curve rows
+    for row in 0..CURVE_H {
+        let db = 12.0 - row as f32 * 24.0 / (CURVE_H - 1) as f32;
+        let label = if (db as i32).abs() % 6 == 0 {
+            format!("{:+3.0} ", db)
+        } else {
+            "     ".to_string()
+        };
+        let axis_char = if row == zero_row { "┼" } else { "│" };
+
+        let mut spans: Vec<Span> = vec![
+            Span::styled(label, Style::default().fg(muted)),
+            Span::styled(axis_char, Style::default().fg(muted)),
+        ];
+
+        for col in 0..curve_w {
+            let is_curve = curve_rows[col] == row;
+            let is_zero = row == zero_row;
+            // connect adjacent curve points that skip this row
+            let is_fill = if col > 0 && col < curve_w - 1 {
+                let prev = curve_rows[col.saturating_sub(1)] as isize;
+                let next = curve_rows[(col + 1).min(curve_w - 1)] as isize;
+                let r = row as isize;
+                (prev < r && r < next) || (next < r && r < prev)
+            } else {
+                false
+            };
+            let span = if is_curve {
+                Span::styled("●", Style::default().fg(accent))
+            } else if is_fill {
+                Span::styled("│", Style::default().fg(accent))
+            } else if is_zero {
+                Span::styled("─", Style::default().fg(muted))
+            } else {
+                Span::raw(" ")
+            };
+            spans.push(span);
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // Frequency axis labels row
+    {
+        // Place labels at approximate column positions for key frequencies
+        let freq_markers: &[(&str, f32)] = &[
+            ("20Hz", 20.0),
+            ("200", 200.0),
+            ("1k", 1000.0),
+            ("5k", 5000.0),
+            ("20k", 20000.0),
+        ];
+        let mut freq_row = vec![' '; curve_w];
+        for (label, freq) in freq_markers {
+            let t = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
+            let col = (t * (curve_w - 1) as f32).round() as usize;
+            let col = col.min(curve_w.saturating_sub(label.len()));
+            for (i, ch) in label.chars().enumerate() {
+                if col + i < curve_w {
+                    freq_row[col + i] = ch;
+                }
+            }
+        }
+        let freq_str: String = freq_row.iter().collect();
+        lines.push(Line::from(vec![
+            Span::styled("     ", Style::default()),
+            Span::styled("└", Style::default().fg(muted)),
+            Span::styled(freq_str, Style::default().fg(muted)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Band sliders
+    let bands = [
+        ("Low  200Hz", eq.low_db, app.eq_tuner_band == 0),
+        ("Mid  1kHz ", eq.mid_db, app.eq_tuner_band == 1),
+        ("High 5kHz ", eq.high_db, app.eq_tuner_band == 2),
+    ];
+    let slider_w = inner_w.saturating_sub(26).max(10);
+    for (label, db, selected) in &bands {
+        let cursor = if *selected { "▶" } else { " " };
+        let cursor_style = if *selected {
+            Style::default().fg(accent)
+        } else {
+            Style::default().fg(muted)
+        };
+        let pos = ((db + 12.0) / 24.0 * (slider_w - 1) as f32).round() as usize;
+        let pos = pos.min(slider_w - 1);
+        let bar: String = (0..slider_w)
+            .map(|i| if i == pos { '●' } else { '─' })
+            .collect();
+        let db_label = format!("{:+.0} dB", db);
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", cursor), cursor_style),
+            Span::styled(*label, Style::default().fg(if *selected { fg } else { muted })),
+            Span::styled("  ├", Style::default().fg(muted)),
+            Span::styled(bar, Style::default().fg(if *selected { accent } else { secondary })),
+            Span::styled("┤", Style::default().fg(muted)),
+            Span::styled(format!(" {:<7}", db_label), Style::default().fg(if *selected { accent } else { fg })),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Preset buttons
+    let current = crate::eq::PRESETS.iter().position(|(_, s)| {
+        (s.low_db - eq.low_db).abs() < 0.1
+            && (s.mid_db - eq.mid_db).abs() < 0.1
+            && (s.high_db - eq.high_db).abs() < 0.1
+    });
+    let mut preset_spans: Vec<Span> = vec![Span::styled(" ", Style::default())];
+    for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate() {
+        let active = current == Some(i);
+        let style = if active {
+            Style::default().fg(parse_color(&theme.colors.background)).bg(accent)
+        } else {
+            Style::default().fg(muted)
+        };
+        preset_spans.push(Span::styled(format!(" {} ", name), style));
+        preset_spans.push(Span::raw(" "));
+    }
+    lines.push(Line::from(preset_spans));
+
+    lines.push(Line::from(vec![
+        Span::styled("  ← → ", Style::default().fg(accent)),
+        Span::styled("adjust  ", Style::default().fg(muted)),
+        Span::styled("↑↓ ", Style::default().fg(accent)),
+        Span::styled("band  ", Style::default().fg(muted)),
+        Span::styled("0 ", Style::default().fg(accent)),
+        Span::styled("preset  ", Style::default().fg(muted)),
+        Span::styled("Esc ", Style::default().fg(accent)),
+        Span::styled("close", Style::default().fg(muted)),
+    ]));
+
+    let p = Paragraph::new(Text::from(lines))
+        .style(Style::default().fg(fg))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border(true))
+                .title(Span::styled(" EQ Tuner ", theme.accent())),
+        );
+    f.render_widget(p, popup);
+}
+
 fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let eq = app.player.eq().snapshot();
@@ -413,8 +618,8 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
-    let w = 56.min(area.width.saturating_sub(4));
-    let h = 22.min(area.height.saturating_sub(4));
+    let w = 58.min(area.width.saturating_sub(4));
+    let h = 42.min(area.height.saturating_sub(4));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -425,62 +630,69 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
 
     let lines: Vec<Line> = vec![
         Line::from("  Playback"),
-        Line::from("    Space      play / pause"),
-        Line::from("    n / p      next / previous"),
-        Line::from("    s          stop"),
-        Line::from("    ← / →      seek -5s / +5s"),
-        Line::from("    + / -      volume up / down"),
+        Line::from("    Space        play / pause"),
+        Line::from("    n / p        next / previous"),
+        Line::from("    s            stop"),
+        Line::from("    ← / →        seek -5s / +5s"),
+        Line::from("    + / -        volume up / down"),
+        Line::from("    m            toggle mini mode"),
         Line::from(""),
         Line::from("  Library / Queue"),
-        Line::from("    Tab        switch focus"),
-        Line::from("    ↑↓ / jk    move selection"),
-        Line::from("    Enter      play"),
-        Line::from("    a / d      add / remove from queue"),
-        Line::from("    c          clear queue (confirm twice)"),
-        Line::from("    u          undo last clear / remove"),
-        Line::from("    /          search (title, artist, album, genre, year)"),
-        Line::from("    Shift+H    toggle recently played view"),
+        Line::from("    Tab          switch focus"),
+        Line::from("    ↑↓ / jk      move selection"),
+        Line::from("    Enter        play selected"),
+        Line::from("    a / d        add / remove from queue"),
+        Line::from("    c            clear queue (confirm twice)"),
+        Line::from("    u            undo last clear / remove"),
+        Line::from("    f            toggle favorite"),
+        Line::from("    /            search (title, artist, album, genre, year)"),
+        Line::from("    H            toggle recently played view"),
         Line::from(""),
         Line::from("  Modes & playlists"),
-        Line::from("    Shift+S    toggle shuffle"),
-        Line::from("    r          cycle repeat (off/all/one)"),
-        Line::from("    o          cycle sort (title/artist/album)"),
-        Line::from("    Shift+T    sleep timer (30 min)"),
-        Line::from("    w          save queue as .m3u"),
-        Line::from("    Shift+L    load latest .m3u"),
+        Line::from("    S            toggle shuffle"),
+        Line::from("    r            cycle repeat (off/all/one)"),
+        Line::from("    o            cycle sort (title/artist/album/year)"),
+        Line::from("    T            sleep timer (30 min)"),
+        Line::from("    w            save queue as .m3u"),
+        Line::from("    L            load / browse saved playlists"),
         Line::from(""),
-        Line::from("  Spotify (set client_id in config first)"),
-        Line::from("    Shift+P    open browser login (OAuth PKCE)"),
-        Line::from("    @          toggle play/pause on Spotify"),
-        Line::from(""),
-        Line::from("  View & mouse"),
-        Line::from("    Shift+V    toggle flat / album view"),
-        Line::from("    Click      play library / queue row"),
-        Line::from("    Click bar  seek to position"),
+        Line::from("  View"),
+        Line::from("    V            toggle flat / album view"),
+        Line::from("    Shift+Tab    cycle color themes"),
+        Line::from("    Click        play library / queue row"),
+        Line::from("    Click bar    seek to position"),
+        Line::from("    Scroll       scroll list"),
         Line::from(""),
         Line::from("  EQ (-12..+12 dB)"),
-        Line::from("    1 / 2      low  -/+"),
-        Line::from("    3 / 4      mid  -/+"),
-        Line::from("    5 / 6      high -/+"),
-        Line::from("    0          cycle preset (Flat/Bass/Vocal/Treble/Loud)"),
+        Line::from("    1 / 2        low  -/+"),
+        Line::from("    3 / 4        mid  -/+"),
+        Line::from("    5 / 6        high -/+"),
+        Line::from("    0            cycle preset (Flat/Bass/Vocal/Treble/Loud)"),
+        Line::from("    E            open EQ tuner popup"),
         Line::from(""),
-        Line::from("  Library"),
-        Line::from("    Shift+R    rescan music_dirs"),
-        Line::from("    Shift+I    track info popup"),
-        Line::from("    Shift+Tab  cycle themes"),
+        Line::from("  Audio & Visualizer"),
+        Line::from("    e            open audio panel (crossfade, compressor…)"),
+        Line::from("    v            cycle viz mode (spectrum/waveform/vu-meter)"),
+        Line::from("    [ / ]        viz sensitivity -/+"),
+        Line::from("    G            cycle ReplayGain (off/track/album)"),
         Line::from(""),
-        Line::from("  Online"),
-        Line::from("    i          open URL (YouTube, YT Music, Spotify)"),
+        Line::from("  Library tools"),
+        Line::from("    R            rescan music_dirs"),
+        Line::from("    I            track info popup"),
+        Line::from("    D            select audio output device"),
         Line::from(""),
-        Line::from("  Visualizer"),
-        Line::from("    v          cycle mode (spectrum/waveform/vu-meter)"),
-        Line::from("    [ / ]      sensitivity -/+ (×0.1..×3.0)"),
-        Line::from("    Shift+G    cycle ReplayGain (off/track/album)"),
+        Line::from("  Online / Streaming"),
+        Line::from("    i            open URL prompt"),
+        Line::from("                 • YouTube / youtu.be links"),
+        Line::from("                 • ytsearch:query  (top 5 results)"),
+        Line::from("                 • ytmsearch:query (YouTube Music)"),
+        Line::from("                 • M3U / PLS radio playlist URLs"),
+        Line::from("                 • Direct HTTP stream URL"),
         Line::from(""),
-        Line::from("  Audio panel"),
-        Line::from("    e          open/close panel"),
-        Line::from("    ↑↓ / jk    select parameter"),
-        Line::from("    ← / →      decrease / increase"),
+        Line::from("  Integrations"),
+        Line::from("    F            Last.fm login (press twice to confirm)"),
+        Line::from("    P            Spotify browser login (OAuth PKCE)"),
+        Line::from("    @            Spotify play/pause toggle"),
     ];
 
     let p = Paragraph::new(Text::from(lines))
@@ -490,7 +702,8 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
                 .title(Span::styled(" Help — press any key ", theme.accent())),
-        );
+        )
+        .wrap(Wrap { trim: false });
     f.render_widget(p, popup);
 }
 
