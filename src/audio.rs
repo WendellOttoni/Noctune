@@ -43,6 +43,8 @@ pub struct Track {
     pub title: String,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<String>,
     pub duration: Option<Duration>,
 }
 
@@ -58,6 +60,8 @@ impl Track {
             title: fallback_title,
             artist: None,
             album: None,
+            genre: None,
+            year: None,
             duration: None,
         }
     }
@@ -70,6 +74,8 @@ impl Track {
         }
         t.artist = meta.artist;
         t.album = meta.album;
+        t.genre = meta.genre;
+        t.year = meta.year;
         t.duration = meta.duration;
         t
     }
@@ -337,6 +343,8 @@ impl Track {
             title: format!("{} (stream)", url),
             artist: None,
             album: None,
+            genre: None,
+            year: None,
             duration: None,
         }
     }

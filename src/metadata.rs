@@ -11,6 +11,8 @@ pub struct TrackMeta {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<String>,
     pub duration: Option<Duration>,
 }
 
@@ -122,6 +124,9 @@ pub fn probe(path: &Path) -> TrackMeta {
                 StandardTagKey::Artist if meta.artist.is_none() => meta.artist = Some(value),
                 StandardTagKey::AlbumArtist if meta.artist.is_none() => meta.artist = Some(value),
                 StandardTagKey::Album if meta.album.is_none() => meta.album = Some(value),
+                StandardTagKey::Genre if meta.genre.is_none() => meta.genre = Some(value),
+                StandardTagKey::Date | StandardTagKey::ReleaseDate
+                    if meta.year.is_none() => meta.year = Some(value),
                 _ => {}
             }
         }

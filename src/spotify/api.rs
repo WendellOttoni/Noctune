@@ -175,6 +175,8 @@ impl SpotifyApi {
             title: t.name,
             artist,
             album: Some(t.album.name),
+            genre: None,
+            year: None,
             duration: Some(Duration::from_millis(t.duration_ms)),
         })
     }
@@ -222,6 +224,8 @@ impl SpotifyApi {
                     title: t.name,
                     artist: t.artists.first().map(|a| a.name.clone()),
                     album: Some(t.album.name),
+                    genre: None,
+                    year: None,
                     duration: Some(Duration::from_millis(t.duration_ms)),
                 });
             }
@@ -263,6 +267,8 @@ impl SpotifyApi {
                     title: t.name,
                     artist: t.artists.first().map(|a| a.name.clone()),
                     album: None,
+                    genre: None,
+                    year: None,
                     duration: Some(Duration::from_millis(t.duration_ms)),
                 });
             }

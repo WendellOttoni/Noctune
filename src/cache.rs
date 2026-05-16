@@ -15,6 +15,8 @@ pub struct CacheEntry {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<String>,
     pub duration_ms: Option<u64>,
 }
 
@@ -56,6 +58,8 @@ impl MetadataCache {
             title: meta.title.clone(),
             artist: meta.artist.clone(),
             album: meta.album.clone(),
+            genre: meta.genre.clone(),
+            year: meta.year.clone(),
             duration_ms: meta.duration.map(|d| d.as_millis() as u64),
         };
         let track = track_from_cache(path, &entry);
@@ -89,6 +93,8 @@ fn track_from_cache(path: &Path, entry: &CacheEntry) -> Track {
         title: entry.title.clone().unwrap_or(fallback),
         artist: entry.artist.clone(),
         album: entry.album.clone(),
+        genre: entry.genre.clone(),
+        year: entry.year.clone(),
         duration: entry.duration_ms.map(Duration::from_millis),
     }
 }

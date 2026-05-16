@@ -44,6 +44,8 @@ pub enum Action {
     CycleTheme,
     VizSensUp,
     VizSensDown,
+    UndoQueue,
+    RecentlyPlayed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -160,6 +162,8 @@ impl Bindings {
             (KeyChord::new(KeyCode::BackTab), Action::CycleTheme),
             (KeyChord::new(KeyCode::Char('[')), Action::VizSensDown),
             (KeyChord::new(KeyCode::Char(']')), Action::VizSensUp),
+            (KeyChord::new(KeyCode::Char('u')), Action::UndoQueue),
+            (KeyChord::new(KeyCode::Char('H')), Action::RecentlyPlayed),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

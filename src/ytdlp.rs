@@ -149,6 +149,8 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
         title,
         artist,
         album: None,
+        genre: None,
+        year: None,
         duration,
     })
 }

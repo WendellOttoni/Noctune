@@ -134,8 +134,10 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from("    ↑↓ / jk    move selection"),
         Line::from("    Enter      play"),
         Line::from("    a / d      add / remove from queue"),
-        Line::from("    c          clear queue"),
-        Line::from("    /          search library"),
+        Line::from("    c          clear queue (confirm twice)"),
+        Line::from("    u          undo last clear / remove"),
+        Line::from("    /          search (title, artist, album, genre, year)"),
+        Line::from("    Shift+H    toggle recently played view"),
         Line::from(""),
         Line::from("  Modes & playlists"),
         Line::from("    Shift+S    toggle shuffle"),
@@ -316,15 +318,20 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
 
-    let total = app.library.len();
     let shown = rows
         .iter()
         .filter(|r| matches!(r, crate::app::LibraryRow::Track(_)))
         .count();
-    let title = if app.search_active() || !app.search_query().is_empty() {
-        format!(" Library [{}/{}] /{} ", shown, total, app.search_query())
+    let title = if app.view_mode == crate::app::ViewMode::RecentlyPlayed {
+        if app.search_active() || !app.search_query().is_empty() {
+            format!(" Recently Played [{}/{}] /{} ", shown, app.history.len(), app.search_query())
+        } else {
+            format!(" Recently Played ({}) ", app.history.len())
+        }
+    } else if app.search_active() || !app.search_query().is_empty() {
+        format!(" Library [{}/{}] /{} ", shown, app.library.len(), app.search_query())
     } else {
-        format!(" Library ({}) ", total)
+        format!(" Library ({}) ", app.library.len())
     };
     let list = List::new(items)
         .block(
@@ -345,6 +352,8 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     if rows.is_empty() {
         let msg = if !app.search_query().is_empty() {
             format!(" No matches for /{}\n\n Press Esc to clear the search.", app.search_query())
+        } else if app.view_mode == crate::app::ViewMode::RecentlyPlayed {
+            " No recently played tracks.\n\n Play some tracks and they will appear here.\n Press Shift+H to return to the library.".to_string()
         } else {
             " Library is empty.\n\n Add paths to music_dirs in your config.toml\n or press Shift+R to rescan.\n Press i to paste a YouTube / Spotify URL.".to_string()
         };
@@ -667,10 +676,15 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(area);
 
+    const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let spinner_char = SPINNER[(app.tick_count as usize / 3) % SPINNER.len()];
+
     let status_text = if app.url_editing {
         format!(" URL> {}_", app.url_input)
     } else if app.search_active() {
         format!(" /{}", app.search_query())
+    } else if app.loading {
+        format!(" {} {}", spinner_char, app.status)
     } else {
         format!(" {}", app.status)
     };

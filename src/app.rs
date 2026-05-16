@@ -112,6 +112,10 @@ pub struct App {
     pub last_drag_seek: Option<std::time::Instant>,
     pub pending_url: Option<String>,
     pub clear_confirm_until: Option<std::time::Instant>,
+    pub loading: bool,
+    pub tick_count: u64,
+    pub pending_rescan: bool,
+    pub queue_undo: Option<(Vec<Track>, Option<usize>)>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -132,6 +136,7 @@ pub enum LibraryRow {
 pub enum ViewMode {
     Flat,
     Albums,
+    RecentlyPlayed,
 }
 
 impl ViewMode {
@@ -139,12 +144,14 @@ impl ViewMode {
         match self {
             ViewMode::Flat => ViewMode::Albums,
             ViewMode::Albums => ViewMode::Flat,
+            ViewMode::RecentlyPlayed => ViewMode::Flat,
         }
     }
     pub fn label(self) -> &'static str {
         match self {
             ViewMode::Flat => "flat",
             ViewMode::Albums => "albums",
+            ViewMode::RecentlyPlayed => "recently played",
         }
     }
 }
@@ -219,6 +226,10 @@ impl App {
             last_drag_seek: None,
             pending_url: None,
             clear_confirm_until: None,
+            loading: false,
+            tick_count: 0,
+            pending_rescan: false,
+            queue_undo: None,
         })
     }
 
@@ -231,27 +242,35 @@ impl App {
     }
 
     pub fn visible_library(&self) -> Vec<&Track> {
-        let base: Vec<&Track> = if self.search.is_empty() {
-            self.library.iter().collect()
+        let source: Box<dyn Iterator<Item = &Track>> = if self.view_mode == ViewMode::RecentlyPlayed {
+            Box::new(self.history.iter())
+        } else {
+            Box::new(self.library.iter())
+        };
+
+        if self.search.is_empty() {
+            source.collect()
         } else {
             let needle = self.search.to_lowercase();
-            self.library
-                .iter()
+            source
                 .filter(|t| {
-                    t.title.to_lowercase().contains(&needle)
-                        || t.artist
-                            .as_deref()
-                            .map(|a| a.to_lowercase().contains(&needle))
-                            .unwrap_or(false)
+                    let matches = |s: &str| s.to_lowercase().contains(&needle);
+                    matches(&t.title)
+                        || t.artist.as_deref().map(matches).unwrap_or(false)
+                        || t.album.as_deref().map(matches).unwrap_or(false)
+                        || t.genre.as_deref().map(matches).unwrap_or(false)
+                        || t.year.as_deref().map(matches).unwrap_or(false)
                 })
                 .collect()
-        };
-        base
+        }
     }
 
     pub fn library_rows(&self) -> Vec<LibraryRow> {
         let visible = self.visible_library();
-        if self.view_mode == ViewMode::Flat || self.sort != SortMode::Album {
+        if self.view_mode == ViewMode::Flat
+            || self.view_mode == ViewMode::RecentlyPlayed
+            || self.sort != SortMode::Album
+        {
             return visible
                 .into_iter()
                 .map(|t| LibraryRow::Track(t.clone()))
@@ -295,8 +314,18 @@ impl App {
     }
 
     fn tick(&mut self) -> Result<()> {
+        self.tick_count = self.tick_count.wrapping_add(1);
+
+        if self.pending_rescan {
+            self.pending_rescan = false;
+            self.rescan_library();
+            self.loading = false;
+            return Ok(());
+        }
+
         if let Some(url) = self.pending_url.take() {
             self.load_url(url);
+            self.loading = false;
             return Ok(());
         }
         if let Some(when) = self.sleep_until {
@@ -400,6 +429,7 @@ impl App {
                     self.url_editing = false;
                     if !url.is_empty() {
                         self.status = format!("Loading {url}…");
+                        self.loading = true;
                         self.pending_url = Some(url);
                     }
                 }
@@ -510,7 +540,10 @@ impl App {
             Action::SelectionDown => self.move_selection(1),
             Action::ActivateSelection => self.activate_selection(),
             Action::Enqueue => self.enqueue_selection(),
-            Action::RemoveQueueItem => self.remove_from_queue(),
+            Action::RemoveQueueItem => {
+                self.save_queue_undo();
+                self.remove_from_queue();
+            }
             Action::ClearQueue => self.clear_queue(),
             Action::SpotifyLogin => self.spotify_login(),
             Action::SpotifyToggle => self.spotify_toggle(),
@@ -558,11 +591,30 @@ impl App {
                 self.player.eq().set(state);
                 self.status = format!("EQ preset: {name}");
             }
-            Action::Rescan => self.rescan_library(),
+            Action::Rescan => {
+                self.status = "Rescanning library…".into();
+                self.loading = true;
+                self.pending_rescan = true;
+            }
             Action::TrackInfo => self.show_info = true,
             Action::CycleTheme => self.cycle_theme(),
             Action::VizSensUp => self.adjust_viz_sensitivity(crate::visualizer::SENS_STEP),
             Action::VizSensDown => self.adjust_viz_sensitivity(-crate::visualizer::SENS_STEP),
+            Action::UndoQueue => self.undo_queue(),
+            Action::RecentlyPlayed => {
+                if self.view_mode == ViewMode::RecentlyPlayed {
+                    self.view_mode = ViewMode::Flat;
+                    self.status = "View: library".into();
+                } else {
+                    self.view_mode = ViewMode::RecentlyPlayed;
+                    self.status = format!("Recently played ({} tracks)", self.history.len());
+                }
+                self.library_state.select(if self.visible_library().is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+            }
         }
     }
 
@@ -929,11 +981,28 @@ impl App {
         }
         self.clear_confirm_until = None;
         let n = self.queue.len();
+        self.save_queue_undo();
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
         self.player.stop();
-        self.status = format!("Queue cleared ({n} tracks).");
+        self.status = format!("Queue cleared ({n} tracks). Press u to undo.");
+    }
+
+    fn save_queue_undo(&mut self) {
+        self.queue_undo = Some((self.queue.clone(), self.queue_index));
+    }
+
+    fn undo_queue(&mut self) {
+        let Some((queue, idx)) = self.queue_undo.take() else {
+            self.status = "Nothing to undo.".into();
+            return;
+        };
+        let n = queue.len();
+        self.queue = queue;
+        self.queue_index = idx;
+        self.queue_state.select(idx);
+        self.status = format!("Undo: restored {n} tracks.");
     }
 
     fn play_current(&mut self) {
