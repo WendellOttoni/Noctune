@@ -188,6 +188,7 @@ pub struct App {
     lastfm_pending_token: Option<String>,
     lastfm_scrobble_info: Option<(String, String, u64)>,
     lastfm_scrobbled: bool,
+    discord_tx: Option<std::sync::mpsc::Sender<crate::discord::Cmd>>,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -261,6 +262,12 @@ impl App {
         let spotify_client_id = config.spotify.client_id.clone();
         let spotify_redirect_uri = config.spotify.redirect_uri();
         let spotify_port = config.spotify.redirect_port;
+
+        let discord_tx = if config.discord.is_configured() {
+            Some(crate::discord::spawn(config.discord.client_id.clone()))
+        } else {
+            None
+        };
 
         let lastfm = if config.lastfm.is_configured() {
             crate::lastfm::load_session().and_then(|s| {
@@ -372,6 +379,7 @@ impl App {
             lastfm_pending_token: None,
             lastfm_scrobble_info: None,
             lastfm_scrobbled: false,
+            discord_tx,
         })
     }
 
@@ -943,7 +951,12 @@ impl App {
             Action::PlayPause => self.player.toggle(),
             Action::Next => self.next(),
             Action::Prev => self.prev(),
-            Action::Stop => self.player.stop(),
+            Action::Stop => {
+                self.player.stop();
+                if let Some(tx) = &self.discord_tx {
+                    let _ = tx.send(crate::discord::Cmd::Clear);
+                }
+            }
             Action::Shuffle => {
                 self.shuffle = !self.shuffle;
                 self.status = format!("Shuffle: {}", if self.shuffle { "on" } else { "off" });
@@ -1657,8 +1670,15 @@ impl App {
                 let ts = crate::lastfm::now_unix();
                 self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
                 if let Some(lfm) = self.lastfm.clone() {
-                    std::thread::spawn(move || {
-                        let _ = lfm.update_now_playing(&artist, &title);
+                    let a = artist.clone();
+                    let ti = title.clone();
+                    std::thread::spawn(move || { let _ = lfm.update_now_playing(&a, &ti); });
+                }
+                if let Some(tx) = &self.discord_tx {
+                    let _ = tx.send(crate::discord::Cmd::Update {
+                        title: title.clone(),
+                        artist: artist.clone(),
+                        start_secs: ts as i64,
                     });
                 }
                 self.push_history(t);
