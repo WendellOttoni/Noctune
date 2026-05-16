@@ -15,6 +15,14 @@ use crate::{
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
+    if app.mini_mode {
+        render_mini(f, area, app);
+        if app.show_help {
+            render_help(f, area, &app.theme);
+        }
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -115,6 +123,90 @@ fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             .title(Span::styled(" Track info — press any key ", app.theme.accent())),
     );
     f.render_widget(p, popup);
+}
+
+fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
+    let theme = &app.theme;
+    let fg = parse_color(&theme.colors.foreground);
+    let accent = parse_color(&theme.colors.accent);
+    let muted = parse_color(&theme.colors.muted);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // track title + state
+            Constraint::Length(1), // progress bar
+            Constraint::Length(1), // time + volume + modes
+            Constraint::Length(1), // eq row
+            Constraint::Length(1), // status
+        ])
+        .split(area);
+
+    // Row 0: play state + title
+    let state_sym = if app.player.current().is_none() {
+        theme.symbols.stop.clone()
+    } else if app.player.is_paused() {
+        theme.symbols.pause.clone()
+    } else {
+        theme.symbols.play.clone()
+    };
+    let title = app.player.current()
+        .map(|t| t.display())
+        .unwrap_or_else(|| "— nothing playing —".into());
+    let queue_pos = match app.queue_index {
+        Some(i) if !app.queue.is_empty() => format!(" [{}/{}]", i + 1, app.queue.len()),
+        _ => String::new(),
+    };
+    f.render_widget(Paragraph::new(Line::from(vec![
+        Span::styled(format!("{state_sym}  "), Style::default().fg(accent)),
+        Span::styled(title, Style::default().fg(fg).add_modifier(Modifier::BOLD)),
+        Span::styled(queue_pos, Style::default().fg(muted)),
+        Span::styled("  [m] full", Style::default().fg(muted)),
+    ])), rows[0]);
+
+    // Row 1: progress bar
+    let elapsed = app.player.elapsed();
+    let total = app.player.current().and_then(|t| t.duration);
+    let progress_line = build_progress(elapsed, total, rows[1].width.saturating_sub(2) as usize, theme);
+    f.render_widget(Paragraph::new(progress_line), rows[1]);
+    app.layout.progress = rows[1];
+    app.layout.progress_total_ms = total.map(|d| d.as_millis() as u64).unwrap_or(0);
+
+    // Row 2: time / volume / modes
+    let total_str = total.map(format_duration).unwrap_or_else(|| "--:--".into());
+    let vol_pct = (app.player.volume() * 100.0).round() as u32;
+    let shuf = if app.shuffle { " shuf" } else { "" };
+    let rep = match app.repeat {
+        crate::app::RepeatMode::Off => "",
+        crate::app::RepeatMode::All => " rep:all",
+        crate::app::RepeatMode::One => " rep:one",
+    };
+    let rg = match app.replaygain_mode {
+        crate::app::ReplayGainMode::Off => "",
+        crate::app::ReplayGainMode::Track => " rg:trk",
+        crate::app::ReplayGainMode::Album => " rg:alb",
+    };
+    f.render_widget(Paragraph::new(Line::from(vec![
+        Span::styled(
+            format!(" {} / {}  vol:{}%{shuf}{rep}{rg}", format_duration(elapsed), total_str, vol_pct),
+            Style::default().fg(muted),
+        ),
+    ])), rows[2]);
+
+    // Row 3: EQ
+    let eq = app.player.eq().snapshot();
+    let eq_line = build_eq_row(&eq, theme);
+    f.render_widget(Paragraph::new(eq_line), rows[3]);
+
+    // Row 4: status
+    const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let spinner_char = SPINNER[(app.tick_count as usize / 3) % SPINNER.len()];
+    let status_text = if app.is_loading() {
+        format!(" {} {}", spinner_char, app.status)
+    } else {
+        format!(" {}", app.status)
+    };
+    f.render_widget(Paragraph::new(Span::styled(status_text, Style::default().fg(parse_color(&theme.colors.secondary)))), rows[4]);
 }
 
 fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {

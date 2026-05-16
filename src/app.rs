@@ -182,6 +182,7 @@ pub struct App {
     pub play_threshold_secs: f64,
     pub browser_path: Option<PathBuf>,
     pub browser_music_root_idx: usize,
+    pub mini_mode: bool,
     current_play_recorded: bool,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
@@ -343,6 +344,7 @@ impl App {
             current_play_recorded: false,
             browser_path: None,
             browser_music_root_idx: 0,
+            mini_mode: false,
             playlist_name_editing: false,
             playlist_name_input: String::new(),
             show_playlist_browser: false,
@@ -1041,6 +1043,9 @@ impl App {
             Action::CycleVizMode => {
                 self.viz_mode = self.viz_mode.cycle();
                 self.status = format!("Visualizer: {}", self.viz_mode.label());
+            }
+            Action::ToggleMini => {
+                self.mini_mode = !self.mini_mode;
             }
             Action::ToggleFavorite => {
                 let path = match self.focus {

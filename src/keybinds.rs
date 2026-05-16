@@ -50,6 +50,7 @@ pub enum Action {
     ReplayGain,
     CycleVizMode,
     ToggleFavorite,
+    ToggleMini,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -172,6 +173,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('G')), Action::ReplayGain),
             (KeyChord::new(KeyCode::Char('v')), Action::CycleVizMode),
             (KeyChord::new(KeyCode::Char('f')), Action::ToggleFavorite),
+            (KeyChord::new(KeyCode::Char('m')), Action::ToggleMini),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {
