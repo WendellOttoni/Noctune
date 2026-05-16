@@ -775,68 +775,92 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
         return;
     }
 
-    // 1. Smoothing + interpolation + peak decay via waveform_data()
-    let (samples, peaks) = app.tap.waveform_data(w);
+    let (samples, _) = app.tap.waveform_data(w);
     let mid = h / 2;
-    let half_f = mid as f32;
 
+    let bg       = parse_color(&app.theme.colors.background);
     let accent   = parse_color(&app.theme.colors.accent);
     let primary  = parse_color(&app.theme.colors.primary);
     let secondary = parse_color(&app.theme.colors.secondary);
     let muted    = parse_color(&app.theme.colors.muted);
 
-    // 3. Unicode density — 9 levels: space + ▁▂▃▄▅▆▇█
-    let sub: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    // sub[k]: fills (k+1)/8 from BOTTOM with foreground color.
+    // Inverted (fg=bg, bg=fill): fills (7-k)/8 from TOP with fill color.
+    let sub: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+    // Virtual pixel grid: h*8 rows total. s=+1 → pixel 0 (top), s=-1 → pixel h*8-1 (bottom).
+    let half_px = (h * 4) as f32;
+
+    struct Col {
+        trace_row: usize,
+        trace_sub: usize, // 0 = top of cell, 7 = bottom of cell
+        fill_lo:   usize, // fill rows [fill_lo, fill_hi) with solid █
+        fill_hi:   usize,
+        above:     bool,  // trace is above center (s > 0)
+        below:     bool,  // trace is below center (s < 0)
+    }
+
+    let cols: Vec<Col> = (0..w).map(|c| {
+        let s = samples[c].clamp(-1.0, 1.0);
+        let px = ((half_px - s * half_px).max(0.0).round() as usize).min(h * 8 - 1);
+        let trace_row = px / 8;
+        let trace_sub = px % 8;
+        let above = trace_row < mid;
+        let below = trace_row > mid;
+
+        let (fill_lo, fill_hi) = if above {
+            (trace_row + 1, mid + 1) // down to center inclusive
+        } else if below {
+            (mid, trace_row)         // up from center, exclusive of trace_row
+        } else {
+            (0, 0)
+        };
+
+        Col { trace_row, trace_sub, fill_lo, fill_hi, above, below }
+    }).collect();
 
     for row in 0..h {
         let mut spans = Vec::with_capacity(w);
-
         for col in 0..w {
-            let amplitude = samples[col].abs().clamp(0.0, 1.0);
-            let peak_amp  = peaks[col].clamp(0.0, 1.0);
+            let c = &cols[col];
 
-            // Symmetric mirror waveform: bar extends above and below center
-            // bar_f in 1/8-row units for sub-block precision
-            let bar_f    = amplitude * half_f * 8.0;
-            let bar_rows = (bar_f / 8.0) as usize;
-            let bar_sub  = (bar_f as usize) % 8; // 0-7
-
-            let dist = (row as i32 - mid as i32).unsigned_abs() as usize;
-
-            // 5. Peak decay — marker sits 1 row beyond the smoothed bar tip
-            let peak_dist = ((peak_amp * half_f).ceil() as usize + 1).min(mid.saturating_sub(1));
-            let is_peak = dist == peak_dist && row < mid && peak_amp > 0.05;
-
-            let (ch, color) = if dist < bar_rows {
-                // Bar body — dim near center, bright near tip (3. coloring gradient)
-                let t = dist as f32 / half_f.max(1.0);
-                let color = if t > 0.65 { accent }
-                    else if t > 0.3  { primary }
-                    else             { secondary };
-                ('█', color)
-            } else if dist == bar_rows && bar_sub > 0 {
-                // 3. Fractional tip with Unicode sub-block
-                let color = if amplitude > 0.65 { accent } else { primary };
-                (sub[bar_sub], color)
-            } else if dist == bar_rows + 1 && amplitude > 0.04 {
-                // 4. Glow fake — inner halo one row past tip
-                ('░', secondary)
-            } else if dist == bar_rows + 2 && amplitude > 0.15 {
-                // 4. Glow fake — outer halo two rows past tip
-                ('░', muted)
-            } else if is_peak {
-                // 5. Peak decay marker
-                ('━', accent)
+            let span = if row == c.trace_row {
+                if c.above {
+                    // Bottom-fill (8-trace_sub)/8: trace connects downward into the fill.
+                    // trace_sub=0 (top of cell) → sub[7]=█ (whole cell); trace_sub=7 → sub[0]=▁ (sliver).
+                    Span::styled(sub[7 - c.trace_sub].to_string(), Style::default().fg(accent))
+                } else if c.below {
+                    // Top-fill (trace_sub+1)/8: trace connects upward into the fill.
+                    // Achieved by drawing sub[6-trace_sub] with fg/bg swapped so the block
+                    // renders inverted — accent appears on top, bg on bottom.
+                    if c.trace_sub == 7 {
+                        Span::styled('█'.to_string(), Style::default().fg(accent))
+                    } else {
+                        Span::styled(
+                            sub[6 - c.trace_sub].to_string(),
+                            Style::default().fg(bg).bg(accent),
+                        )
+                    }
+                } else {
+                    // Trace sits on center row: just show the dashed baseline.
+                    let ch = if col % 3 == 0 { '·' } else { ' ' };
+                    Span::styled(ch.to_string(), Style::default().fg(muted))
+                }
+            } else if row >= c.fill_lo && row < c.fill_hi {
+                let dist     = (row as i32 - mid as i32).unsigned_abs() as f32;
+                let max_dist = (c.trace_row as i32 - mid as i32).unsigned_abs() as f32;
+                let t = if max_dist > 0.0 { dist / max_dist } else { 0.0 };
+                let color = if t > 0.55 { primary } else { secondary };
+                Span::styled('█'.to_string(), Style::default().fg(color))
             } else if row == mid {
-                // Center reference line (dashed)
-                if col % 3 == 0 { ('·', muted) } else { (' ', muted) }
+                let ch = if col % 3 == 0 { '·' } else { ' ' };
+                Span::styled(ch.to_string(), Style::default().fg(muted))
             } else {
-                (' ', muted)
+                Span::styled(' '.to_string(), Style::default())
             };
 
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+            spans.push(span);
         }
-
         let r = Rect { x: inner.x, y: inner.y + row as u16, width: inner.width, height: 1 };
         f.render_widget(Paragraph::new(Line::from(spans)), r);
     }

@@ -62,11 +62,11 @@ fn pipe_from_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -
 }
 
 fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
-    // Prefer best audio quality. Since we download to a file first (not piped),
-    // the full container is available for seeking — no ffmpeg needed for DASH formats.
-    // Opus ~160kbps > M4A 128kbps > MP3 > progressive fallback.
+    // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
+    // DASH WebM/Opus has higher bitrate but triggers "unsupported feature: core" in
+    // symphonia's Matroska reader when YouTube serves it as fragmented DASH segments.
     let format_selector =
-        "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
+        "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/18/bestaudio";
 
     let tmp_dir = std::env::temp_dir();
     let hash: u64 = youtube_url
