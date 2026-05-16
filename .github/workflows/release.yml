@@ -25,11 +25,6 @@ jobs:
             artifact: noctune-linux-x64
             binary: target/release/noctune
 
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact: noctune-macos-x64
-            binary: target/release/noctune
-
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: noctune-macos-arm64
