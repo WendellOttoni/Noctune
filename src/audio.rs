@@ -1,11 +1,21 @@
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{source::Source, Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{source::Source, OutputStream, OutputStreamHandle, Sink};
 use std::{
     fs::File,
-    io::{BufReader, Cursor},
-    path::PathBuf,
+    io::{Cursor, Read},
+    path::{Path, PathBuf},
+    process::Child,
     time::{Duration, Instant},
+};
+use symphonia::core::{
+    audio::SampleBuffer,
+    codecs::{DecoderOptions, CODEC_TYPE_NULL},
+    errors::Error as SymphoniaError,
+    formats::{FormatOptions, FormatReader},
+    io::{MediaSourceStream, ReadOnlySource},
+    meta::MetadataOptions,
+    probe::Hint,
 };
 
 use crate::{
@@ -13,6 +23,139 @@ use crate::{
     metadata::{probe, TrackMeta},
     visualizer::{VizSource, VizTap},
 };
+
+// Wrapper to satisfy symphonia's `Read + Send + Sync` bound for non-Sync readers.
+// Safety: SymphoniaSource is !Sync, so the inner reader is accessed from one thread only.
+struct SyncWrap<R>(R);
+impl<R: Read> Read for SyncWrap<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+unsafe impl<R: Send> Send for SyncWrap<R> {}
+unsafe impl<R: Send> Sync for SyncWrap<R> {}
+
+pub struct SymphoniaSource {
+    format: Box<dyn FormatReader>,
+    decoder: Box<dyn symphonia::core::codecs::Decoder>,
+    track_id: u32,
+    sample_rate: u32,
+    channels: u16,
+    buf: Vec<f32>,
+    buf_pos: usize,
+    // Holds the yt-dlp child process so it's killed when the source is dropped.
+    _child: Option<Child>,
+}
+
+// Safety: FormatReader/Decoder internals are not Sync, but SymphoniaSource is !Sync
+// and is only moved to rodio's audio thread — never shared across threads.
+unsafe impl Send for SymphoniaSource {}
+
+impl SymphoniaSource {
+    fn from_mss(mss: MediaSourceStream, hint: Hint, child: Option<Child>) -> Result<Self> {
+        let fmt_opts = FormatOptions { enable_gapless: true, ..Default::default() };
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &fmt_opts, &MetadataOptions::default())
+            .map_err(|e| anyhow!("audio probe failed: {e}"))?;
+
+        let format = probed.format;
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+            .ok_or_else(|| anyhow!("no audio track found"))?;
+
+        let track_id = track.id;
+        let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+        let channels = track.codec_params.channels.map(|c| c.count() as u16).unwrap_or(2);
+        let decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|e| anyhow!("codec init: {e}"))?;
+
+        Ok(Self {
+            format,
+            decoder,
+            track_id,
+            sample_rate,
+            channels,
+            buf: Vec::new(),
+            buf_pos: 0,
+            _child: child,
+        })
+    }
+
+    pub fn from_file(file: File, hint: Hint) -> Result<Self> {
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        Self::from_mss(mss, hint, None)
+    }
+
+    pub fn from_reader<R: Read + Send + 'static>(reader: R, hint: Hint) -> Result<Self> {
+        let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(reader))), Default::default());
+        Self::from_mss(mss, hint, None)
+    }
+
+    pub fn from_child(mut child: Child, hint: Hint) -> Result<Self> {
+        let stdout = child.stdout.take().ok_or_else(|| anyhow!("yt-dlp stdout not piped"))?;
+        let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(stdout))), Default::default());
+        Self::from_mss(mss, hint, Some(child))
+    }
+
+    fn fill_buf(&mut self) -> bool {
+        loop {
+            let packet = match self.format.next_packet() {
+                Ok(p) => p,
+                Err(_) => return false,
+            };
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            match self.decoder.decode(&packet) {
+                Ok(decoded) => {
+                    let spec = *decoded.spec();
+                    let mut sbuf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+                    sbuf.copy_interleaved_ref(decoded);
+                    self.buf = sbuf.samples().to_vec();
+                    self.buf_pos = 0;
+                    return !self.buf.is_empty();
+                }
+                Err(SymphoniaError::DecodeError(_)) => continue,
+                Err(_) => return false,
+            }
+        }
+    }
+}
+
+impl Iterator for SymphoniaSource {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        if self.buf_pos >= self.buf.len() {
+            if !self.fill_buf() {
+                return None;
+            }
+        }
+        let s = self.buf[self.buf_pos];
+        self.buf_pos += 1;
+        Some(s)
+    }
+}
+
+impl Source for SymphoniaSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        let rem = self.buf.len().saturating_sub(self.buf_pos);
+        if rem > 0 { Some(rem) } else { None }
+    }
+    fn channels(&self) -> u16 { self.channels }
+    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn total_duration(&self) -> Option<Duration> { None }
+}
+
+fn hint_from_path(path: &Path) -> Hint {
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    hint
+}
 
 pub enum CrossfadeStatus {
     None,
@@ -152,10 +295,9 @@ impl Player {
         }
         let file = File::open(&track.path)
             .with_context(|| format!("opening {}", track.path.display()))?;
-        let decoder = Decoder::new(BufReader::new(file))
+        let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
-        let samples = decoder.convert_samples::<f32>();
-        let viz = VizSource::new(samples, self.tap.clone());
+        let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
         self.sink.append(eq);
         self.gapless_queued = Some(track.clone());
@@ -173,15 +315,13 @@ impl Player {
         let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
 
         if is_url {
-            let bytes = if crate::ytdlp::is_youtube_url(&path_str) {
-                crate::ytdlp::download_audio_bytes(&path_str)?
+            let source = if crate::ytdlp::is_youtube_url(&path_str) {
+                crate::ytdlp::spawn_yt_dlp(&path_str)?
             } else {
-                http_get_bytes(&path_str)?
+                let bytes = http_get_bytes(&path_str)?;
+                SymphoniaSource::from_reader(Cursor::new(bytes), Hint::new())?
             };
-            let decoder = Decoder::new(Cursor::new(bytes))
-                .map_err(|e| anyhow!("decoding {path_str}: {e}"))?;
-            let samples = decoder.convert_samples::<f32>();
-            let viz = VizSource::new(samples, self.tap.clone());
+            let viz = VizSource::new(source, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
             let sink = Sink::try_new(&self.handle)?;
             sink.set_volume(self.volume * self.rg_scale);
@@ -190,20 +330,19 @@ impl Player {
         } else {
             let file = File::open(&track.path)
                 .with_context(|| format!("opening {}", track.path.display()))?;
-            let decoder = Decoder::new(BufReader::new(file))
+            let mut source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
                 .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
-            let mut samples = decoder.convert_samples::<f32>();
             if offset > Duration::ZERO {
-                let rate = samples.sample_rate() as u64;
-                let ch = samples.channels() as u64;
+                let rate = source.sample_rate() as u64;
+                let ch = source.channels() as u64;
                 let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
                 for _ in 0..to_skip {
-                    if samples.next().is_none() {
+                    if source.next().is_none() {
                         break;
                     }
                 }
             }
-            let viz = VizSource::new(samples, self.tap.clone());
+            let viz = VizSource::new(source, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
             let sink = Sink::try_new(&self.handle)?;
             sink.set_volume(self.volume * self.rg_scale);
@@ -284,10 +423,9 @@ impl Player {
 
         let file = File::open(&track.path)
             .with_context(|| format!("opening {}", track.path.display()))?;
-        let decoder = Decoder::new(BufReader::new(file))
+        let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
-        let samples = decoder.convert_samples::<f32>();
-        let viz = VizSource::new(samples, self.tap.clone());
+        let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
 
         let new_sink = Sink::try_new(&self.handle)?;

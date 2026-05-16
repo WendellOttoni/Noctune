@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use std::{path::PathBuf, process::Command, time::Duration};
+use std::{path::PathBuf, process::{Command, Stdio}, time::Duration};
 
-use crate::audio::Track;
+use crate::audio::{SymphoniaSource, Track};
 
 pub fn is_youtube_url(url: &str) -> bool {
     url.contains("youtube.com/")
@@ -30,64 +30,34 @@ fn ffmpeg_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Download audio for a YouTube URL to a temp file, read it, then delete it.
+/// Spawn yt-dlp with `-o -` and build a `SymphoniaSource` from its piped stdout.
 ///
-/// Piping with `-o -` delivers raw DASH segments (no seek table), causing
-/// symphonia to panic during init. Writing to a file lets yt-dlp merge the
-/// DASH segments into a proper seekable container before we read the bytes.
-pub fn download_audio_bytes(youtube_url: &str) -> Result<Vec<u8>> {
-    let tmp_dir = std::env::temp_dir();
-    let hash: u64 = youtube_url
-        .bytes()
-        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    // %(ext)s is expanded by yt-dlp to the actual extension
-    let tmp_pattern = tmp_dir
-        .join(format!("noctune_{hash}.%(ext)s"))
-        .to_string_lossy()
-        .to_string();
-    let tmp_base = tmp_dir.join(format!("noctune_{hash}"));
-
-    // YouTube serves audio-only formats as DASH (fragmented MP4 / fragmented WebM),
-    // which symphonia's MP4 reader can't seek — rodio's init then panics.
-    // Without ffmpeg, yt-dlp cannot remux DASH into a regular container.
-    // Workaround: pick a *progressive* (non-DASH) format that includes video+audio
-    // in a properly indexed mp4 container — symphonia can still extract the audio track.
+/// With ffmpeg available, yt-dlp remuxes DASH segments into a streaming-friendly
+/// Matroska/WebM container before piping — no temp file required and no panic risk.
+/// Without ffmpeg, falls back to progressive format 18/22 (non-DASH mp4).
+/// The spawned process is killed automatically when the source is dropped.
+pub fn spawn_yt_dlp(youtube_url: &str) -> Result<SymphoniaSource> {
     let format_selector = if ffmpeg_available() {
-        // With ffmpeg, yt-dlp auto-remuxes DASH m4a into proper mp4
-        "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio"
+        "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio"
     } else {
-        // No ffmpeg: prefer progressive (non-DASH) mp4 formats (18 = 360p+aac, 22 = 720p+aac)
         "18/22/best[ext=mp4][protocol^=https]"
     };
 
-    let out = Command::new("yt-dlp")
+    let child = Command::new("yt-dlp")
         .args([
             "-f", format_selector,
             "--no-playlist",
             "--no-warnings",
-            "-o", &tmp_pattern,
+            "-o", "-",
             youtube_url,
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;
 
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(anyhow!("yt-dlp: {}", err.trim()));
-    }
-
-    // yt-dlp expanded %(ext)s — find the actual file
-    for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
-        let path = tmp_base.with_extension(ext);
-        if path.exists() {
-            let bytes = std::fs::read(&path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            let _ = std::fs::remove_file(&path);
-            return Ok(bytes);
-        }
-    }
-
-    Err(anyhow!("yt-dlp: could not locate downloaded audio file"))
+    SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new())
+        .map_err(|e| anyhow!("yt-dlp stream: {e}"))
 }
 
 #[derive(Debug, Deserialize)]
