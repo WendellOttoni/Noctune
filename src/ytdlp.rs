@@ -62,11 +62,11 @@ fn pipe_from_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -
 }
 
 fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
-    let format_selector = if ffmpeg_available() {
-        "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio"
-    } else {
-        "18/22/best[ext=mp4][protocol^=https]"
-    };
+    // Prefer best audio quality. Since we download to a file first (not piped),
+    // the full container is available for seeking — no ffmpeg needed for DASH formats.
+    // Opus ~160kbps > M4A 128kbps > MP3 > progressive fallback.
+    let format_selector =
+        "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio";
 
     let tmp_dir = std::env::temp_dir();
     let hash: u64 = youtube_url
