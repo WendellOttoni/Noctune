@@ -27,3 +27,14 @@ if ($userPath -notlike "*$installDir*") {
 } else {
     Write-Host "noctune $version installed. Run: noctune"
 }
+
+# Check for yt-dlp (required for YouTube playback)
+Write-Host ""
+if (Get-Command yt-dlp -ErrorAction SilentlyContinue) {
+    Write-Host "yt-dlp found — YouTube playback is ready."
+} else {
+    Write-Host "yt-dlp not found. YouTube playback requires it."
+    Write-Host "Install it with:"
+    Write-Host "  winget install yt-dlp.yt-dlp"
+    Write-Host "Then restart your terminal."
+}

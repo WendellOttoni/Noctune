@@ -4,6 +4,14 @@ use std::{path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Du
 
 use crate::audio::{SymphoniaSource, Track};
 
+fn yt_dlp_install_hint() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "yt-dlp not found — install it with: winget install yt-dlp.yt-dlp  (then restart your terminal)"
+    } else {
+        "yt-dlp not found — install it with: pip install yt-dlp"
+    }
+}
+
 pub fn is_youtube_url(url: &str) -> bool {
     url.contains("youtube.com/")
         || url.contains("youtu.be/")
@@ -55,7 +63,7 @@ fn pipe_from_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;
+        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
 
     SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new(), stream_err)
         .map_err(|e| anyhow!("yt-dlp stream: {e}"))
@@ -78,7 +86,7 @@ fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String
     let out = Command::new("yt-dlp")
         .args(["-f", format_selector, "--no-playlist", "--no-warnings", "-o", &tmp_pattern, youtube_url])
         .output()
-        .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;
+        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -134,7 +142,7 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
             &resolved,
         ])
         .output()
-        .map_err(|_| anyhow!("yt-dlp not found — install it: pip install yt-dlp"))?;
+        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
