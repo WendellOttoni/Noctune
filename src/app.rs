@@ -75,6 +75,30 @@ impl RepeatMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayGainMode {
+    Off,
+    Track,
+    Album,
+}
+
+impl ReplayGainMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            ReplayGainMode::Off => ReplayGainMode::Track,
+            ReplayGainMode::Track => ReplayGainMode::Album,
+            ReplayGainMode::Album => ReplayGainMode::Off,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            ReplayGainMode::Off => "off",
+            ReplayGainMode::Track => "track",
+            ReplayGainMode::Album => "album",
+        }
+    }
+}
+
 pub struct App {
     #[allow(dead_code)]
     pub config: Config,
@@ -123,6 +147,7 @@ pub struct App {
     pub hover_x: Option<u16>,
     pub show_audio_panel: bool,
     pub audio_panel_row: usize,
+    pub replaygain_mode: ReplayGainMode,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -252,6 +277,7 @@ impl App {
             hover_x: None,
             show_audio_panel: false,
             audio_panel_row: 0,
+            replaygain_mode: ReplayGainMode::Track,
         })
     }
 
@@ -705,6 +731,10 @@ impl App {
             Action::ShowAudioPanel => {
                 self.show_audio_panel = !self.show_audio_panel;
                 self.audio_panel_row = 0;
+            }
+            Action::ReplayGain => {
+                self.replaygain_mode = self.replaygain_mode.cycle();
+                self.status = format!("ReplayGain: {}", self.replaygain_mode.label());
             }
         }
     }
@@ -1187,6 +1217,9 @@ impl App {
             return;
         }
 
+        // Apply ReplayGain scaling
+        self.player.rg_scale = rg_scale(&t, self.replaygain_mode);
+
         // Local file or HTTP/YouTube stream
         match self.player.play(&t) {
             Ok(_) => {
@@ -1342,6 +1375,17 @@ impl App {
         }
         self.status = format!("Loaded {} tracks from {}", loaded, path.display());
     }
+}
+
+fn rg_scale(track: &Track, mode: ReplayGainMode) -> f32 {
+    let db = match mode {
+        ReplayGainMode::Off => return 1.0,
+        ReplayGainMode::Track => track.replaygain_track_db,
+        ReplayGainMode::Album => track
+            .replaygain_album_db
+            .or(track.replaygain_track_db),
+    };
+    db.map(|db| 10f32.powf(db / 20.0)).unwrap_or(1.0)
 }
 
 fn parse_spotify_url(url: &str) -> (String, String) {

@@ -18,6 +18,8 @@ pub struct CacheEntry {
     pub genre: Option<String>,
     pub year: Option<String>,
     pub duration_ms: Option<u64>,
+    pub replaygain_track_db: Option<f32>,
+    pub replaygain_album_db: Option<f32>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -61,6 +63,8 @@ impl MetadataCache {
             genre: meta.genre.clone(),
             year: meta.year.clone(),
             duration_ms: meta.duration.map(|d| d.as_millis() as u64),
+            replaygain_track_db: meta.replaygain_track_db,
+            replaygain_album_db: meta.replaygain_album_db,
         };
         let track = track_from_cache(path, &entry);
         self.entries.insert(key, entry);
@@ -96,6 +100,8 @@ fn track_from_cache(path: &Path, entry: &CacheEntry) -> Track {
         genre: entry.genre.clone(),
         year: entry.year.clone(),
         duration: entry.duration_ms.map(Duration::from_millis),
+        replaygain_track_db: entry.replaygain_track_db,
+        replaygain_album_db: entry.replaygain_album_db,
     }
 }
 

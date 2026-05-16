@@ -29,6 +29,7 @@ pub struct Player {
     paused_offset: Duration,
     tap: VizTap,
     eq: EqHandle,
+    pub rg_scale: f32,
     // crossfade state
     fade_sink: Option<Sink>,
     fade_current: Option<Track>,
@@ -46,6 +47,8 @@ pub struct Track {
     pub genre: Option<String>,
     pub year: Option<String>,
     pub duration: Option<Duration>,
+    pub replaygain_track_db: Option<f32>,
+    pub replaygain_album_db: Option<f32>,
 }
 
 impl Track {
@@ -63,6 +66,8 @@ impl Track {
             genre: None,
             year: None,
             duration: None,
+            replaygain_track_db: None,
+            replaygain_album_db: None,
         }
     }
 
@@ -77,6 +82,8 @@ impl Track {
         t.genre = meta.genre;
         t.year = meta.year;
         t.duration = meta.duration;
+        t.replaygain_track_db = meta.replaygain_track_db;
+        t.replaygain_album_db = meta.replaygain_album_db;
         t
     }
 
@@ -104,6 +111,7 @@ impl Player {
             paused_offset: Duration::ZERO,
             tap: VizTap::new(viz_sensitivity),
             eq: EqHandle::new(),
+            rg_scale: 1.0,
             fade_sink: None,
             fade_current: None,
             fade_started_at: None,
@@ -148,7 +156,7 @@ impl Player {
             let viz = VizSource::new(samples, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
             let sink = Sink::try_new(&self.handle)?;
-            sink.set_volume(self.volume);
+            sink.set_volume(self.volume * self.rg_scale);
             sink.append(eq);
             self.sink = sink;
         } else {
@@ -170,7 +178,7 @@ impl Player {
             let viz = VizSource::new(samples, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
             let sink = Sink::try_new(&self.handle)?;
-            sink.set_volume(self.volume);
+            sink.set_volume(self.volume * self.rg_scale);
             sink.append(eq);
             self.sink = sink;
         }
@@ -270,16 +278,16 @@ impl Player {
         };
         let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs).clamp(0.0, 1.0);
 
-        self.sink.set_volume(self.volume * (1.0 - progress));
+        self.sink.set_volume(self.volume * self.rg_scale * (1.0 - progress));
         if let Some(sink) = &self.fade_sink {
-            sink.set_volume(self.volume * progress);
+            sink.set_volume(self.volume * self.rg_scale * progress);
         }
 
         if progress >= 1.0 || self.sink.empty() {
             if let (Some(new_sink), Some(new_track)) =
                 (self.fade_sink.take(), self.fade_current.take())
             {
-                new_sink.set_volume(self.volume);
+                new_sink.set_volume(self.volume * self.rg_scale);
                 let played = self.fade_started_at.map(|t| t.elapsed()).unwrap_or_default();
                 self.sink = new_sink;
                 self.current = Some(new_track);
@@ -313,7 +321,7 @@ impl Player {
 
     pub fn set_volume(&mut self, v: f32) {
         self.volume = v.clamp(0.0, 1.5);
-        self.sink.set_volume(self.volume);
+        self.sink.set_volume(self.volume * self.rg_scale);
     }
 
     pub fn current(&self) -> Option<&Track> {
@@ -346,6 +354,8 @@ impl Track {
             genre: None,
             year: None,
             duration: None,
+            replaygain_track_db: None,
+            replaygain_album_db: None,
         }
     }
 }

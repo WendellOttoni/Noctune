@@ -179,6 +179,8 @@ impl SpotifyApi {
             genre: None,
             year: None,
             duration: Some(Duration::from_millis(t.duration_ms)),
+            replaygain_track_db: None,
+            replaygain_album_db: None,
         })
     }
 
@@ -228,6 +230,8 @@ impl SpotifyApi {
                     genre: None,
                     year: None,
                     duration: Some(Duration::from_millis(t.duration_ms)),
+                    replaygain_track_db: None,
+                    replaygain_album_db: None,
                 });
             }
         }
@@ -271,6 +275,8 @@ impl SpotifyApi {
                     genre: None,
                     year: None,
                     duration: Some(Duration::from_millis(t.duration_ms)),
+                    replaygain_track_db: None,
+                    replaygain_album_db: None,
                 });
             }
         }

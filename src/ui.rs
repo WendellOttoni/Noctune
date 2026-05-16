@@ -878,8 +878,13 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
         })
         .unwrap_or_default();
     let sort = format!("sort:{} ", app.sort.label());
+    let rg = match app.replaygain_mode {
+        crate::app::ReplayGainMode::Off => String::new(),
+        crate::app::ReplayGainMode::Track => "rg:track ".to_string(),
+        crate::app::ReplayGainMode::Album => "rg:album ".to_string(),
+    };
     let hints = Paragraph::new(Span::styled(
-        format!("{sleep}{shuf}{rep}{sort}[?] help [q] quit "),
+        format!("{sleep}{shuf}{rep}{rg}{sort}[?] help [q] quit "),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     ))
     .alignment(Alignment::Right);

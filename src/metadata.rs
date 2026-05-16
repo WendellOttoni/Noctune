@@ -14,6 +14,12 @@ pub struct TrackMeta {
     pub genre: Option<String>,
     pub year: Option<String>,
     pub duration: Option<Duration>,
+    pub replaygain_track_db: Option<f32>,
+    pub replaygain_album_db: Option<f32>,
+}
+
+fn parse_rg_db(s: &str) -> Option<f32> {
+    s.trim().trim_end_matches("dB").trim().parse().ok()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -127,6 +133,12 @@ pub fn probe(path: &Path) -> TrackMeta {
                 StandardTagKey::Genre if meta.genre.is_none() => meta.genre = Some(value),
                 StandardTagKey::Date | StandardTagKey::ReleaseDate
                     if meta.year.is_none() => meta.year = Some(value),
+                StandardTagKey::ReplayGainTrackGain if meta.replaygain_track_db.is_none() => {
+                    meta.replaygain_track_db = parse_rg_db(&value);
+                }
+                StandardTagKey::ReplayGainAlbumGain if meta.replaygain_album_db.is_none() => {
+                    meta.replaygain_album_db = parse_rg_db(&value);
+                }
                 _ => {}
             }
         }
