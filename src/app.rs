@@ -121,6 +121,8 @@ pub struct App {
     pub tick_count: u64,
     pub queue_undo: Option<(Vec<Track>, Option<usize>)>,
     pub hover_x: Option<u16>,
+    pub show_audio_panel: bool,
+    pub audio_panel_row: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -248,6 +250,8 @@ impl App {
             tick_count: 0,
             queue_undo: None,
             hover_x: None,
+            show_audio_panel: false,
+            audio_panel_row: 0,
         })
     }
 
@@ -501,6 +505,11 @@ impl App {
             return;
         }
 
+        if self.show_audio_panel {
+            self.handle_audio_panel_key(key);
+            return;
+        }
+
         if self.url_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -693,6 +702,10 @@ impl App {
                     Some(0)
                 });
             }
+            Action::ShowAudioPanel => {
+                self.show_audio_panel = !self.show_audio_panel;
+                self.audio_panel_row = 0;
+            }
         }
     }
 
@@ -702,6 +715,73 @@ impl App {
         self.status = format!("Visualizer sensitivity: ×{:.1}", new_val);
         if let Err(e) = self.config.save() {
             self.status = format!("sensitivity saved in memory only ({e})");
+        }
+    }
+
+    pub const AUDIO_PANEL_ROWS: usize = 7;
+
+    fn handle_audio_panel_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('e') => {
+                self.show_audio_panel = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.audio_panel_row =
+                    self.audio_panel_row.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.audio_panel_row + 1 < Self::AUDIO_PANEL_ROWS {
+                    self.audio_panel_row += 1;
+                }
+            }
+            KeyCode::Left => self.audio_panel_adjust(-1),
+            KeyCode::Right => self.audio_panel_adjust(1),
+            _ => {}
+        }
+    }
+
+    fn audio_panel_adjust(&mut self, dir: i32) {
+        match self.audio_panel_row {
+            0 => {
+                self.player.eq().adjust_low(dir as f32);
+                let db = self.player.eq().snapshot().low_db;
+                self.status = format!("EQ Low: {:+.0} dB", db);
+            }
+            1 => {
+                self.player.eq().adjust_mid(dir as f32);
+                let db = self.player.eq().snapshot().mid_db;
+                self.status = format!("EQ Mid: {:+.0} dB", db);
+            }
+            2 => {
+                self.player.eq().adjust_high(dir as f32);
+                let db = self.player.eq().snapshot().high_db;
+                self.status = format!("EQ High: {:+.0} dB", db);
+            }
+            3 => {
+                let presets = crate::eq::PRESETS;
+                self.eq_preset_idx = if dir > 0 {
+                    (self.eq_preset_idx + 1) % presets.len()
+                } else {
+                    self.eq_preset_idx.wrapping_sub(1).min(presets.len() - 1)
+                };
+                let (name, state) = presets[self.eq_preset_idx];
+                self.player.eq().set(state);
+                self.status = format!("EQ preset: {name}");
+            }
+            4 => {
+                let v = (self.player.volume() + dir as f32 * 0.05).clamp(0.0, 1.5);
+                self.player.set_volume(v);
+                self.status = format!("Volume: {}%", (v * 100.0) as u32);
+            }
+            5 => {
+                let xf = (self.player.crossfade_secs + dir as f32 * 0.5).clamp(0.0, 10.0);
+                self.player.crossfade_secs = xf;
+                self.status = format!("Crossfade: {:.1}s", xf);
+            }
+            6 => {
+                self.adjust_viz_sensitivity(dir as f32 * crate::visualizer::SENS_STEP);
+            }
+            _ => {}
         }
     }
 

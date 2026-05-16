@@ -27,7 +27,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
         .split(area);
 
     render_header(f, chunks[0], &app.theme);
-    render_main(f, chunks[1], app);
+    if app.show_audio_panel {
+        render_audio_panel(f, chunks[1], app);
+    } else {
+        render_main(f, chunks[1], app);
+    }
     render_visualizer(f, chunks[2], app);
     render_now_playing(f, chunks[3], app);
     render_status(f, chunks[4], app);
@@ -110,6 +114,93 @@ fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(p, popup);
 }
 
+fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let eq = app.player.eq().snapshot();
+    let vol_pct = (app.player.volume() * 100.0).round() as i32;
+    let xf = app.player.crossfade_secs;
+    let sens = app.tap.sensitivity();
+    let preset_name = crate::eq::PRESETS
+        .get(app.eq_preset_idx)
+        .map(|(n, _)| *n)
+        .unwrap_or("?");
+
+    struct Row {
+        label: &'static str,
+        value: String,
+        bar_pct: f64,
+    }
+
+    let rows: &[Row] = &[
+        Row { label: "EQ Low",       value: format!("{:+.0} dB", eq.low_db),  bar_pct: ((eq.low_db + 12.0) / 24.0) as f64 },
+        Row { label: "EQ Mid",       value: format!("{:+.0} dB", eq.mid_db),  bar_pct: ((eq.mid_db + 12.0) / 24.0) as f64 },
+        Row { label: "EQ High",      value: format!("{:+.0} dB", eq.high_db), bar_pct: ((eq.high_db + 12.0) / 24.0) as f64 },
+        Row { label: "EQ Preset",    value: preset_name.to_string(),           bar_pct: app.eq_preset_idx as f64 / (crate::eq::PRESETS.len() - 1).max(1) as f64 },
+        Row { label: "Volume",       value: format!("{}%", vol_pct),           bar_pct: (app.player.volume() / 1.5) as f64 },
+        Row { label: "Crossfade",    value: format!("{:.1}s", xf),             bar_pct: (xf / 10.0) as f64 },
+        Row { label: "Viz Sens",     value: format!("×{:.1}", sens),           bar_pct: ((sens - 0.1) / 2.9) as f64 },
+    ];
+
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let selected_bg = parse_color(&theme.colors.primary);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(" Audio Panel — ↑↓ select  ←→ adjust  e/Esc close ", theme.accent()));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let bar_width = inner.width.saturating_sub(22) as usize;
+
+    for (i, row) in rows.iter().enumerate() {
+        let y = inner.y + i as u16;
+        if y >= inner.y + inner.height {
+            break;
+        }
+        let selected = i == app.audio_panel_row;
+        let row_area = Rect { x: inner.x, y, width: inner.width, height: 1 };
+
+        let label_style = if selected {
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(fg)
+        };
+        let prefix = if selected { "▶ " } else { "  " };
+
+        let filled = (row.bar_pct.clamp(0.0, 1.0) * bar_width as f64).round() as usize;
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+
+        let line = Line::from(vec![
+            Span::styled(format!("{}{:<12}", prefix, row.label), label_style),
+            Span::styled(format!(" {:>8}  ", row.value), Style::default().fg(muted)),
+            Span::styled(bar, if selected {
+                Style::default().fg(accent)
+            } else {
+                Style::default().fg(parse_color(&theme.colors.muted))
+            }),
+        ]);
+
+        let row_style = if selected {
+            Style::default().bg(selected_bg)
+        } else {
+            Style::default()
+        };
+        f.render_widget(Paragraph::new(line).style(row_style), row_area);
+    }
+
+    let hint_y = inner.y + App::AUDIO_PANEL_ROWS as u16 + 1;
+    if hint_y < inner.y + inner.height {
+        let hint_area = Rect { x: inner.x, y: hint_y, width: inner.width, height: 1 };
+        let hint = Paragraph::new(Line::from(vec![
+            Span::styled("  ← / → to adjust  |  ↑↓ to navigate  |  e or Esc to close", Style::default().fg(muted)),
+        ]));
+        f.render_widget(hint, hint_area);
+    }
+}
+
 fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
     let w = 56.min(area.width.saturating_sub(4));
     let h = 22.min(area.height.saturating_sub(4));
@@ -172,6 +263,11 @@ fn render_help(f: &mut Frame, area: Rect, theme: &Theme) {
         Line::from(""),
         Line::from("  Visualizer"),
         Line::from("    [ / ]      sensitivity -/+ (×0.1..×3.0)"),
+        Line::from(""),
+        Line::from("  Audio panel"),
+        Line::from("    e          open/close panel"),
+        Line::from("    ↑↓ / jk    select parameter"),
+        Line::from("    ← / →      decrease / increase"),
     ];
 
     let p = Paragraph::new(Text::from(lines))

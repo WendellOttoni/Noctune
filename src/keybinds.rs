@@ -46,6 +46,7 @@ pub enum Action {
     VizSensDown,
     UndoQueue,
     RecentlyPlayed,
+    ShowAudioPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -164,6 +165,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char(']')), Action::VizSensUp),
             (KeyChord::new(KeyCode::Char('u')), Action::UndoQueue),
             (KeyChord::new(KeyCode::Char('H')), Action::RecentlyPlayed),
+            (KeyChord::new(KeyCode::Char('e')), Action::ShowAudioPanel),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {
