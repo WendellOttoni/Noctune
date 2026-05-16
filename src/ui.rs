@@ -42,6 +42,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_info {
         render_track_info(f, area, app);
     }
+    if app.show_playlist_browser {
+        render_playlist_browser(f, area, app);
+    }
 }
 
 fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
@@ -112,6 +115,72 @@ fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             .title(Span::styled(" Track info — press any key ", app.theme.accent())),
     );
     f.render_widget(p, popup);
+}
+
+fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let entries = &app.playlist_browser_entries;
+
+    let w = 60.min(area.width.saturating_sub(4));
+    let h = (entries.len() as u16 + 5).clamp(6, area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let selected = i == app.playlist_browser_row;
+            let deleting = app.playlist_browser_delete_confirm == Some(i);
+            let style = if deleting {
+                Style::default().fg(parse_color(&theme.colors.accent)).add_modifier(Modifier::BOLD)
+            } else if selected {
+                Style::default().fg(parse_color(&theme.colors.foreground)).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(parse_color(&theme.colors.muted))
+            };
+            let label = format!(
+                " {}{} ({} tracks){}",
+                if selected { "▶ " } else { "  " },
+                e.name,
+                e.track_count,
+                if deleting { "  ← confirm Shift+D" } else { "" },
+            );
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+
+    let hint = Line::from(vec![
+        Span::styled("  Enter", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" load  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("a", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" append  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("Shift+D", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" delete  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("Esc", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" close", Style::default().fg(parse_color(&theme.colors.muted))),
+    ]);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border(true))
+                .title(Span::styled(" Playlists ", theme.accent()))
+                .title_bottom(hint),
+        )
+        .highlight_style(
+            Style::default().bg(parse_color(&theme.colors.secondary)).fg(parse_color(&theme.colors.background)),
+        );
+
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(Some(app.playlist_browser_row));
+    f.render_stateful_widget(list, popup, &mut state);
 }
 
 fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
@@ -496,7 +565,11 @@ fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
 
-    let title = format!(" Queue ({}) ", app.queue.len());
+    let title = if let Some(name) = &app.active_playlist_name {
+        format!(" Queue ({}) — {} ", app.queue.len(), name)
+    } else {
+        format!(" Queue ({}) ", app.queue.len())
+    };
     let list = List::new(items)
         .block(
             Block::default()
@@ -848,7 +921,9 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let spinner_char = SPINNER[(app.tick_count as usize / 3) % SPINNER.len()];
 
-    let status_text = if app.url_editing {
+    let status_text = if app.playlist_name_editing {
+        format!(" Name> {}_", app.playlist_name_input)
+    } else if app.url_editing {
         format!(" URL> {}_", app.url_input)
     } else if app.search_active() {
         format!(" /{}", app.search_query())

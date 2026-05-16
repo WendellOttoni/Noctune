@@ -148,6 +148,20 @@ pub struct App {
     pub show_audio_panel: bool,
     pub audio_panel_row: usize,
     pub replaygain_mode: ReplayGainMode,
+    pub playlist_name_editing: bool,
+    pub playlist_name_input: String,
+    pub show_playlist_browser: bool,
+    pub playlist_browser_entries: Vec<PlaylistEntry>,
+    pub playlist_browser_row: usize,
+    pub playlist_browser_delete_confirm: Option<usize>,
+    pub active_playlist_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlaylistEntry {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub track_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -278,6 +292,13 @@ impl App {
             show_audio_panel: false,
             audio_panel_row: 0,
             replaygain_mode: ReplayGainMode::Track,
+            playlist_name_editing: false,
+            playlist_name_input: String::new(),
+            show_playlist_browser: false,
+            playlist_browser_entries: Vec::new(),
+            playlist_browser_row: 0,
+            playlist_browser_delete_confirm: None,
+            active_playlist_name: None,
         })
     }
 
@@ -536,6 +557,30 @@ impl App {
             return;
         }
 
+        if self.show_playlist_browser {
+            self.handle_playlist_browser_key(key);
+            return;
+        }
+
+        if self.playlist_name_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.playlist_name_input.clear();
+                    self.playlist_name_editing = false;
+                }
+                KeyCode::Enter => {
+                    let name = self.playlist_name_input.trim().to_string();
+                    self.playlist_name_input.clear();
+                    self.playlist_name_editing = false;
+                    self.save_playlist_named(name);
+                }
+                KeyCode::Backspace => { self.playlist_name_input.pop(); }
+                KeyCode::Char(c) => { self.playlist_name_input.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
         if self.url_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -633,8 +678,14 @@ impl App {
                 self.status = format!("Sort: {}", self.sort.label());
             }
             Action::SleepTimer => self.toggle_sleep_timer(),
-            Action::SavePlaylist => self.save_playlist(),
-            Action::LoadPlaylist => self.load_first_playlist(),
+            Action::SavePlaylist => {
+                self.playlist_name_editing = true;
+                self.playlist_name_input.clear();
+                self.status = "Playlist name (Enter to save, Esc to cancel):".into();
+            }
+            Action::LoadPlaylist => {
+                self.open_playlist_browser();
+            }
             Action::VolumeUp => {
                 let v = (self.player.volume() + 0.05).min(1.5);
                 self.player.set_volume(v);
@@ -1289,7 +1340,7 @@ impl App {
         }
     }
 
-    fn save_playlist(&mut self) {
+    fn save_playlist_named(&mut self, name: String) {
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
@@ -1301,23 +1352,33 @@ impl App {
             self.status = format!("Could not create {}", dir.display());
             return;
         }
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let path = dir.join(format!("queue-{stamp}.m3u"));
+        let safe_name = if name.is_empty() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            format!("queue-{stamp}")
+        } else {
+            name.chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+                .collect()
+        };
+        let path = dir.join(format!("{safe_name}.m3u"));
         let mut text = String::from("#EXTM3U\n");
         for t in &self.queue {
             text.push_str(&t.path.display().to_string());
             text.push('\n');
         }
         match std::fs::write(&path, text) {
-            Ok(_) => self.status = format!("Saved playlist: {}", path.display()),
+            Ok(_) => {
+                self.active_playlist_name = Some(safe_name.clone());
+                self.status = format!("Saved: {safe_name}.m3u");
+            }
             Err(e) => self.status = format!("Save error: {e}"),
         }
     }
 
-    fn load_first_playlist(&mut self) {
+    fn open_playlist_browser(&mut self) {
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
@@ -1325,56 +1386,126 @@ impl App {
                 return;
             }
         };
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(r) => r,
-            Err(_) => {
-                self.status = format!("No playlists at {}", dir.display());
-                return;
+        let mut entries: Vec<PlaylistEntry> = std::fs::read_dir(&dir)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()) == Some("m3u")
+            })
+            .filter_map(|e| {
+                let path = e.path();
+                let name = path.file_stem()?.to_str()?.to_string();
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                let count = text.lines()
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .count();
+                Some(PlaylistEntry { name, path, track_count: count })
+            })
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        if entries.is_empty() {
+            self.status = "No playlists saved yet.".into();
+            return;
+        }
+        self.playlist_browser_entries = entries;
+        self.playlist_browser_row = 0;
+        self.playlist_browser_delete_confirm = None;
+        self.show_playlist_browser = true;
+    }
+
+    fn handle_playlist_browser_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_playlist_browser = false;
+                self.playlist_browser_delete_confirm = None;
             }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.playlist_browser_row = self.playlist_browser_row.saturating_sub(1);
+                self.playlist_browser_delete_confirm = None;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = self.playlist_browser_entries.len().saturating_sub(1);
+                if self.playlist_browser_row < max {
+                    self.playlist_browser_row += 1;
+                }
+                self.playlist_browser_delete_confirm = None;
+            }
+            KeyCode::Enter => {
+                self.load_playlist_at_row(false);
+            }
+            KeyCode::Char('a') => {
+                self.load_playlist_at_row(true);
+            }
+            KeyCode::Char('D') => {
+                let row = self.playlist_browser_row;
+                if self.playlist_browser_delete_confirm == Some(row) {
+                    if let Some(entry) = self.playlist_browser_entries.get(row).cloned() {
+                        if std::fs::remove_file(&entry.path).is_ok() {
+                            self.playlist_browser_entries.remove(row);
+                            self.playlist_browser_row =
+                                row.min(self.playlist_browser_entries.len().saturating_sub(1));
+                            self.status = format!("Deleted: {}", entry.name);
+                            if self.active_playlist_name.as_deref() == Some(&entry.name) {
+                                self.active_playlist_name = None;
+                            }
+                        }
+                    }
+                    self.playlist_browser_delete_confirm = None;
+                    if self.playlist_browser_entries.is_empty() {
+                        self.show_playlist_browser = false;
+                    }
+                } else {
+                    self.playlist_browser_delete_confirm = Some(row);
+                    self.status = "Press Shift+D again to confirm deletion.".into();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn load_playlist_at_row(&mut self, append: bool) {
+        let Some(entry) = self.playlist_browser_entries.get(self.playlist_browser_row).cloned() else {
+            return;
         };
-        let mut latest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("m3u") {
-                continue;
-            }
-            let mtime = e.metadata().and_then(|m| m.modified()).ok();
-            if let Some(mtime) = mtime {
-                if latest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
-                    latest = Some((mtime, path));
+        let Ok(text) = std::fs::read_to_string(&entry.path) else {
+            self.status = format!("Could not read {}", entry.path.display());
+            return;
+        };
+        if !append {
+            self.queue.clear();
+            self.queue_state.select(None);
+            self.queue_index = None;
+        }
+        let start = self.queue.len();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.starts_with("http://") || line.starts_with("https://") {
+                self.queue.push(Track::from_url(line.to_string()));
+            } else {
+                let p = std::path::PathBuf::from(line);
+                if p.exists() {
+                    self.queue.push(Track::from_path_with_meta(p));
                 }
             }
         }
-        let Some((_, path)) = latest else {
-            self.status = format!("No .m3u files in {}", dir.display());
-            return;
-        };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            self.status = format!("Could not read {}", path.display());
-            return;
-        };
-        let mut loaded = 0usize;
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
+        let loaded = self.queue.len() - start;
+        if !append {
+            if !self.queue.is_empty() {
+                self.queue_state.select(Some(0));
             }
-            if line.starts_with("http://") || line.starts_with("https://") {
-                self.queue.push(Track::from_url(line.to_string()));
-                loaded += 1;
-                continue;
-            }
-            let p = std::path::PathBuf::from(line);
-            if p.exists() {
-                self.queue.push(Track::from_path_with_meta(p));
-                loaded += 1;
-            }
+            self.active_playlist_name = Some(entry.name.clone());
         }
-        if loaded > 0 && self.queue_state.selected().is_none() {
-            self.queue_state.select(Some(0));
-        }
-        self.status = format!("Loaded {} tracks from {}", loaded, path.display());
+        self.show_playlist_browser = false;
+        self.status = if append {
+            format!("Appended {} tracks from '{}'", loaded, entry.name)
+        } else {
+            format!("Loaded {} tracks from '{}'", loaded, entry.name)
+        };
     }
+
 }
 
 fn rg_scale(track: &Track, mode: ReplayGainMode) -> f32 {
