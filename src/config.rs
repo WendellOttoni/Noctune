@@ -13,6 +13,8 @@ pub struct Config {
     pub spotify: SpotifyConfig,
     #[serde(default)]
     pub visualizer: VisualizerConfig,
+    #[serde(default)]
+    pub lastfm: LastfmConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +40,27 @@ impl Default for SpotifyConfig {
             client_id: String::new(),
             redirect_port: 8888,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastfmConfig {
+    pub api_key: String,
+    pub api_secret: String,
+}
+
+impl Default for LastfmConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            api_secret: String::new(),
+        }
+    }
+}
+
+impl LastfmConfig {
+    pub fn is_configured(&self) -> bool {
+        !self.api_key.is_empty() && !self.api_secret.is_empty()
     }
 }
 
@@ -88,6 +111,7 @@ impl Default for Config {
             },
             spotify: SpotifyConfig::default(),
             visualizer: VisualizerConfig::default(),
+            lastfm: LastfmConfig::default(),
         }
     }
 }

@@ -7,6 +7,7 @@ mod config;
 mod eq;
 mod keybinds;
 mod history;
+mod lastfm;
 mod lyrics;
 mod metadata;
 mod ratings;

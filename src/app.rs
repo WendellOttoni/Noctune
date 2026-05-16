@@ -184,6 +184,10 @@ pub struct App {
     pub browser_music_root_idx: usize,
     pub mini_mode: bool,
     current_play_recorded: bool,
+    pub lastfm: Option<crate::lastfm::LastfmClient>,
+    lastfm_pending_token: Option<String>,
+    lastfm_scrobble_info: Option<(String, String, u64)>,
+    lastfm_scrobbled: bool,
     pub playlist_name_editing: bool,
     pub playlist_name_input: String,
     pub show_playlist_browser: bool,
@@ -257,6 +261,18 @@ impl App {
         let spotify_client_id = config.spotify.client_id.clone();
         let spotify_redirect_uri = config.spotify.redirect_uri();
         let spotify_port = config.spotify.redirect_port;
+
+        let lastfm = if config.lastfm.is_configured() {
+            crate::lastfm::load_session().and_then(|s| {
+                crate::lastfm::LastfmClient::new(
+                    config.lastfm.api_key.clone(),
+                    config.lastfm.api_secret.clone(),
+                    s,
+                ).ok()
+            })
+        } else {
+            None
+        };
         let _ = spotify_port;
 
         let spotify = crate::spotify::load_tokens()
@@ -352,6 +368,10 @@ impl App {
             playlist_browser_row: 0,
             playlist_browser_delete_confirm: None,
             active_playlist_name: None,
+            lastfm,
+            lastfm_pending_token: None,
+            lastfm_scrobble_info: None,
+            lastfm_scrobbled: false,
         })
     }
 
@@ -745,6 +765,18 @@ impl App {
                 if self.player.elapsed().as_secs_f64() >= self.play_threshold_secs {
                     self.play_history.record_play(&track.path);
                     self.current_play_recorded = true;
+
+                    // Scrobble to Last.fm (once per track)
+                    if !self.lastfm_scrobbled {
+                        if let (Some(lfm), Some((artist, title, ts))) =
+                            (self.lastfm.clone(), self.lastfm_scrobble_info.clone())
+                        {
+                            self.lastfm_scrobbled = true;
+                            std::thread::spawn(move || {
+                                let _ = lfm.scrobble(&artist, &title, ts);
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1047,6 +1079,7 @@ impl App {
             Action::ToggleMini => {
                 self.mini_mode = !self.mini_mode;
             }
+            Action::LastfmLogin => self.lastfm_login(),
             Action::ToggleFavorite => {
                 let path = match self.focus {
                     Pane::Library => self.selected_library_track().map(|t| t.path),
@@ -1314,6 +1347,53 @@ impl App {
         }
     }
 
+    fn lastfm_login(&mut self) {
+        let cfg = &self.config.lastfm;
+        if !cfg.is_configured() {
+            self.status = "Set [lastfm] api_key and api_secret in config.toml first.".into();
+            return;
+        }
+
+        // If a pending token exists, complete the auth
+        if let Some(token) = self.lastfm_pending_token.take() {
+            let api_key = cfg.api_key.clone();
+            let api_secret = cfg.api_secret.clone();
+            match crate::lastfm::get_session(&api_key, &api_secret, &token) {
+                Ok(session) => {
+                    let username = session.username.clone();
+                    crate::lastfm::save_session(&session);
+                    match crate::lastfm::LastfmClient::new(api_key, api_secret, session) {
+                        Ok(client) => {
+                            self.lastfm = Some(client);
+                            self.status = format!("Last.fm connected as {username}.");
+                        }
+                        Err(e) => self.status = format!("Last.fm client error: {e}"),
+                    }
+                }
+                Err(e) => {
+                    self.status = format!("Last.fm auth error: {e}");
+                }
+            }
+            return;
+        }
+
+        // Start new auth: get token and open browser
+        let api_key = cfg.api_key.clone();
+        let api_secret = cfg.api_secret.clone();
+        match crate::lastfm::get_token(&api_key, &api_secret) {
+            Ok(token) => {
+                let url = format!(
+                    "http://www.last.fm/api/auth/?api_key={}&token={}",
+                    api_key, token
+                );
+                let _ = webbrowser::open(&url);
+                self.lastfm_pending_token = Some(token);
+                self.status = "Last.fm: authorize in browser, then press F again.".into();
+            }
+            Err(e) => self.status = format!("Last.fm token error: {e}"),
+        }
+    }
+
     fn spotify_toggle(&mut self) {
         let Some(api) = self.spotify.as_mut() else {
             self.status = "Not logged in to Spotify. Press Shift+P first.".into();
@@ -1541,6 +1621,8 @@ impl App {
 
     fn play_current(&mut self) {
         self.current_play_recorded = false;
+        self.lastfm_scrobbled = false;
+        self.lastfm_scrobble_info = None;
         let Some(i) = self.queue_index else { return };
         let Some(t) = self.queue.get(i).cloned() else { return };
 
@@ -1570,6 +1652,15 @@ impl App {
             Ok(_) => {
                 self.status = format!("Playing: {}", t.display());
                 self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                let artist = t.artist.clone().unwrap_or_default();
+                let title = t.title.clone();
+                let ts = crate::lastfm::now_unix();
+                self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
+                if let Some(lfm) = self.lastfm.clone() {
+                    std::thread::spawn(move || {
+                        let _ = lfm.update_now_playing(&artist, &title);
+                    });
+                }
                 self.push_history(t);
             }
             Err(e) => self.status = format!("Error: {e}"),
