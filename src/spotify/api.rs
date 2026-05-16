@@ -6,6 +6,7 @@ use super::{refresh_token, save_tokens, Tokens};
 
 const API_BASE: &str = "https://api.spotify.com/v1";
 
+#[derive(Clone)]
 pub struct SpotifyApi {
     client_id: String,
     client: reqwest::blocking::Client,

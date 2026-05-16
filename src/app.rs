@@ -110,8 +110,8 @@ pub struct App {
     pub theme_names: Vec<String>,
     pub theme_idx: usize,
     pub last_drag_seek: Option<std::time::Instant>,
-    pub pending_url: Option<String>,
     pub clear_confirm_until: Option<std::time::Instant>,
+    pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub loading: bool,
     pub tick_count: u64,
     pub pending_rescan: bool,
@@ -225,8 +225,8 @@ impl App {
             theme_names: Vec::new(),
             theme_idx: 0,
             last_drag_seek: None,
-            pending_url: None,
             clear_confirm_until: None,
+            url_rx: None,
             loading: false,
             tick_count: 0,
             pending_rescan: false,
@@ -325,10 +325,31 @@ impl App {
             return Ok(());
         }
 
-        if let Some(url) = self.pending_url.take() {
-            self.load_url(url);
-            self.loading = false;
-            return Ok(());
+        if let Some(rx) = &self.url_rx {
+            match rx.try_recv() {
+                Ok(Ok(tracks)) => {
+                    let n = tracks.len();
+                    let was_empty = self.queue.is_empty();
+                    self.queue.extend(tracks);
+                    if was_empty {
+                        self.queue_state.select(Some(0));
+                    }
+                    self.status = format!("Added {n} track(s) to queue.");
+                    self.loading = false;
+                    self.url_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.status = format!("Load error: {e}");
+                    self.loading = false;
+                    self.url_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.status = "URL load failed (worker disconnected).".into();
+                    self.loading = false;
+                    self.url_rx = None;
+                }
+            }
         }
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
@@ -430,9 +451,7 @@ impl App {
                     self.url_input.clear();
                     self.url_editing = false;
                     if !url.is_empty() {
-                        self.status = format!("Loading {url}…");
-                        self.loading = true;
-                        self.pending_url = Some(url);
+                        self.start_url_load(url);
                     }
                 }
                 KeyCode::Backspace => { self.url_input.pop(); }
@@ -682,87 +701,76 @@ impl App {
         self.status = format!("Library rescanned: {} tracks", self.library.len());
     }
 
-    fn load_url(&mut self, url: String) {
-        // Spotify URLs
-        if url.contains("spotify.com") || url.starts_with("spotify:") {
-            self.load_spotify_url(url);
+    fn start_url_load(&mut self, url: String) {
+        if self.url_rx.is_some() {
+            self.status = "Already loading, please wait…".into();
             return;
         }
-        // YouTube / YT Music
-        if crate::ytdlp::is_youtube_url(&url) {
-            self.status = "Fetching YouTube metadata…".into();
-            match crate::ytdlp::fetch_tracks(&url) {
-                Ok(tracks) if tracks.is_empty() => {
-                    self.status = "yt-dlp returned no tracks for that URL.".into();
-                }
-                Ok(tracks) => {
-                    let n = tracks.len();
-                    let was_empty = self.queue.is_empty();
-                    self.queue.extend(tracks);
-                    if was_empty {
-                        self.queue_state.select(Some(0));
-                    }
-                    self.status = format!("Added {n} track(s) from YouTube to queue.");
-                }
-                Err(e) => self.status = format!("yt-dlp error: {e}"),
-            }
-            return;
-        }
-        // Generic HTTP URL (e.g. direct audio stream or M3U)
-        if url.starts_with("http://") || url.starts_with("https://") {
-            self.queue.push(crate::audio::Track::from_url(url.clone()));
+
+        // HTTP stream (instant — no need for a thread)
+        if !url.contains("spotify.com")
+            && !url.starts_with("spotify:")
+            && !crate::ytdlp::is_youtube_url(&url)
+            && (url.starts_with("http://") || url.starts_with("https://"))
+        {
+            self.queue.push(crate::audio::Track::from_url(url));
             if self.queue_state.selected().is_none() {
                 self.queue_state.select(Some(self.queue.len().saturating_sub(1)));
             }
-            self.status = format!("Added stream URL to queue.");
+            self.status = "Added stream URL to queue.".into();
             return;
         }
-        self.status = format!("Unrecognised URL scheme: {url}");
-    }
 
-    fn load_spotify_url(&mut self, url: String) {
-        let Some(api) = self.spotify.as_mut() else {
-            self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+        if !url.starts_with("http://")
+            && !url.starts_with("https://")
+            && !url.starts_with("spotify:")
+            && !crate::ytdlp::is_youtube_url(&url)
+        {
+            self.status = format!("Unrecognised URL scheme: {url}");
             return;
-        };
-
-        // Parse: spotify.com/{type}/{id} or spotify:{type}:{id}
-        let (kind, id) = if let Some(path) = url.strip_prefix("spotify:") {
-            let mut parts = path.splitn(2, ':');
-            let k = parts.next().unwrap_or("").to_string();
-            let i = parts.next().unwrap_or("").to_string();
-            (k, i)
-        } else {
-            // https://open.spotify.com/{type}/{id}?...
-            let trimmed = url.split('?').next().unwrap_or(&url);
-            let segs: Vec<&str> = trimmed.rsplit('/').take(2).collect();
-            let i = segs.first().copied().unwrap_or("").to_string();
-            let k = segs.get(1).copied().unwrap_or("").to_string();
-            (k, i)
-        };
-
-        let result = match kind.as_str() {
-            "track" => api.track_by_id(&id).map(|t| vec![t]),
-            "playlist" => api.playlist_tracks(&id),
-            "album" => api.album_tracks(&id),
-            other => Err(anyhow::anyhow!("Unsupported Spotify type: {other}")),
-        };
-
-        match result {
-            Ok(tracks) if tracks.is_empty() => {
-                self.status = "Spotify: no tracks found.".into();
-            }
-            Ok(tracks) => {
-                let n = tracks.len();
-                let was_empty = self.queue.is_empty();
-                self.queue.extend(tracks);
-                if was_empty {
-                    self.queue_state.select(Some(0));
-                }
-                self.status = format!("Loaded {n} Spotify track(s) — plays on connected device.");
-            }
-            Err(e) => self.status = format!("Spotify error: {e}"),
         }
+
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
+        self.url_rx = Some(rx);
+        self.loading = true;
+
+        // Spotify
+        if url.contains("spotify.com") || url.starts_with("spotify:") {
+            let Some(api) = self.spotify.clone() else {
+                self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+                self.url_rx = None;
+                self.loading = false;
+                return;
+            };
+            let (kind, id) = parse_spotify_url(&url);
+            self.status = format!("Loading Spotify {kind}…");
+            std::thread::spawn(move || {
+                let mut api = api;
+                let result = match kind.as_str() {
+                    "track" => api.track_by_id(&id).map(|t| vec![t]),
+                    "playlist" => api.playlist_tracks(&id),
+                    "album" => api.album_tracks(&id),
+                    other => Err(anyhow::anyhow!("Unsupported Spotify type: {other}")),
+                };
+                let _ = tx.send(result.map_err(|e| e.to_string()));
+            });
+            return;
+        }
+
+        // YouTube / YT Music
+        self.status = format!("Loading {url}…");
+        std::thread::spawn(move || {
+            let result = crate::ytdlp::fetch_tracks(&url)
+                .map_err(|e| e.to_string())
+                .and_then(|tracks| {
+                    if tracks.is_empty() {
+                        Err("yt-dlp returned no tracks for that URL.".into())
+                    } else {
+                        Ok(tracks)
+                    }
+                });
+            let _ = tx.send(result);
+        });
     }
 
     fn spotify_login(&mut self) {
@@ -1191,6 +1199,21 @@ impl App {
             self.queue_state.select(Some(0));
         }
         self.status = format!("Loaded {} tracks from {}", loaded, path.display());
+    }
+}
+
+fn parse_spotify_url(url: &str) -> (String, String) {
+    if let Some(path) = url.strip_prefix("spotify:") {
+        let mut parts = path.splitn(2, ':');
+        let k = parts.next().unwrap_or("").to_string();
+        let i = parts.next().unwrap_or("").to_string();
+        (k, i)
+    } else {
+        let trimmed = url.split('?').next().unwrap_or(url);
+        let segs: Vec<&str> = trimmed.rsplit('/').take(2).collect();
+        let i = segs.first().copied().unwrap_or("").to_string();
+        let k = segs.get(1).copied().unwrap_or("").to_string();
+        (k, i)
     }
 }
 
