@@ -329,13 +329,15 @@ fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
+    use std::collections::HashSet;
+
     let theme = &app.theme;
     let eq = app.player.eq().snapshot();
 
     const CURVE_H: usize = 13; // rows for curve (+12 to -12 dB, 2dB per row)
-    let w = 70.min(area.width.saturating_sub(4)).max(40);
-    // curve + 1 freq row + 1 blank + 3 sliders + 1 blank + 1 preset + 1 hint + 2 border
-    let h = (CURVE_H as u16 + 10).min(area.height.saturating_sub(2));
+    let w = 72.min(area.width.saturating_sub(4)).max(44);
+    // 1 band header + curve + 1 freq row + 1 blank + 3 sliders + 1 blank + 1 preset + 1 hint + 2 border
+    let h = (CURVE_H as u16 + 11).min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -348,47 +350,78 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     let muted = parse_color(&theme.colors.muted);
     let accent = parse_color(&theme.colors.accent);
     let secondary = parse_color(&theme.colors.secondary);
+    let bg = parse_color(&theme.colors.background);
 
-    // curve_w: inner width minus 5-char dB label and axis bar
     let inner_w = (w as usize).saturating_sub(2);
     let curve_w = inner_w.saturating_sub(6).max(20);
 
-    // --- Frequency response curve ---
-    // Approximated filter responses (simplified transfer functions for display)
+    let freq_to_col = |freq: f32| -> usize {
+        let t = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
+        ((t * (curve_w - 1) as f32).round() as usize).min(curve_w - 1)
+    };
+
+    let low_col  = freq_to_col(200.0);
+    let mid_col  = freq_to_col(1000.0);
+    let high_col = freq_to_col(5000.0);
+
+    // Subtle vertical grid lines at non-band key frequencies
+    let grid_cols: HashSet<usize> = [50.0f32, 100.0, 500.0, 2000.0, 10000.0]
+        .iter().map(|&freq| freq_to_col(freq)).collect();
+
+    // Frequency response curve (approximated transfer functions for display)
     let curve_rows: Vec<usize> = (0..curve_w)
         .map(|col| {
             let t = col as f32 / (curve_w - 1).max(1) as f32;
-            // Log-spaced 20Hz – 20kHz
             let freq = 20.0f32 * (1000.0f32).powf(t);
-
-            let fc_low = 200.0f32;
-            let fc_mid = 1000.0f32;
+            let fc_low  = 200.0f32;
+            let fc_mid  = 1000.0f32;
             let fc_high = 5000.0f32;
-
-            // Low shelf: RC-like rolloff
-            let g_low = eq.low_db * fc_low * fc_low / (freq * freq + fc_low * fc_low);
-            // Peaking: bandwidth-based, peaks at fc_mid
-            let bw = freq / fc_mid - fc_mid / freq;
-            let g_mid = eq.mid_db / (1.0 + (bw * 0.9).powi(2));
-            // High shelf: RC-like highpass
+            let g_low  = eq.low_db  * fc_low  * fc_low  / (freq * freq + fc_low  * fc_low);
+            let bw     = freq / fc_mid - fc_mid / freq;
+            let g_mid  = eq.mid_db  / (1.0 + (bw * 0.9).powi(2));
             let g_high = eq.high_db * freq * freq / (freq * freq + fc_high * fc_high);
-
-            let total = (g_low + g_mid + g_high).clamp(-12.0, 12.0);
-            let row = ((12.0 - total) / 24.0 * (CURVE_H - 1) as f32).round() as usize;
+            let total  = (g_low + g_mid + g_high).clamp(-12.0, 12.0);
+            let row    = ((12.0 - total) / 24.0 * (CURVE_H - 1) as f32).round() as usize;
             row.min(CURVE_H - 1)
         })
         .collect();
 
-    // zero is at row 6 (0dB = midpoint of 0..12)
-    let zero_row = (CURVE_H - 1) / 2;
+    let zero_row = (CURVE_H - 1) / 2; // row 6 = 0 dB
 
-    // --- Build Lines ---
     let mut lines: Vec<Line> = Vec::new();
+
+    // Band selector header: numbered nodes show which band is active
+    {
+        let nodes = [
+            (low_col,  "1", app.eq_tuner_band == 0),
+            (mid_col,  "2", app.eq_tuner_band == 1),
+            (high_col, "3", app.eq_tuner_band == 2),
+        ];
+        let mut spans = vec![Span::styled("      │", Style::default().fg(muted))];
+        let mut cursor = 0usize;
+        for &(col, sym, selected) in &nodes {
+            if col > cursor {
+                spans.push(Span::raw(" ".repeat(col - cursor)));
+                cursor = col;
+            }
+            let style = if selected {
+                Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(muted)
+            };
+            spans.push(Span::styled(sym, style));
+            cursor += 1;
+        }
+        if cursor < curve_w {
+            spans.push(Span::raw(" ".repeat(curve_w - cursor)));
+        }
+        lines.push(Line::from(spans));
+    }
 
     // Curve rows
     for row in 0..CURVE_H {
         let db = 12.0 - row as f32 * 24.0 / (CURVE_H - 1) as f32;
-        let label = if (db as i32).abs() % 6 == 0 {
+        let label = if (db.round() as i32).abs() % 6 == 0 {
             format!("{:+3.0} ", db)
         } else {
             "     ".to_string()
@@ -401,23 +434,69 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         ];
 
         for col in 0..curve_w {
-            let is_curve = curve_rows[col] == row;
-            let is_zero = row == zero_row;
-            // connect adjacent curve points that skip this row
-            let is_fill = if col > 0 && col < curve_w - 1 {
-                let prev = curve_rows[col.saturating_sub(1)] as isize;
-                let next = curve_rows[(col + 1).min(curve_w - 1)] as isize;
-                let r = row as isize;
+            let cr = curve_rows[col] as isize;
+            let r  = row as isize;
+            let zr = zero_row as isize;
+
+            let is_on_curve = cr == r;
+
+            // Vertical connector for steep diagonal transitions between adjacent columns
+            let is_vert = if col > 0 && col < curve_w - 1 {
+                let prev = curve_rows[col - 1] as isize;
+                let next = curve_rows[col + 1] as isize;
                 (prev < r && r < next) || (next < r && r < prev)
             } else {
                 false
             };
-            let span = if is_curve {
-                Span::styled("●", Style::default().fg(accent))
-            } else if is_fill {
+
+            // Fill region between curve and zero line
+            let in_boost = cr < zr && r > cr && r < zr;
+            let in_cut   = cr > zr && r > zr && r < cr;
+
+            // Numbered nodes at band frequency columns, positioned on the curve
+            let is_low_node  = col == low_col  && is_on_curve;
+            let is_mid_node  = col == mid_col  && is_on_curve;
+            let is_high_node = col == high_col && is_on_curve;
+
+            let is_grid_col = grid_cols.contains(&col);
+
+            let span = if is_low_node {
+                let style = if app.eq_tuner_band == 0 {
+                    Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(secondary)
+                };
+                Span::styled("1", style)
+            } else if is_mid_node {
+                let style = if app.eq_tuner_band == 1 {
+                    Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(secondary)
+                };
+                Span::styled("2", style)
+            } else if is_high_node {
+                let style = if app.eq_tuner_band == 2 {
+                    Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(secondary)
+                };
+                Span::styled("3", style)
+            } else if is_on_curve {
+                Span::styled("─", Style::default().fg(accent))
+            } else if is_vert {
                 Span::styled("│", Style::default().fg(accent))
-            } else if is_zero {
-                Span::styled("─", Style::default().fg(muted))
+            } else if in_boost {
+                Span::styled("░", Style::default().fg(accent))
+            } else if in_cut {
+                Span::styled("░", Style::default().fg(secondary))
+            } else if r == zr {
+                if is_grid_col {
+                    Span::styled("┼", Style::default().fg(muted))
+                } else {
+                    Span::styled("─", Style::default().fg(muted))
+                }
+            } else if is_grid_col {
+                Span::styled("╎", Style::default().fg(muted))
             } else {
                 Span::raw(" ")
             };
@@ -426,23 +505,27 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(spans));
     }
 
-    // Frequency axis labels row
+    // Frequency axis labels — denser than before
     {
-        // Place labels at approximate column positions for key frequencies
         let freq_markers: &[(&str, f32)] = &[
-            ("20Hz", 20.0),
+            ("20",  20.0),
+            ("50",  50.0),
+            ("100", 100.0),
             ("200", 200.0),
-            ("1k", 1000.0),
-            ("5k", 5000.0),
+            ("500", 500.0),
+            ("1k",  1000.0),
+            ("2k",  2000.0),
+            ("5k",  5000.0),
+            ("10k", 10000.0),
             ("20k", 20000.0),
         ];
         let mut freq_row = vec![' '; curve_w];
         for (label, freq) in freq_markers {
-            let t = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
+            let t   = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
             let col = (t * (curve_w - 1) as f32).round() as usize;
             let col = col.min(curve_w.saturating_sub(label.len()));
             for (i, ch) in label.chars().enumerate() {
-                if col + i < curve_w {
+                if col + i < curve_w && freq_row[col + i] == ' ' {
                     freq_row[col + i] = ch;
                 }
             }
@@ -499,7 +582,7 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate() {
         let active = current == Some(i);
         let style = if active {
-            Style::default().fg(parse_color(&theme.colors.background)).bg(accent)
+            Style::default().fg(bg).bg(accent)
         } else {
             Style::default().fg(muted)
         };
