@@ -1,0 +1,24 @@
+{
+  "name": "noctune",
+  "version": "0.1.0",
+  "description": "TUI music player for the terminal",
+  "homepage": "https://github.com/WendellOttoni/Noctune",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WendellOttoni/Noctune.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "noctune": "bin/noctune.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/",
+    "install.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
