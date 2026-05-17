@@ -35,7 +35,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    render_header(f, chunks[0], &app.theme);
+    render_header(f, chunks[0], app);
     if app.show_audio_panel {
         render_audio_panel(f, chunks[1], app);
     } else {
@@ -1053,8 +1053,10 @@ fn render_viz_vu(f: &mut Frame, inner: Rect, app: &App) {
     bar_row(f, mid, "Peak", peak, if peak > 0.75 { accent } else { primary });
 }
 
-fn render_header(f: &mut Frame, area: Rect, theme: &Theme) {
-    let lines: Vec<Line> = theme
+fn render_header(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+
+    let logo_lines: Vec<Line> = theme
         .ascii
         .logo
         .lines()
@@ -1068,14 +1070,42 @@ fn render_header(f: &mut Frame, area: Rect, theme: &Theme) {
         })
         .collect();
 
-    let p = Paragraph::new(Text::from(lines))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(theme.border(false)),
+    let block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(theme.border(false));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Logo centered
+    f.render_widget(
+        Paragraph::new(Text::from(logo_lines)).alignment(Alignment::Center),
+        inner,
+    );
+
+    // System stats — bottom-right corner of the header inner area
+    let s = &app.sys_stats;
+    let net_str = if s.net_down_kbps >= 1024.0 {
+        format!("↓ {:.1}MB/s", s.net_down_kbps / 1024.0)
+    } else {
+        format!("↓ {:.0}KB/s", s.net_down_kbps)
+    };
+    let stats_str = format!(" CPU {:.0}% · RAM {}MB · {} ", s.cpu_pct, s.ram_mb, net_str);
+    let stats_width = stats_str.len() as u16;
+    if inner.width > stats_width + 2 {
+        let stats_area = Rect {
+            x: inner.x + inner.width - stats_width,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: stats_width,
+            height: 1,
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                stats_str,
+                Style::default().fg(parse_color(&theme.colors.muted)),
+            )),
+            stats_area,
         );
-    f.render_widget(p, area);
+    }
 }
 
 fn render_main(f: &mut Frame, area: Rect, app: &mut App) {

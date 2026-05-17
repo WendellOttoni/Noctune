@@ -215,6 +215,7 @@ pub struct App {
     pub active_playlist_name: Option<String>,
     pub album_art: Option<DynamicImage>,
     pub art_picker: ArtPicker,
+    pub sys_stats: crate::stats::SystemStats,
     pub custom_eq_presets: Vec<crate::config::EqPreset>,
     pub eq_preset_name_editing: bool,
     pub eq_preset_name_input: String,
@@ -417,6 +418,7 @@ impl App {
             pending_gapless_idx: None,
             album_art: None,
             art_picker,
+            sys_stats: crate::stats::SystemStats::new(),
             custom_eq_presets: crate::config::EqPresets::load().presets,
             eq_preset_name_editing: false,
             eq_preset_name_input: String::new(),
@@ -701,6 +703,11 @@ impl App {
 
     fn tick(&mut self) -> Result<()> {
         self.tick_count = self.tick_count.wrapping_add(1);
+
+        // Refresh system stats once per second (~30 ticks at 33ms each)
+        if self.tick_count % 30 == 0 {
+            self.sys_stats.refresh();
+        }
 
         // Poll completed library scan
         if let Some(rx) = &self.scan_rx {
