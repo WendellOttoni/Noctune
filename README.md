@@ -1,16 +1,16 @@
-```
+<pre>
        ███▄    █  ▒█████  ▄████▄  ▄▄▄█████▓ █    ██  ███▄    █ ▓█████
        ██ ▀█   █ ▒██▒  ██▒▒██▀ ▀█  ▓  ██▒ ▓▒ ██  ▓██▒ ██ ▀█   █ ▓█   ▀
       ▓██  ▀█ ██▒▒██░  ██▒▒▓█    ▄ ▒ ▓██░ ▒░▓██  ▒██░▓██  ▀█ ██▒▒███
       ▓██▒  ▐▌██▒▒██   ██░▒▓▓▄ ▄██▒░ ▓██▓ ░ ▓▓█  ░██░▓██▒  ▐▌██▒▒▓█  ▄
       ▒██░   ▓██░░ ████▓▒░▒ ▓███▀ ░  ▒██▒ ░ ▒▒█████▓ ▒██░   ▓██░░▒████▒
-```
+</pre>
 
 A fully customizable terminal music player in Rust. ASCII-art TUI, multi-format playback, theme system via TOML.
 
 ## Demo
 
-<!-- Drop a demo GIF or MP4 here -->
+<!-- Adicione o vídeo aqui: arraste um MP4/GIF no editor do GitHub -->
 
 > Status: early MVP — plays local files, queue/library navigation, themable UI.
 
