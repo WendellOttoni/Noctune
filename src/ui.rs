@@ -8,6 +8,7 @@ use ratatui::{
 use std::time::Duration;
 
 use crate::{
+    album_art,
     app::{App, Pane},
     theme::{parse_color, Theme},
 };
@@ -1233,8 +1234,17 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
         ])
         .split(content_area);
 
+    // Track art_area so the overlay renderer can position Kitty/iTerm2 images.
+    app.layout.art_area = art_area;
+
     if app.player.current().is_some() {
-        if app.player.is_paused() {
+        if let Some(img) = &app.album_art {
+            if app.art_picker.protocol == crate::album_art::Protocol::Blocks {
+                // Half-block rendering lives inside ratatui — render it here.
+                album_art::render_blocks(f, art_area, img);
+            }
+            // Kitty / iTerm2 are emitted via render_overlay_art() after terminal.draw().
+        } else if app.player.is_paused() {
             let art_text = app.theme.ascii.paused.clone();
             if !art_text.trim().is_empty() {
                 let lines: Vec<Line> = art_text

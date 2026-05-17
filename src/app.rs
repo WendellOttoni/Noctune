@@ -3,12 +3,14 @@ use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use ratatui::widgets::ListState;
+use image::DynamicImage;
 use std::{path::PathBuf, time::Duration};
 use walkdir::WalkDir;
 
 use notify::Watcher as _;
 
 use crate::{
+    album_art::ArtPicker,
     audio::{CrossfadeStatus, Player, Track},
     cache::{cache_path, MetadataCache},
     config::Config,
@@ -211,6 +213,8 @@ pub struct App {
     pub playlist_browser_row: usize,
     pub playlist_browser_delete_confirm: Option<usize>,
     pub active_playlist_name: Option<String>,
+    pub album_art: Option<DynamicImage>,
+    pub art_picker: ArtPicker,
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +230,7 @@ pub struct LayoutRects {
     pub queue: ratatui::layout::Rect,
     pub progress: ratatui::layout::Rect,
     pub progress_total_ms: u64,
+    pub art_area: ratatui::layout::Rect,
 }
 
 #[derive(Debug, Clone)]
@@ -267,7 +272,7 @@ impl ViewMode {
 }
 
 impl App {
-    pub fn new(config: Config, theme: Theme) -> Result<Self> {
+    pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
         let player = Player::new(config.playback.default_volume, config.visualizer.sensitivity)?;
         let tap = player.tap();
 
@@ -402,6 +407,8 @@ impl App {
             show_eq_tuner: false,
             eq_tuner_band: 0,
             pending_gapless_idx: None,
+            album_art: None,
+            art_picker,
         })
     }
 
@@ -658,6 +665,7 @@ impl App {
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {
         while !self.should_quit {
             terminal.draw(|f| ui::render(f, self))?;
+            self.render_overlay_art();
             self.tick()?;
             if event::poll(Duration::from_millis(33))? {
                 match event::read()? {
@@ -1830,6 +1838,7 @@ impl App {
         self.queue_state.select(None);
         self.queue_index = None;
         self.player.stop();
+        self.album_art = None;
         self.status = format!("Queue cleared ({n} tracks). Press u to undo.");
     }
 
@@ -1889,8 +1898,13 @@ impl App {
         self.player.rg_scale = rg_scale(&t, self.replaygain_mode);
 
         // Local file or HTTP/YouTube stream
+        // Load album art (blocking but fast — typically a JPEG thumbnail in the tag)
+        let new_art = crate::metadata::probe_picture(&t.path)
+            .and_then(|bytes| self.art_picker.load(&bytes));
+
         match self.player.play(&t) {
             Ok(_) => {
+                self.album_art = new_art;
                 self.status = format!("Playing: {}", t.display());
                 self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
                 let artist = t.artist.clone().unwrap_or_default();
@@ -2149,6 +2163,25 @@ impl App {
         };
     }
 
+    /// Render rich-protocol album art (Kitty / iTerm2) after ratatui's frame draw.
+    /// Called every frame when art is loaded; a no-op for block mode (handled in ui.rs).
+    fn render_overlay_art(&self) {
+        let Some(img) = &self.album_art else { return };
+        let area = self.layout.art_area;
+        if area.width == 0 || area.height == 0 { return }
+        match self.art_picker.protocol {
+            crate::album_art::Protocol::Kitty => {
+                // Use common cell size defaults; exact pixel size affects quality not positioning.
+                crate::album_art::render_kitty(img, area, 8, 16);
+            }
+            crate::album_art::Protocol::Iterm2 => {
+                crate::album_art::render_iterm2(img, area);
+            }
+            crate::album_art::Protocol::Blocks => {
+                // Handled inside ratatui render loop (ui.rs); nothing to do here.
+            }
+        }
+    }
 }
 
 fn rg_scale(track: &Track, mode: ReplayGainMode) -> f32 {

@@ -2,7 +2,7 @@ use std::{fs::File, path::Path, time::Duration};
 use symphonia::core::{
     formats::FormatOptions,
     io::MediaSourceStream,
-    meta::{MetadataOptions, StandardTagKey},
+    meta::{MetadataOptions, StandardTagKey, StandardVisualKey, Visual},
     probe::Hint,
 };
 
@@ -88,6 +88,53 @@ pub fn probe_full(path: &Path) -> FullMeta {
         }
     }
     m
+}
+
+pub fn probe_picture(path: &Path) -> Option<Vec<u8>> {
+    let file = File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .ok()?;
+
+    let pick = |visuals: &[Visual]| -> Option<Vec<u8>> {
+        let v = visuals
+            .iter()
+            .find(|v| v.usage == Some(StandardVisualKey::FrontCover))
+            .or_else(|| visuals.first())?;
+        Some(v.data.to_vec())
+    };
+
+    if let Some(rev) = probed.format.metadata().current() {
+        if let Some(bytes) = pick(rev.visuals()) {
+            return Some(bytes);
+        }
+    }
+    if let Some(mut md) = probed.metadata.get() {
+        if let Some(rev) = md.skip_to_latest() {
+            if let Some(bytes) = pick(rev.visuals()) {
+                return Some(bytes);
+            }
+        }
+    }
+
+    // Fallback: look for folder art files next to the track
+    if let Some(dir) = path.parent() {
+        for name in &["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "album.png"] {
+            let p = dir.join(name);
+            if p.exists() {
+                if let Ok(bytes) = std::fs::read(&p) {
+                    return Some(bytes);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 pub fn probe(path: &Path) -> TrackMeta {
