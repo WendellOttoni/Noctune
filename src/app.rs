@@ -215,6 +215,14 @@ pub struct App {
     pub active_playlist_name: Option<String>,
     pub album_art: Option<DynamicImage>,
     pub art_picker: ArtPicker,
+    pub custom_eq_presets: Vec<crate::config::EqPreset>,
+    pub eq_preset_name_editing: bool,
+    pub eq_preset_name_input: String,
+    pub profiles: Vec<crate::config::Profile>,
+    pub show_profile_browser: bool,
+    pub profile_browser_row: usize,
+    pub profile_name_editing: bool,
+    pub profile_name_input: String,
 }
 
 #[derive(Debug, Clone)]
@@ -409,6 +417,14 @@ impl App {
             pending_gapless_idx: None,
             album_art: None,
             art_picker,
+            custom_eq_presets: crate::config::EqPresets::load().presets,
+            eq_preset_name_editing: false,
+            eq_preset_name_input: String::new(),
+            profiles: crate::config::Profiles::load().profiles,
+            show_profile_browser: false,
+            profile_browser_row: 0,
+            profile_name_editing: false,
+            profile_name_input: String::new(),
         })
     }
 
@@ -675,6 +691,11 @@ impl App {
                 }
             }
         }
+        // Persist session state so the next launch starts with the same settings.
+        self.config.playback.default_volume = self.player.volume();
+        self.config.playback.shuffle = self.shuffle;
+        self.config.playback.repeat = matches!(self.repeat, RepeatMode::All | RepeatMode::One);
+        let _ = self.config.save();
         Ok(())
     }
 
@@ -948,6 +969,49 @@ impl App {
             return;
         }
 
+        if self.show_profile_browser {
+            self.handle_profile_browser_key(key);
+            return;
+        }
+
+        if self.eq_preset_name_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.eq_preset_name_input.clear();
+                    self.eq_preset_name_editing = false;
+                }
+                KeyCode::Enter => {
+                    let name = self.eq_preset_name_input.trim().to_string();
+                    self.eq_preset_name_input.clear();
+                    self.eq_preset_name_editing = false;
+                    self.save_eq_preset(name);
+                }
+                KeyCode::Backspace => { self.eq_preset_name_input.pop(); }
+                KeyCode::Char(c) => { self.eq_preset_name_input.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.profile_name_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.profile_name_input.clear();
+                    self.profile_name_editing = false;
+                }
+                KeyCode::Enter => {
+                    let name = self.profile_name_input.trim().to_string();
+                    self.profile_name_input.clear();
+                    self.profile_name_editing = false;
+                    self.save_profile(name);
+                }
+                KeyCode::Backspace => { self.profile_name_input.pop(); }
+                KeyCode::Char(c) => { self.profile_name_input.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
         if self.playlist_name_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1086,13 +1150,19 @@ impl App {
             Action::LoadPlaylist => {
                 self.open_playlist_browser();
             }
+            Action::Profiles => {
+                self.show_profile_browser = true;
+                self.profile_browser_row = 0;
+            }
             Action::VolumeUp => {
                 let v = (self.player.volume() + 0.05).min(1.5);
                 self.player.set_volume(v);
+                self.config.playback.default_volume = v;
             }
             Action::VolumeDown => {
                 let v = (self.player.volume() - 0.05).max(0.0);
                 self.player.set_volume(v);
+                self.config.playback.default_volume = v;
             }
             Action::SeekBack => {
                 if let Err(e) = self.player.seek_relative(-5) {
@@ -1280,6 +1350,7 @@ impl App {
             4 => {
                 let v = (self.player.volume() + dir as f32 * 0.05).clamp(0.0, 1.5);
                 self.player.set_volume(v);
+                self.config.playback.default_volume = v;
                 self.status = format!("Volume: {}%", (v * 100.0) as u32);
             }
             5 => {
@@ -1531,6 +1602,13 @@ impl App {
     }
 
     fn handle_eq_tuner_key(&mut self, key: KeyEvent) {
+        // Ctrl+S: save current EQ as named preset
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+            self.eq_preset_name_editing = true;
+            self.eq_preset_name_input.clear();
+            return;
+        }
+
         let eq = self.player.eq();
         match key.code {
             KeyCode::Esc | KeyCode::Char('E') => {
@@ -1557,19 +1635,27 @@ impl App {
                 }
             }
             KeyCode::Char('0') => {
+                // Cycle through built-in presets then custom presets
                 let snap = eq.snapshot();
-                let presets = crate::eq::PRESETS;
-                let next = presets
+                let builtins = crate::eq::PRESETS;
+                let all: Vec<(&str, crate::eq::EqState)> = builtins
+                    .iter()
+                    .map(|(n, s)| (*n, *s))
+                    .chain(self.custom_eq_presets.iter().map(|p| {
+                        (p.name.as_str(), crate::eq::EqState { low_db: p.low_db, mid_db: p.mid_db, high_db: p.high_db })
+                    }))
+                    .collect();
+                let next = all
                     .iter()
                     .position(|(_, s)| {
                         (s.low_db - snap.low_db).abs() < 0.1
                             && (s.mid_db - snap.mid_db).abs() < 0.1
                             && (s.high_db - snap.high_db).abs() < 0.1
                     })
-                    .map(|i| (i + 1) % presets.len())
+                    .map(|i| (i + 1) % all.len())
                     .unwrap_or(0);
-                eq.set(presets[next].1);
-                self.status = format!("EQ Preset: {}", presets[next].0);
+                eq.set(all[next].1);
+                self.status = format!("EQ Preset: {}", all[next].0);
             }
             _ => {}
         }
@@ -2161,6 +2247,115 @@ impl App {
         } else {
             format!("Loaded {} tracks from '{}'", loaded, entry.name)
         };
+    }
+
+    fn save_eq_preset(&mut self, name: String) {
+        if name.is_empty() { return; }
+        let snap = self.player.eq().snapshot();
+        let preset = crate::config::EqPreset {
+            name: name.clone(),
+            low_db: snap.low_db,
+            mid_db: snap.mid_db,
+            high_db: snap.high_db,
+        };
+        // Replace if name already exists, otherwise append
+        if let Some(existing) = self.custom_eq_presets.iter_mut().find(|p| p.name == name) {
+            *existing = preset;
+        } else {
+            self.custom_eq_presets.push(preset);
+        }
+        let store = crate::config::EqPresets { presets: self.custom_eq_presets.clone() };
+        match store.save() {
+            Ok(_) => self.status = format!("EQ preset '{name}' saved."),
+            Err(e) => self.status = format!("EQ preset save error: {e}"),
+        }
+    }
+
+    fn save_profile(&mut self, name: String) {
+        if name.is_empty() { return; }
+        let snap = self.player.eq().snapshot();
+        let profile = crate::config::Profile {
+            name: name.clone(),
+            theme: self.config.theme.clone(),
+            volume: self.player.volume(),
+            shuffle: self.shuffle,
+            repeat: matches!(self.repeat, RepeatMode::All | RepeatMode::One),
+            eq_low_db: snap.low_db,
+            eq_mid_db: snap.mid_db,
+            eq_high_db: snap.high_db,
+        };
+        if let Some(existing) = self.profiles.iter_mut().find(|p| p.name == name) {
+            *existing = profile;
+        } else {
+            self.profiles.push(profile);
+        }
+        let store = crate::config::Profiles { profiles: self.profiles.clone() };
+        match store.save() {
+            Ok(_) => self.status = format!("Profile '{name}' saved."),
+            Err(e) => self.status = format!("Profile save error: {e}"),
+        }
+    }
+
+    fn apply_profile(&mut self, idx: usize) {
+        let Some(p) = self.profiles.get(idx).cloned() else { return };
+        self.player.set_volume(p.volume);
+        self.config.playback.default_volume = p.volume;
+        self.shuffle = p.shuffle;
+        self.repeat = if p.repeat { RepeatMode::All } else { RepeatMode::Off };
+        self.player.eq().set(crate::eq::EqState {
+            low_db: p.eq_low_db,
+            mid_db: p.eq_mid_db,
+            high_db: p.eq_high_db,
+        });
+        if self.config.theme != p.theme {
+            if let Ok(theme) = crate::theme::Theme::load(&p.theme) {
+                self.config.theme = p.theme.clone();
+                self.theme = theme;
+            }
+        }
+        let _ = self.config.save();
+        self.status = format!("Profile '{}' loaded.", p.name);
+    }
+
+    fn handle_profile_browser_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_profile_browser = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.profile_browser_row > 0 {
+                    self.profile_browser_row -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.profile_browser_row + 1 < self.profiles.len() {
+                    self.profile_browser_row += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let row = self.profile_browser_row;
+                self.show_profile_browser = false;
+                self.apply_profile(row);
+            }
+            KeyCode::Char('n') => {
+                self.show_profile_browser = false;
+                self.profile_name_editing = true;
+                self.profile_name_input.clear();
+                self.status = "Profile name (Enter to save, Esc to cancel):".into();
+            }
+            KeyCode::Char('D') => {
+                if self.profile_browser_row < self.profiles.len() {
+                    let removed = self.profiles.remove(self.profile_browser_row);
+                    if self.profile_browser_row > 0 {
+                        self.profile_browser_row -= 1;
+                    }
+                    let store = crate::config::Profiles { profiles: self.profiles.clone() };
+                    let _ = store.save();
+                    self.status = format!("Profile '{}' deleted.", removed.name);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Render rich-protocol album art (Kitty / iTerm2) after ratatui's frame draw.

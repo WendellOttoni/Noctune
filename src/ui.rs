@@ -54,6 +54,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_playlist_browser {
         render_playlist_browser(f, area, app);
     }
+    if app.show_profile_browser {
+        render_profile_browser(f, area, app);
+    }
     if app.show_device_selector {
         render_device_selector(f, area, app);
     }
@@ -279,6 +282,73 @@ fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let mut state = ratatui::widgets::ListState::default();
     state.select(Some(app.playlist_browser_row));
+    f.render_stateful_widget(list, popup, &mut state);
+}
+
+fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let profiles = &app.profiles;
+
+    let w = 60.min(area.width.saturating_sub(4));
+    let h = (profiles.len() as u16 + 6).clamp(7, area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = if profiles.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  No profiles yet. Press n to save current settings.",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        )))]
+    } else {
+        profiles.iter().enumerate().map(|(i, p)| {
+            let selected = i == app.profile_browser_row;
+            let style = if selected {
+                Style::default().fg(parse_color(&theme.colors.foreground)).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(parse_color(&theme.colors.muted))
+            };
+            let label = format!(
+                " {}{}  vol:{:.0}%  EQ:{:+.0}/{:+.0}/{:+.0}  theme:{}",
+                if selected { "▶ " } else { "  " },
+                p.name,
+                p.volume * 100.0,
+                p.eq_low_db, p.eq_mid_db, p.eq_high_db,
+                p.theme,
+            );
+            ListItem::new(Line::from(Span::styled(label, style)))
+        }).collect()
+    };
+
+    let hint = Line::from(vec![
+        Span::styled("  Enter", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" load  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("n", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" save current  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("Shift+D", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" delete  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled("Esc", Style::default().fg(parse_color(&theme.colors.accent))),
+        Span::styled(" close", Style::default().fg(parse_color(&theme.colors.muted))),
+    ]);
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border(true))
+                .title(Span::styled(" Profiles ", theme.accent()))
+                .title_bottom(hint),
+        )
+        .highlight_style(
+            Style::default().bg(parse_color(&theme.colors.secondary)).fg(parse_color(&theme.colors.background)),
+        );
+
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(if profiles.is_empty() { None } else { Some(app.profile_browser_row) });
     f.render_stateful_widget(list, popup, &mut state);
 }
 
@@ -739,6 +809,7 @@ fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from("    T            sleep timer (30 min)"),
         Line::from("    w            save queue as .m3u"),
         Line::from("    L            load / browse saved playlists"),
+        Line::from("    O            open profiles browser (save/load settings)"),
         Line::from(""),
         Line::from("  View"),
         Line::from("    V            toggle flat / album view"),
@@ -751,8 +822,9 @@ fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from("    1 / 2        low  -/+"),
         Line::from("    3 / 4        mid  -/+"),
         Line::from("    5 / 6        high -/+"),
-        Line::from("    0            cycle preset (Flat/Bass/Vocal/Treble/Loud)"),
+        Line::from("    0            cycle preset (Flat/Bass/Vocal/Treble/Loud + custom)"),
         Line::from("    E            open EQ tuner popup"),
+        Line::from("    Ctrl+S       save EQ as custom preset (in EQ tuner)"),
         Line::from(""),
         Line::from("  Audio & Visualizer"),
         Line::from("    e            open audio panel (crossfade, compressor…)"),
@@ -1526,7 +1598,11 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let spinner_char = SPINNER[(app.tick_count as usize / 3) % SPINNER.len()];
 
-    let status_text = if app.playlist_name_editing {
+    let status_text = if app.eq_preset_name_editing {
+        format!(" EQ Preset name> {}_", app.eq_preset_name_input)
+    } else if app.profile_name_editing {
+        format!(" Profile name> {}_", app.profile_name_input)
+    } else if app.playlist_name_editing {
         format!(" Name> {}_", app.playlist_name_input)
     } else if app.url_editing {
         format!(" URL> {}_", app.url_input)

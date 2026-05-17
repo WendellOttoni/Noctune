@@ -54,6 +54,7 @@ pub enum Action {
     LastfmLogin,
     SelectDevice,
     EqTuner,
+    Profiles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -181,6 +182,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('F')), Action::LastfmLogin),
             (KeyChord::new(KeyCode::Char('D')), Action::SelectDevice),
             (KeyChord::new(KeyCode::Char('E')), Action::EqTuner),
+            (KeyChord::new(KeyCode::Char('O')), Action::Profiles),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {
