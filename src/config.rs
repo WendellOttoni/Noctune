@@ -180,6 +180,80 @@ pub fn playlists_dir() -> Result<PathBuf> {
     Ok(project_dirs()?.config_dir().join("playlists"))
 }
 
+pub fn eq_presets_path() -> Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().join("eq_presets.toml"))
+}
+
+pub fn profiles_path() -> Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().join("profiles.toml"))
+}
+
+// ── EQ presets ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqPreset {
+    pub name: String,
+    pub low_db: f32,
+    pub mid_db: f32,
+    pub high_db: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EqPresets {
+    #[serde(default)]
+    pub presets: Vec<EqPreset>,
+}
+
+impl EqPresets {
+    pub fn load() -> Self {
+        let Ok(path) = eq_presets_path() else { return Self::default() };
+        let Ok(text) = std::fs::read_to_string(&path) else { return Self::default() };
+        toml::from_str(&text).unwrap_or_default()
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = eq_presets_path()?;
+        if let Some(p) = path.parent() { std::fs::create_dir_all(p).ok(); }
+        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
+}
+
+// ── Profiles ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub name: String,
+    pub theme: String,
+    pub volume: f32,
+    pub shuffle: bool,
+    pub repeat: bool,
+    pub eq_low_db: f32,
+    pub eq_mid_db: f32,
+    pub eq_high_db: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Profiles {
+    #[serde(default)]
+    pub profiles: Vec<Profile>,
+}
+
+impl Profiles {
+    pub fn load() -> Self {
+        let Ok(path) = profiles_path() else { return Self::default() };
+        let Ok(text) = std::fs::read_to_string(&path) else { return Self::default() };
+        toml::from_str(&text).unwrap_or_default()
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = profiles_path()?;
+        if let Some(p) = path.parent() { std::fs::create_dir_all(p).ok(); }
+        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
+}
+
 fn default_music_dirs() -> Vec<PathBuf> {
     directories::UserDirs::new()
         .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))
