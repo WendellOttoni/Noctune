@@ -136,6 +136,13 @@ struct UndoSnapshot {
     label: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpotifyTab {
+    Search,
+    MyPlaylists,
+    LikedSongs,
+}
+
 pub struct App {
     #[allow(dead_code)]
     pub config: Config,
@@ -224,6 +231,15 @@ pub struct App {
     pub profile_browser_row: usize,
     pub profile_name_editing: bool,
     pub profile_name_input: String,
+    pub show_spotify_browser: bool,
+    pub spotify_browser_query: String,
+    pub spotify_browser_query_editing: bool,
+    pub spotify_browser_results: Vec<crate::audio::Track>,
+    pub spotify_browser_row: usize,
+    pub spotify_browser_tab: SpotifyTab,
+    pub spotify_my_playlists: Vec<(String, String, u32)>,
+    pub spotify_playlist_row: usize,
+    spotify_search_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -427,11 +443,20 @@ impl App {
             profile_browser_row: 0,
             profile_name_editing: false,
             profile_name_input: String::new(),
+            show_spotify_browser: false,
+            spotify_browser_query: String::new(),
+            spotify_browser_query_editing: false,
+            spotify_browser_results: Vec::new(),
+            spotify_browser_row: 0,
+            spotify_browser_tab: SpotifyTab::Search,
+            spotify_my_playlists: Vec::new(),
+            spotify_playlist_row: 0,
+            spotify_search_rx: None,
         })
     }
 
     pub fn is_loading(&self) -> bool {
-        self.url_rx.is_some() || self.scan_rx.is_some()
+        self.url_rx.is_some() || self.scan_rx.is_some() || self.spotify_search_rx.is_some()
     }
 
     pub fn search_active(&self) -> bool {
@@ -760,6 +785,26 @@ impl App {
             }
         }
 
+        if let Some(rx) = &self.spotify_search_rx {
+            match rx.try_recv() {
+                Ok(Ok(tracks)) => {
+                    let n = tracks.len();
+                    self.spotify_browser_results = tracks;
+                    self.spotify_browser_row = 0;
+                    self.status = format!("Spotify: {n} results.");
+                    self.spotify_search_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.status = format!("Spotify search error: {e}");
+                    self.spotify_search_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.spotify_search_rx = None;
+                }
+            }
+        }
+
         if let Some(rx) = &self.url_rx {
             match rx.try_recv() {
                 Ok(Ok(tracks)) => {
@@ -981,6 +1026,11 @@ impl App {
             return;
         }
 
+        if self.show_spotify_browser {
+            self.handle_spotify_browser_key(key);
+            return;
+        }
+
         if self.eq_preset_name_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1160,6 +1210,18 @@ impl App {
             Action::Profiles => {
                 self.show_profile_browser = true;
                 self.profile_browser_row = 0;
+            }
+            Action::SpotifyBrowser => {
+                if self.spotify.is_none() {
+                    self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+                } else {
+                    self.show_spotify_browser = true;
+                    self.spotify_browser_tab = SpotifyTab::Search;
+                    self.spotify_browser_query_editing = true;
+                    if self.spotify_my_playlists.is_empty() {
+                        self.spotify_load_my_playlists();
+                    }
+                }
             }
             Action::VolumeUp => {
                 let v = (self.player.volume() + 0.05).min(1.5);
@@ -2300,6 +2362,170 @@ impl App {
         match store.save() {
             Ok(_) => self.status = format!("Profile '{name}' saved."),
             Err(e) => self.status = format!("Profile save error: {e}"),
+        }
+    }
+
+    fn spotify_search(&mut self) {
+        let query = self.spotify_browser_query.trim().to_string();
+        if query.is_empty() { return; }
+        let Some(api) = self.spotify.clone() else { return };
+        self.status = format!("Searching Spotify: \"{query}\"…");
+        self.spotify_browser_results.clear();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
+        self.spotify_search_rx = Some(rx);
+        std::thread::spawn(move || {
+            let mut api = api;
+            let r = api.search(&query, 30).map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+    }
+
+    fn spotify_load_my_playlists(&mut self) {
+        let Some(mut api) = self.spotify.clone() else { return };
+        match api.my_playlists() {
+            Ok(playlists) => {
+                self.spotify_my_playlists = playlists;
+                if !self.spotify_my_playlists.is_empty() {
+                    self.spotify_playlist_row = 0;
+                }
+            }
+            Err(e) => self.status = format!("Spotify playlists error: {e}"),
+        }
+    }
+
+    fn spotify_load_liked(&mut self) {
+        let Some(api) = self.spotify.clone() else { return };
+        self.status = "Loading liked songs…".into();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
+        self.url_rx = Some(rx);
+        std::thread::spawn(move || {
+            let mut api = api;
+            let r = api.liked_tracks(50).map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+    }
+
+    fn spotify_load_playlist(&mut self, id: String, name: String) {
+        let Some(api) = self.spotify.clone() else { return };
+        self.status = format!("Loading playlist \"{name}\"…");
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
+        self.url_rx = Some(rx);
+        std::thread::spawn(move || {
+            let mut api = api;
+            let r = api.playlist_tracks(&id).map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+    }
+
+    fn handle_spotify_browser_key(&mut self, key: KeyEvent) {
+        // While typing a search query
+        if self.spotify_browser_query_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.spotify_browser_query_editing = false;
+                    if self.spotify_browser_query.is_empty() {
+                        self.show_spotify_browser = false;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.spotify_browser_query_editing = false;
+                    self.spotify_browser_tab = SpotifyTab::Search;
+                    self.spotify_search();
+                }
+                KeyCode::Backspace => { self.spotify_browser_query.pop(); }
+                KeyCode::Char(c) => { self.spotify_browser_query.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_spotify_browser = false;
+            }
+            // Tab cycle: Search → MyPlaylists → LikedSongs
+            KeyCode::Tab => {
+                self.spotify_browser_tab = match self.spotify_browser_tab {
+                    SpotifyTab::Search => {
+                        if self.spotify_my_playlists.is_empty() {
+                            self.spotify_load_my_playlists();
+                        }
+                        SpotifyTab::MyPlaylists
+                    }
+                    SpotifyTab::MyPlaylists => {
+                        self.spotify_load_liked();
+                        SpotifyTab::LikedSongs
+                    }
+                    SpotifyTab::LikedSongs => SpotifyTab::Search,
+                };
+                self.spotify_browser_row = 0;
+                self.spotify_playlist_row = 0;
+            }
+            KeyCode::Char('/') | KeyCode::Char('s') => {
+                self.spotify_browser_tab = SpotifyTab::Search;
+                self.spotify_browser_query_editing = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                match self.spotify_browser_tab {
+                    SpotifyTab::MyPlaylists => {
+                        if self.spotify_playlist_row > 0 { self.spotify_playlist_row -= 1; }
+                    }
+                    _ => {
+                        if self.spotify_browser_row > 0 { self.spotify_browser_row -= 1; }
+                    }
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                match self.spotify_browser_tab {
+                    SpotifyTab::MyPlaylists => {
+                        if self.spotify_playlist_row + 1 < self.spotify_my_playlists.len() {
+                            self.spotify_playlist_row += 1;
+                        }
+                    }
+                    _ => {
+                        if self.spotify_browser_row + 1 < self.spotify_browser_results.len() {
+                            self.spotify_browser_row += 1;
+                        }
+                    }
+                }
+            }
+            // Enter: play immediately
+            KeyCode::Enter => {
+                self.show_spotify_browser = false;
+                match self.spotify_browser_tab {
+                    SpotifyTab::MyPlaylists => {
+                        if let Some((id, name, _)) = self.spotify_my_playlists.get(self.spotify_playlist_row).cloned() {
+                            self.spotify_load_playlist(id, name);
+                        }
+                    }
+                    _ => {
+                        if let Some(t) = self.spotify_browser_results.get(self.spotify_browser_row).cloned() {
+                            self.queue.push(t.clone());
+                            self.queue_index = Some(self.queue.len() - 1);
+                            self.queue_state.select(self.queue_index);
+                            self.play_current();
+                        }
+                    }
+                }
+            }
+            // 'a': enqueue without playing
+            KeyCode::Char('a') => {
+                match self.spotify_browser_tab {
+                    SpotifyTab::MyPlaylists => {
+                        if let Some((id, name, _)) = self.spotify_my_playlists.get(self.spotify_playlist_row).cloned() {
+                            self.show_spotify_browser = false;
+                            self.spotify_load_playlist(id, name);
+                        }
+                    }
+                    _ => {
+                        if let Some(t) = self.spotify_browser_results.get(self.spotify_browser_row).cloned() {
+                            self.queue.push(t);
+                            self.status = "Added to queue.".into();
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
