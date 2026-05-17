@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
 license = "MIT"
-repository = "https://github.com/wendellocf/noctune"
+repository = "https://github.com/WendellOttoni/Noctune"
 
 [dependencies]
 # TUI
@@ -14,6 +14,7 @@ crossterm = "0.28"
 
 # Audio
 rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
+cpal = "0.15"
 symphonia = { version = "0.5", features = ["all"] }
 
 # Config & themes
@@ -26,6 +27,7 @@ anyhow = "1"
 thiserror = "2"
 directories = "5"
 walkdir = "2"
+notify = "6"
 unicode-width = "0.2"
 rustfft = "6"
 parking_lot = "0.12"
@@ -36,6 +38,7 @@ base64 = "0.22"
 rand = "0.8"
 tiny_http = "0.12"
 webbrowser = "1"
+discord-rich-presence = "1"
 
 [profile.release]
 lto = true

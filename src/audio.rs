@@ -1,10 +1,22 @@
 use anyhow::{anyhow, Context, Result};
-use rodio::{source::Source, Decoder, OutputStream, OutputStreamHandle, Sink};
+use cpal::traits::{DeviceTrait, HostTrait};
+use rodio::{source::Source, OutputStream, OutputStreamHandle, Sink};
 use std::{
     fs::File,
-    io::{BufReader, Cursor},
-    path::PathBuf,
+    io::{Cursor, Read},
+    path::{Path, PathBuf},
+    process::Child,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
+};
+use symphonia::core::{
+    audio::SampleBuffer,
+    codecs::{DecoderOptions, CODEC_TYPE_NULL},
+    errors::Error as SymphoniaError,
+    formats::{FormatOptions, FormatReader},
+    io::{MediaSourceStream, ReadOnlySource},
+    meta::MetadataOptions,
+    probe::Hint,
 };
 
 use crate::{
@@ -12,6 +24,185 @@ use crate::{
     metadata::{probe, TrackMeta},
     visualizer::{VizSource, VizTap},
 };
+
+// Wrapper to satisfy symphonia's `Read + Send + Sync` bound for non-Sync readers.
+// Safety: SymphoniaSource is !Sync, so the inner reader is accessed from one thread only.
+struct SyncWrap<R>(R);
+impl<R: Read> Read for SyncWrap<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+unsafe impl<R: Send> Send for SyncWrap<R> {}
+unsafe impl<R: Send> Sync for SyncWrap<R> {}
+
+pub struct SymphoniaSource {
+    format: Box<dyn FormatReader>,
+    decoder: Box<dyn symphonia::core::codecs::Decoder>,
+    track_id: u32,
+    sample_rate: u32,
+    channels: u16,
+    buf: Vec<f32>,
+    buf_pos: usize,
+    // Holds the yt-dlp child process so it's killed when the source is dropped.
+    _child: Option<Child>,
+}
+
+// Safety: FormatReader/Decoder internals are not Sync, but SymphoniaSource is !Sync
+// and is only moved to rodio's audio thread — never shared across threads.
+unsafe impl Send for SymphoniaSource {}
+
+impl SymphoniaSource {
+    fn from_mss(mss: MediaSourceStream, hint: Hint, child: Option<Child>) -> Result<Self> {
+        let fmt_opts = FormatOptions { enable_gapless: true, ..Default::default() };
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &fmt_opts, &MetadataOptions::default())
+            .map_err(|e| anyhow!("audio probe failed: {e}"))?;
+
+        let format = probed.format;
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+            .ok_or_else(|| anyhow!("no audio track found"))?;
+
+        let track_id = track.id;
+        let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+        let channels = track.codec_params.channels.map(|c| c.count() as u16).unwrap_or(2);
+        let decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .map_err(|e| anyhow!("codec init: {e}"))?;
+
+        Ok(Self {
+            format,
+            decoder,
+            track_id,
+            sample_rate,
+            channels,
+            buf: Vec::new(),
+            buf_pos: 0,
+            _child: child,
+        })
+    }
+
+    pub fn from_file(file: File, hint: Hint) -> Result<Self> {
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        Self::from_mss(mss, hint, None)
+    }
+
+    pub fn from_bytes(bytes: Vec<u8>, hint: Hint) -> Result<Self> {
+        // Cursor<Vec<u8>> implements MediaSource with is_seekable=true, which allows
+        // format readers that require seeking (e.g. MP4/M4A moov atom lookup).
+        let mss = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+        Self::from_mss(mss, hint, None)
+    }
+
+    #[allow(dead_code)]
+    pub fn from_reader<R: Read + Send + 'static>(reader: R, hint: Hint) -> Result<Self> {
+        let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(reader))), Default::default());
+        Self::from_mss(mss, hint, None)
+    }
+
+    pub fn from_child(
+        mut child: Child,
+        hint: Hint,
+        stream_err: Arc<Mutex<Option<String>>>,
+    ) -> Result<Self> {
+        let stdout = child.stdout.take().ok_or_else(|| anyhow!("yt-dlp stdout not piped"))?;
+        // Drain stderr in a background thread; write the last non-empty line to the error slot
+        // so the app can surface it in the status bar.
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let mut last = String::new();
+                for line in BufReader::new(stderr).lines().flatten() {
+                    if !line.trim().is_empty() {
+                        last = line;
+                    }
+                }
+                if !last.is_empty() {
+                    *stream_err.lock().unwrap() = Some(format!("yt-dlp: {last}"));
+                }
+            });
+        }
+        let mss = MediaSourceStream::new(
+            Box::new(ReadOnlySource::new(SyncWrap(stdout))),
+            Default::default(),
+        );
+        Self::from_mss(mss, hint, Some(child))
+    }
+
+    fn fill_buf(&mut self) -> bool {
+        loop {
+            let packet = match self.format.next_packet() {
+                Ok(p) => p,
+                Err(SymphoniaError::IoError(ref e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    return false;
+                }
+                Err(SymphoniaError::ResetRequired) => {
+                    let _ = self.decoder.reset();
+                    continue;
+                }
+                Err(_) => return false,
+            };
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            match self.decoder.decode(&packet) {
+                Ok(decoded) => {
+                    let spec = *decoded.spec();
+                    let mut sbuf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+                    sbuf.copy_interleaved_ref(decoded);
+                    self.buf = sbuf.samples().to_vec();
+                    self.buf_pos = 0;
+                    return !self.buf.is_empty();
+                }
+                Err(SymphoniaError::DecodeError(_)) => continue,
+                Err(_) => return false,
+            }
+        }
+    }
+}
+
+impl Iterator for SymphoniaSource {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        if self.buf_pos >= self.buf.len() {
+            if !self.fill_buf() {
+                return None;
+            }
+        }
+        let s = self.buf[self.buf_pos];
+        self.buf_pos += 1;
+        Some(s)
+    }
+}
+
+impl Source for SymphoniaSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        let rem = self.buf.len().saturating_sub(self.buf_pos);
+        if rem > 0 { Some(rem) } else { None }
+    }
+    fn channels(&self) -> u16 { self.channels }
+    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn total_duration(&self) -> Option<Duration> { None }
+}
+
+fn hint_from_path(path: &Path) -> Hint {
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    hint
+}
+
+pub enum CrossfadeStatus {
+    None,
+    InProgress,
+    Complete,
+}
 
 pub struct Player {
     _stream: OutputStream,
@@ -23,6 +214,17 @@ pub struct Player {
     paused_offset: Duration,
     tap: VizTap,
     eq: EqHandle,
+    pub rg_scale: f32,
+    // crossfade state
+    fade_sink: Option<Sink>,
+    fade_current: Option<Track>,
+    fade_started_at: Option<Instant>,
+    crossfade_start: Option<Instant>,
+    pub crossfade_secs: f32,
+    // gapless state
+    pub gapless_queued: Option<Track>,
+    // last error from a streaming source (yt-dlp stderr)
+    stream_err: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +233,11 @@ pub struct Track {
     pub title: String,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<String>,
     pub duration: Option<Duration>,
+    pub replaygain_track_db: Option<f32>,
+    pub replaygain_album_db: Option<f32>,
 }
 
 impl Track {
@@ -46,7 +252,11 @@ impl Track {
             title: fallback_title,
             artist: None,
             album: None,
+            genre: None,
+            year: None,
             duration: None,
+            replaygain_track_db: None,
+            replaygain_album_db: None,
         }
     }
 
@@ -58,7 +268,11 @@ impl Track {
         }
         t.artist = meta.artist;
         t.album = meta.album;
+        t.genre = meta.genre;
+        t.year = meta.year;
         t.duration = meta.duration;
+        t.replaygain_track_db = meta.replaygain_track_db;
+        t.replaygain_album_db = meta.replaygain_album_db;
         t
     }
 
@@ -71,7 +285,7 @@ impl Track {
 }
 
 impl Player {
-    pub fn new(volume: f32) -> Result<Self> {
+    pub fn new(volume: f32, viz_sensitivity: f32) -> Result<Self> {
         let (stream, handle) = OutputStream::try_default()
             .context("could not open default audio output")?;
         let sink = Sink::try_new(&handle)?;
@@ -84,8 +298,16 @@ impl Player {
             volume,
             started_at: None,
             paused_offset: Duration::ZERO,
-            tap: VizTap::new(),
+            tap: VizTap::new(viz_sensitivity),
             eq: EqHandle::new(),
+            rg_scale: 1.0,
+            fade_sink: None,
+            fade_current: None,
+            fade_started_at: None,
+            crossfade_start: None,
+            crossfade_secs: 3.0,
+            gapless_queued: None,
+            stream_err: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -97,45 +319,82 @@ impl Player {
         self.eq.clone()
     }
 
+    /// Returns and clears the last error message from a streaming source, if any.
+    pub fn take_stream_error(&self) -> Option<String> {
+        self.stream_err.lock().unwrap().take()
+    }
+
     pub fn play(&mut self, track: &Track) -> Result<()> {
         self.play_from(track, Duration::ZERO)
     }
 
+    fn cancel_crossfade(&mut self) {
+        self.fade_sink = None;
+        self.fade_current = None;
+        self.fade_started_at = None;
+        self.crossfade_start = None;
+    }
+
+    /// Appends the next track to the sink queue for gapless playback.
+    /// Only works for local files; URLs are skipped.
+    pub fn enqueue_next(&mut self, track: &Track) -> Result<()> {
+        let path_str = track.path.to_string_lossy();
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            return Ok(());
+        }
+        let file = File::open(&track.path)
+            .with_context(|| format!("opening {}", track.path.display()))?;
+        let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
+            .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
+        let viz = VizSource::new(source, self.tap.clone());
+        let eq = EqSource::new(viz, self.eq.clone());
+        self.sink.append(eq);
+        self.gapless_queued = Some(track.clone());
+        Ok(())
+    }
+
+    pub fn sink_queue_len(&self) -> usize {
+        self.sink.len()
+    }
+
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
+        self.cancel_crossfade();
+        self.gapless_queued = None;
         let path_str = track.path.to_string_lossy().to_string();
         let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
 
         if is_url {
-            let bytes = http_get_bytes(&path_str)?;
-            let decoder = Decoder::new(Cursor::new(bytes))
-                .map_err(|e| anyhow!("decoding {path_str}: {e}"))?;
-            let samples = decoder.convert_samples::<f32>();
-            let viz = VizSource::new(samples, self.tap.clone());
+            let source = if crate::ytdlp::is_youtube_url(&path_str) {
+                crate::ytdlp::spawn_yt_dlp(&path_str, self.stream_err.clone())?
+            } else {
+                let bytes = http_get_bytes(&path_str)?;
+                SymphoniaSource::from_bytes(bytes, Hint::new())?
+            };
+            let viz = VizSource::new(source, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
             let sink = Sink::try_new(&self.handle)?;
-            sink.set_volume(self.volume);
+            sink.set_volume(self.volume * self.rg_scale);
             sink.append(eq);
             self.sink = sink;
         } else {
             let file = File::open(&track.path)
                 .with_context(|| format!("opening {}", track.path.display()))?;
-            let decoder = Decoder::new(BufReader::new(file))
+            let mut source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
                 .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
-            let mut samples = decoder.convert_samples::<f32>();
             if offset > Duration::ZERO {
-                let rate = samples.sample_rate() as u64;
-                let ch = samples.channels() as u64;
+                let rate = source.sample_rate() as u64;
+                let ch = source.channels() as u64;
                 let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
                 for _ in 0..to_skip {
-                    if samples.next().is_none() {
+                    if source.next().is_none() {
                         break;
                     }
                 }
             }
-            let viz = VizSource::new(samples, self.tap.clone());
+            let viz = VizSource::new(source, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
             let sink = Sink::try_new(&self.handle)?;
-            sink.set_volume(self.volume);
+            sink.set_volume(self.volume * self.rg_scale);
             sink.append(eq);
             self.sink = sink;
         }
@@ -188,10 +447,75 @@ impl Player {
     }
 
     pub fn stop(&mut self) {
+        self.cancel_crossfade();
+        self.gapless_queued = None;
         self.sink.stop();
         self.current = None;
         self.started_at = None;
         self.paused_offset = Duration::ZERO;
+    }
+
+    pub fn remaining(&self) -> Option<Duration> {
+        let total = self.current.as_ref()?.duration?;
+        Some(total.saturating_sub(self.elapsed()))
+    }
+
+    pub fn is_crossfading(&self) -> bool {
+        self.crossfade_start.is_some()
+    }
+
+    pub fn begin_crossfade(&mut self, track: &Track) -> Result<()> {
+        let path_str = track.path.to_string_lossy();
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            return Ok(());
+        }
+
+        let file = File::open(&track.path)
+            .with_context(|| format!("opening {}", track.path.display()))?;
+        let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
+            .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
+        let viz = VizSource::new(source, self.tap.clone());
+        let eq = EqSource::new(viz, self.eq.clone());
+
+        let new_sink = Sink::try_new(&self.handle)?;
+        new_sink.set_volume(0.0);
+        new_sink.append(eq);
+
+        self.fade_sink = Some(new_sink);
+        self.fade_current = Some(track.clone());
+        self.fade_started_at = Some(Instant::now());
+        self.crossfade_start = Some(Instant::now());
+        Ok(())
+    }
+
+    pub fn update_crossfade(&mut self) -> CrossfadeStatus {
+        let Some(start) = self.crossfade_start else {
+            return CrossfadeStatus::None;
+        };
+        let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs).clamp(0.0, 1.0);
+
+        self.sink.set_volume(self.volume * self.rg_scale * (1.0 - progress));
+        if let Some(sink) = &self.fade_sink {
+            sink.set_volume(self.volume * self.rg_scale * progress);
+        }
+
+        if progress >= 1.0 || self.sink.empty() {
+            if let (Some(new_sink), Some(new_track)) =
+                (self.fade_sink.take(), self.fade_current.take())
+            {
+                new_sink.set_volume(self.volume * self.rg_scale);
+                let played = self.fade_started_at.map(|t| t.elapsed()).unwrap_or_default();
+                self.sink = new_sink;
+                self.current = Some(new_track);
+                self.paused_offset = played;
+                self.started_at = Some(Instant::now());
+            }
+            self.fade_started_at = None;
+            self.crossfade_start = None;
+            CrossfadeStatus::Complete
+        } else {
+            CrossfadeStatus::InProgress
+        }
     }
 
     pub fn is_paused(&self) -> bool {
@@ -213,12 +537,55 @@ impl Player {
 
     pub fn set_volume(&mut self, v: f32) {
         self.volume = v.clamp(0.0, 1.5);
-        self.sink.set_volume(self.volume);
+        self.sink.set_volume(self.volume * self.rg_scale);
     }
 
     pub fn current(&self) -> Option<&Track> {
         self.current.as_ref()
     }
+
+    pub fn switch_device(&mut self, device_name: &str) -> Result<()> {
+        let host = cpal::default_host();
+        let device = host
+            .output_devices()?
+            .find(|d| d.name().as_deref().ok() == Some(device_name))
+            .ok_or_else(|| anyhow!("device not found: {device_name}"))?;
+
+        let cur = self.current.clone();
+        let offset = self.elapsed();
+        let was_paused = self.sink.is_paused();
+
+        self.stop();
+
+        let (stream, handle) = OutputStream::try_from_device(&device)
+            .context("could not open selected audio device")?;
+        let sink = Sink::try_new(&handle)?;
+        sink.set_volume(self.volume * self.rg_scale);
+
+        self._stream = stream;
+        self.handle = handle;
+        self.sink = sink;
+
+        if let Some(track) = cur {
+            self.play_from(&track, offset)?;
+            if was_paused {
+                self.sink.pause();
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn enumerate_output_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    host.output_devices()
+        .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}
+
+pub fn default_device_name() -> Option<String> {
+    cpal::default_host().default_output_device()?.name().ok()
 }
 
 fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
@@ -243,7 +610,11 @@ impl Track {
             title: format!("{} (stream)", url),
             artist: None,
             album: None,
+            genre: None,
+            year: None,
             duration: None,
+            replaygain_track_db: None,
+            replaygain_album_db: None,
         }
     }
 }

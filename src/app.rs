@@ -6,9 +6,10 @@ use ratatui::widgets::ListState;
 use std::{path::PathBuf, time::Duration};
 use walkdir::WalkDir;
 
+use notify::Watcher as _;
+
 use crate::{
-    audio::Player,
-    audio::Track,
+    audio::{CrossfadeStatus, Player, Track},
     cache::{cache_path, MetadataCache},
     config::Config,
     keybinds::{Action, Bindings},
@@ -32,6 +33,7 @@ pub enum SortMode {
     Title,
     Artist,
     Album,
+    Rating,
 }
 
 impl SortMode {
@@ -39,7 +41,8 @@ impl SortMode {
         match self {
             SortMode::Title => SortMode::Artist,
             SortMode::Artist => SortMode::Album,
-            SortMode::Album => SortMode::Title,
+            SortMode::Album => SortMode::Rating,
+            SortMode::Rating => SortMode::Title,
         }
     }
     pub fn label(self) -> &'static str {
@@ -47,6 +50,7 @@ impl SortMode {
             SortMode::Title => "title",
             SortMode::Artist => "artist",
             SortMode::Album => "album",
+            SortMode::Rating => "rating",
         }
     }
 }
@@ -75,6 +79,61 @@ impl RepeatMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayGainMode {
+    Off,
+    Track,
+    Album,
+}
+
+impl ReplayGainMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            ReplayGainMode::Off => ReplayGainMode::Track,
+            ReplayGainMode::Track => ReplayGainMode::Album,
+            ReplayGainMode::Album => ReplayGainMode::Off,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            ReplayGainMode::Off => "off",
+            ReplayGainMode::Track => "track",
+            ReplayGainMode::Album => "album",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VizMode {
+    Spectrum,
+    Waveform,
+    VuMeter,
+}
+
+impl VizMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            VizMode::Spectrum => VizMode::Waveform,
+            VizMode::Waveform => VizMode::VuMeter,
+            VizMode::VuMeter => VizMode::Spectrum,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            VizMode::Spectrum => "spectrum",
+            VizMode::Waveform => "waveform",
+            VizMode::VuMeter => "vu-meter",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UndoSnapshot {
+    queue: Vec<Track>,
+    queue_index: Option<usize>,
+    label: String,
+}
+
 pub struct App {
     #[allow(dead_code)]
     pub config: Config,
@@ -95,6 +154,7 @@ pub struct App {
     pub shuffle: bool,
     pub repeat: RepeatMode,
     pub show_help: bool,
+    pub help_scroll: u16,
     pub sort: SortMode,
     pub sleep_until: Option<std::time::Instant>,
     pub history: std::collections::VecDeque<Track>,
@@ -105,13 +165,59 @@ pub struct App {
     pub spotify: Option<crate::spotify::SpotifyApi>,
     pub layout: LayoutRects,
     pub view_mode: ViewMode,
+    pub pending_crossfade_idx: Option<usize>,
+    pub url_input: String,
+    pub url_editing: bool,
+    pub eq_preset_idx: usize,
+    pub show_info: bool,
+    pub theme_names: Vec<String>,
+    pub theme_idx: usize,
+    pub last_drag_seek: Option<std::time::Instant>,
+    pub clear_confirm_until: Option<std::time::Instant>,
+    pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
+    pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
+    pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    pub _fs_watcher: Option<notify::RecommendedWatcher>,
+    pub rescan_debounce_until: Option<std::time::Instant>,
+    pub tick_count: u64,
+    pub hover_x: Option<u16>,
+    pub show_audio_panel: bool,
+    pub audio_panel_row: usize,
+    pub replaygain_mode: ReplayGainMode,
+    pub viz_mode: VizMode,
+    pub ratings: crate::ratings::Ratings,
+    pub play_history: crate::history::PlayHistory,
+    pub smart_expanded: [bool; 4],
+    pub play_threshold_secs: f64,
+    pub browser_path: Option<PathBuf>,
+    pub browser_music_root_idx: usize,
+    pub mini_mode: bool,
+    current_play_recorded: bool,
+    pub lastfm: Option<crate::lastfm::LastfmClient>,
+    lastfm_pending_token: Option<String>,
+    lastfm_scrobble_info: Option<(String, String, u64)>,
+    lastfm_scrobbled: bool,
+    discord_tx: Option<std::sync::mpsc::Sender<crate::discord::Cmd>>,
+    pub show_device_selector: bool,
+    pub device_list: Vec<String>,
+    pub device_selector_row: usize,
+    pub show_eq_tuner: bool,
+    pub eq_tuner_band: usize,
+    pending_gapless_idx: Option<usize>,
+    pub playlist_name_editing: bool,
+    pub playlist_name_input: String,
+    pub show_playlist_browser: bool,
+    pub playlist_browser_entries: Vec<PlaylistEntry>,
+    pub playlist_browser_row: usize,
+    pub playlist_browser_delete_confirm: Option<usize>,
+    pub active_playlist_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-struct UndoSnapshot {
-    queue: Vec<Track>,
-    queue_index: Option<usize>,
-    label: String,
+pub struct PlaylistEntry {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub track_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -125,44 +231,45 @@ pub struct LayoutRects {
 #[derive(Debug, Clone)]
 pub enum LibraryRow {
     Header(String),
+    SmartHeader { label: String, count: usize, expanded: bool },
     Track(Track),
+    Dir(std::path::PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Flat,
     Albums,
+    RecentlyPlayed,
+    Smart,
+    Browser,
 }
 
 impl ViewMode {
     pub fn toggle(self) -> Self {
         match self {
             ViewMode::Flat => ViewMode::Albums,
-            ViewMode::Albums => ViewMode::Flat,
+            ViewMode::Albums => ViewMode::Smart,
+            ViewMode::Smart => ViewMode::Browser,
+            ViewMode::Browser => ViewMode::Flat,
+            ViewMode::RecentlyPlayed => ViewMode::Flat,
         }
     }
     pub fn label(self) -> &'static str {
         match self {
             ViewMode::Flat => "flat",
             ViewMode::Albums => "albums",
+            ViewMode::RecentlyPlayed => "recently played",
+            ViewMode::Smart => "smart",
+            ViewMode::Browser => "browser",
         }
     }
 }
 
 impl App {
     pub fn new(config: Config, theme: Theme) -> Result<Self> {
-        let player = Player::new(config.playback.default_volume)?;
+        let player = Player::new(config.playback.default_volume, config.visualizer.sensitivity)?;
         let tap = player.tap();
-
-        let cache_file = cache_path();
-        let mut cache = cache_file
-            .as_ref()
-            .map(|p| MetadataCache::load(p))
-            .unwrap_or_default();
-        let library = scan_library(&config.music_dirs, &mut cache);
-        if let Some(p) = &cache_file {
-            cache.save(p);
-        }
 
         let config_shuffle = config.playback.shuffle;
         let config_repeat = config.playback.repeat;
@@ -170,15 +277,53 @@ impl App {
         let spotify_client_id = config.spotify.client_id.clone();
         let spotify_redirect_uri = config.spotify.redirect_uri();
         let spotify_port = config.spotify.redirect_port;
+
+        let discord_tx = if config.discord.is_configured() {
+            Some(crate::discord::spawn(config.discord.client_id.clone()))
+        } else {
+            None
+        };
+
+        let lastfm = if config.lastfm.is_configured() {
+            crate::lastfm::load_session().and_then(|s| {
+                crate::lastfm::LastfmClient::new(
+                    config.lastfm.api_key.clone(),
+                    config.lastfm.api_secret.clone(),
+                    s,
+                ).ok()
+            })
+        } else {
+            None
+        };
         let _ = spotify_port;
 
         let spotify = crate::spotify::load_tokens()
             .filter(|_| !spotify_client_id.is_empty())
             .and_then(|t| crate::spotify::SpotifyApi::new(spotify_client_id.clone(), t).ok());
 
-        let mut library_state = ListState::default();
-        if !library.is_empty() {
-            library_state.select(Some(0));
+        // Start async library scan
+        let (scan_tx, scan_rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let scan_dirs = config.music_dirs.clone();
+        std::thread::spawn(move || {
+            let cache_file = cache_path();
+            let mut cache = cache_file
+                .as_ref()
+                .map(|p| MetadataCache::load(p))
+                .unwrap_or_default();
+            let tracks = scan_library(&scan_dirs, &mut cache);
+            if let Some(p) = &cache_file {
+                cache.save(p);
+            }
+            let _ = scan_tx.send(tracks);
+        });
+
+        // Start filesystem watcher
+        let (fs_tx, fs_event_rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+        let mut _fs_watcher = notify::RecommendedWatcher::new(fs_tx, notify::Config::default()).ok();
+        if let Some(w) = &mut _fs_watcher {
+            for dir in &config.music_dirs {
+                let _ = w.watch(dir.as_path(), notify::RecursiveMode::Recursive);
+            }
         }
 
         Ok(Self {
@@ -186,20 +331,21 @@ impl App {
             theme,
             player,
             tap,
-            library,
+            library: Vec::new(),
             queue: Vec::new(),
             undo_stack: std::collections::VecDeque::with_capacity(MAX_UNDO_SNAPSHOTS),
-            library_state,
+            library_state: ListState::default(),
             queue_state: ListState::default(),
             focus: Pane::Library,
             queue_index: None,
-            status: "Noctune ready. Press ? for help.".into(),
+            status: "Scanning library…".into(),
             should_quit: false,
             search: String::new(),
             search_editing: false,
             shuffle: config_shuffle,
             repeat: if config_repeat { RepeatMode::All } else { RepeatMode::Off },
             show_help: false,
+            help_scroll: 0,
             sort: SortMode::Title,
             sleep_until: None,
             history: std::collections::VecDeque::with_capacity(64),
@@ -210,7 +356,57 @@ impl App {
             spotify,
             layout: LayoutRects::default(),
             view_mode: ViewMode::Flat,
+            pending_crossfade_idx: None,
+            url_input: String::new(),
+            url_editing: false,
+            eq_preset_idx: 0,
+            show_info: false,
+            theme_names: Vec::new(),
+            theme_idx: 0,
+            last_drag_seek: None,
+            clear_confirm_until: None,
+            url_rx: None,
+            scan_rx: Some(scan_rx),
+            fs_event_rx: Some(fs_event_rx),
+            _fs_watcher,
+            rescan_debounce_until: None,
+            tick_count: 0,
+            hover_x: None,
+            show_audio_panel: false,
+            audio_panel_row: 0,
+            replaygain_mode: ReplayGainMode::Track,
+            viz_mode: VizMode::Spectrum,
+            ratings: crate::ratings::Ratings::load(),
+            play_history: crate::history::PlayHistory::load(),
+            smart_expanded: [true, false, false, false],
+            play_threshold_secs: 30.0,
+            current_play_recorded: false,
+            browser_path: None,
+            browser_music_root_idx: 0,
+            mini_mode: false,
+            playlist_name_editing: false,
+            playlist_name_input: String::new(),
+            show_playlist_browser: false,
+            playlist_browser_entries: Vec::new(),
+            playlist_browser_row: 0,
+            playlist_browser_delete_confirm: None,
+            active_playlist_name: None,
+            lastfm,
+            lastfm_pending_token: None,
+            lastfm_scrobble_info: None,
+            lastfm_scrobbled: false,
+            discord_tx,
+            show_device_selector: false,
+            device_list: Vec::new(),
+            device_selector_row: 0,
+            show_eq_tuner: false,
+            eq_tuner_band: 0,
+            pending_gapless_idx: None,
         })
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.url_rx.is_some() || self.scan_rx.is_some()
     }
 
     pub fn search_active(&self) -> bool {
@@ -222,27 +418,40 @@ impl App {
     }
 
     pub fn visible_library(&self) -> Vec<&Track> {
-        let base: Vec<&Track> = if self.search.is_empty() {
-            self.library.iter().collect()
+        let source: Box<dyn Iterator<Item = &Track>> = match self.view_mode {
+            ViewMode::RecentlyPlayed => Box::new(self.history.iter()),
+            _ => Box::new(self.library.iter()),
+        };
+
+        if self.search.is_empty() {
+            source.collect()
         } else {
             let needle = self.search.to_lowercase();
-            self.library
-                .iter()
+            source
                 .filter(|t| {
-                    t.title.to_lowercase().contains(&needle)
-                        || t.artist
-                            .as_deref()
-                            .map(|a| a.to_lowercase().contains(&needle))
-                            .unwrap_or(false)
+                    let matches = |s: &str| s.to_lowercase().contains(&needle);
+                    matches(&t.title)
+                        || t.artist.as_deref().map(matches).unwrap_or(false)
+                        || t.album.as_deref().map(matches).unwrap_or(false)
+                        || t.genre.as_deref().map(matches).unwrap_or(false)
+                        || t.year.as_deref().map(matches).unwrap_or(false)
                 })
                 .collect()
-        };
-        base
+        }
     }
 
     pub fn library_rows(&self) -> Vec<LibraryRow> {
+        if self.view_mode == ViewMode::Smart {
+            return self.smart_rows();
+        }
+        if self.view_mode == ViewMode::Browser {
+            return self.browser_rows();
+        }
         let visible = self.visible_library();
-        if self.view_mode == ViewMode::Flat || self.sort != SortMode::Album {
+        if self.view_mode == ViewMode::Flat
+            || self.view_mode == ViewMode::RecentlyPlayed
+            || self.sort != SortMode::Album
+        {
             return visible
                 .into_iter()
                 .map(|t| LibraryRow::Track(t.clone()))
@@ -261,12 +470,188 @@ impl App {
         out
     }
 
+    fn smart_rows(&self) -> Vec<LibraryRow> {
+        const LIMIT: usize = 50;
+        let track_map: std::collections::HashMap<String, &Track> = self
+            .library
+            .iter()
+            .map(|t| (t.path.display().to_string(), t))
+            .collect();
+
+        let most_played: Vec<Track> = {
+            let paths = self.play_history.most_played_paths(LIMIT);
+            paths.iter()
+                .filter_map(|(k, _)| track_map.get(k).copied().cloned().map(Some).unwrap_or(None))
+                .collect()
+        };
+
+        let recently_played: Vec<Track> = {
+            let paths = self.play_history.recently_played_paths(LIMIT);
+            paths.iter()
+                .filter_map(|k| track_map.get(k).copied().cloned().map(Some).unwrap_or(None))
+                .collect()
+        };
+
+        let never_played: Vec<Track> = {
+            let mut v: Vec<Track> = self
+                .library
+                .iter()
+                .filter(|t| self.play_history.play_count(&t.path) == 0)
+                .cloned()
+                .collect();
+            v.truncate(LIMIT);
+            v
+        };
+
+        let recently_added: Vec<Track> = {
+            let mut v: Vec<(Track, u64)> = self
+                .library
+                .iter()
+                .filter_map(|t| {
+                    let mtime = std::fs::metadata(&t.path)
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    Some((t.clone(), mtime))
+                })
+                .collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1));
+            v.truncate(LIMIT);
+            v.into_iter().map(|(t, _)| t).collect()
+        };
+
+        let categories: [(&str, &Vec<Track>, bool); 4] = [
+            ("Most Played", &most_played, self.smart_expanded[0]),
+            ("Recently Played", &recently_played, self.smart_expanded[1]),
+            ("Recently Added", &recently_added, self.smart_expanded[2]),
+            ("Never Played", &never_played, self.smart_expanded[3]),
+        ];
+
+        let mut out = Vec::new();
+        for (label, tracks, expanded) in categories {
+            out.push(LibraryRow::SmartHeader {
+                label: label.to_string(),
+                count: tracks.len(),
+                expanded,
+            });
+            if expanded {
+                for t in tracks.iter() {
+                    out.push(LibraryRow::Track(t.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    fn browser_rows(&self) -> Vec<LibraryRow> {
+        let dir = if let Some(p) = &self.browser_path {
+            p.clone()
+        } else if let Some(root) = self.config.music_dirs.get(self.browser_music_root_idx) {
+            root.clone()
+        } else {
+            return Vec::new();
+        };
+
+        let Ok(read_dir) = std::fs::read_dir(&dir) else { return Vec::new() };
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        let mut files: Vec<Track> = Vec::new();
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if AUDIO_EXTS.contains(&ext.to_lowercase().as_str()) {
+                    files.push(Track::from_path(path));
+                }
+            }
+        }
+        dirs.sort();
+        files.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+
+        let mut out = Vec::new();
+        for d in dirs {
+            out.push(LibraryRow::Dir(d));
+        }
+        for f in files {
+            out.push(LibraryRow::Track(f));
+        }
+        out
+    }
+
+    pub fn browser_current_path(&self) -> PathBuf {
+        if let Some(p) = &self.browser_path {
+            p.clone()
+        } else {
+            self.config.music_dirs
+                .get(self.browser_music_root_idx)
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    fn browser_enter(&mut self) {
+        let sel = self.library_state.selected().unwrap_or(0);
+        let rows = self.library_rows();
+        match rows.get(sel) {
+            Some(LibraryRow::Dir(p)) => {
+                self.browser_path = Some(p.clone());
+                self.library_state.select(Some(0));
+            }
+            Some(LibraryRow::Track(t)) => {
+                let t = t.clone();
+                self.queue.push(t);
+                let idx = self.queue.len() - 1;
+                self.queue_index = Some(idx);
+                self.queue_state.select(Some(idx));
+                self.play_current();
+            }
+            _ => {}
+        }
+    }
+
+    fn browser_up(&mut self) {
+        if let Some(current) = &self.browser_path {
+            let parent = current.parent().map(|p| p.to_path_buf());
+            let is_root = self.config.music_dirs
+                .get(self.browser_music_root_idx)
+                .map(|r| current == r)
+                .unwrap_or(false);
+            if is_root {
+                self.browser_path = None;
+            } else {
+                self.browser_path = parent;
+            }
+            self.library_state.select(Some(0));
+        } else if self.config.music_dirs.len() > 1 {
+            self.browser_music_root_idx =
+                (self.browser_music_root_idx + 1) % self.config.music_dirs.len();
+            self.library_state.select(Some(0));
+        }
+    }
+
     fn selected_library_track(&self) -> Option<Track> {
         let rows = self.library_rows();
         let idx = self.library_state.selected()?;
         match rows.get(idx)? {
             LibraryRow::Track(t) => Some(t.clone()),
-            LibraryRow::Header(_) => None,
+            LibraryRow::Header(_) | LibraryRow::SmartHeader { .. } | LibraryRow::Dir(_) => None,
+        }
+    }
+
+    fn toggle_smart_category(&mut self, row_idx: usize) {
+        let rows = self.library_rows();
+        let mut cat_idx = 0usize;
+        for (i, row) in rows.iter().enumerate() {
+            if let LibraryRow::SmartHeader { .. } = row {
+                if i == row_idx {
+                    self.smart_expanded[cat_idx] = !self.smart_expanded[cat_idx];
+                    return;
+                }
+                cat_idx += 1;
+            }
         }
     }
 
@@ -286,13 +671,198 @@ impl App {
     }
 
     fn tick(&mut self) -> Result<()> {
+        self.tick_count = self.tick_count.wrapping_add(1);
+
+        // Poll completed library scan
+        if let Some(rx) = &self.scan_rx {
+            match rx.try_recv() {
+                Ok(mut tracks) => {
+                    sort_tracks(&mut tracks, self.sort);
+                    let n = tracks.len();
+                    self.library = tracks;
+                    self.library_state.select(if self.library.is_empty() { None } else { Some(0) });
+                    self.status = format!("Library: {n} tracks.");
+                    self.scan_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.status = "Library scan failed.".into();
+                    self.scan_rx = None;
+                }
+            }
+        }
+
+        // Drain filesystem events and set debounce timer
+        if let Some(rx) = &self.fs_event_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(Ok(event)) => {
+                        let relevant = matches!(
+                            event.kind,
+                            notify::EventKind::Create(_)
+                                | notify::EventKind::Remove(_)
+                                | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                        );
+                        if relevant {
+                            self.rescan_debounce_until = Some(
+                                std::time::Instant::now() + Duration::from_secs(2),
+                            );
+                        }
+                    }
+                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                }
+            }
+        }
+
+        // Trigger debounced rescan
+        if let Some(until) = self.rescan_debounce_until {
+            if std::time::Instant::now() >= until && self.scan_rx.is_none() {
+                self.rescan_debounce_until = None;
+                self.start_async_scan();
+                self.status = "Library changed — rescanning…".into();
+            }
+        }
+
+        if let Some(rx) = &self.url_rx {
+            match rx.try_recv() {
+                Ok(Ok(tracks)) => {
+                    let n = tracks.len();
+                    let was_empty = self.queue.is_empty();
+                    self.queue.extend(tracks);
+                    if was_empty {
+                        self.queue_state.select(Some(0));
+                    }
+                    self.status = format!("Added {n} track(s) to queue.");
+                    self.url_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.status = format!("Load error: {e}");
+                    self.url_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.status = "URL load failed (worker disconnected).".into();
+                    self.url_rx = None;
+                }
+            }
+        }
+        if let Some(err) = self.player.take_stream_error() {
+            self.status = err;
+        }
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
                 self.player.stop();
                 self.sleep_until = None;
                 self.status = "Sleep timer reached — playback stopped.".into();
+                return Ok(());
             }
         }
+
+        // Advance active crossfade each tick
+        if self.player.is_crossfading() {
+            if let CrossfadeStatus::Complete = self.player.update_crossfade() {
+                if let Some(idx) = self.pending_crossfade_idx.take() {
+                    self.queue_index = Some(idx);
+                    self.queue_state.select(Some(idx));
+                    if let Some(t) = self.player.current().cloned() {
+                        self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                        self.status = format!("Playing: {}", t.display());
+                        self.push_history(t);
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        // Try to start a crossfade when close to end (not for repeat:one)
+        if !matches!(self.repeat, RepeatMode::One) {
+            if let Some(remaining) = self.player.remaining() {
+                let xfade = Duration::from_secs_f32(self.player.crossfade_secs);
+                if remaining > Duration::ZERO && remaining <= xfade {
+                    let cur = self.queue_index.unwrap_or(0);
+                    if let Some(next_idx) = self.pick_next_index(cur) {
+                        if let Some(track) = self.queue.get(next_idx).cloned() {
+                            if self.player.begin_crossfade(&track).is_ok() {
+                                self.pending_crossfade_idx = Some(next_idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Gapless: detect when queued track becomes active (sink_queue_len drops to 1)
+        if self.player.gapless_queued.is_some() && self.player.sink_queue_len() <= 1 {
+            if let Some(next_track) = self.player.gapless_queued.take() {
+                if let Some(idx) = self.pending_gapless_idx.take() {
+                    self.queue_index = Some(idx);
+                    self.queue_state.select(Some(idx));
+                }
+                self.lyrics = crate::lyrics::Lyrics::for_track(&next_track.path);
+                self.status = format!("Playing: {}", next_track.display());
+                self.current_play_recorded = false;
+                let artist = next_track.artist.clone().unwrap_or_default();
+                let title = next_track.title.clone();
+                let ts = crate::lastfm::now_unix();
+                self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
+                self.lastfm_scrobbled = false;
+                if let Some(lfm) = self.lastfm.clone() {
+                    let a = artist.clone();
+                    let ti = title.clone();
+                    std::thread::spawn(move || { let _ = lfm.update_now_playing(&a, &ti); });
+                }
+                if let Some(tx) = &self.discord_tx {
+                    let _ = tx.send(crate::discord::Cmd::Update { title, artist, start_secs: ts as i64 });
+                }
+                self.push_history(next_track);
+            }
+        }
+
+        // Gapless: pre-enqueue next track when approaching end (only when crossfade is off)
+        if self.player.crossfade_secs == 0.0
+            && self.player.gapless_queued.is_none()
+            && self.pending_crossfade_idx.is_none()
+            && !matches!(self.repeat, RepeatMode::One)
+        {
+            if let Some(remaining) = self.player.remaining() {
+                if remaining > Duration::ZERO && remaining <= Duration::from_secs(2) {
+                    let cur = self.queue_index.unwrap_or(0);
+                    if let Some(next_idx) = self.pick_next_index(cur) {
+                        if let Some(track) = self.queue.get(next_idx).cloned() {
+                            if self.player.enqueue_next(&track).is_ok() {
+                                self.pending_gapless_idx = Some(next_idx);
+                                self.player.rg_scale = rg_scale(&track, self.replaygain_mode);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Record play after 30s threshold (once per track start)
+        if !self.current_play_recorded {
+            if let Some(track) = self.player.current().cloned() {
+                if self.player.elapsed().as_secs_f64() >= self.play_threshold_secs {
+                    self.play_history.record_play(&track.path);
+                    self.current_play_recorded = true;
+
+                    // Scrobble to Last.fm (once per track)
+                    if !self.lastfm_scrobbled {
+                        if let (Some(lfm), Some((artist, title, ts))) =
+                            (self.lastfm.clone(), self.lastfm_scrobble_info.clone())
+                        {
+                            self.lastfm_scrobbled = true;
+                            std::thread::spawn(move || {
+                                let _ = lfm.scrobble(&artist, &title, ts);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Regular end detection (covers repeat:one and tracks with no duration)
         if self.player.is_empty() && self.player.current().is_some() {
             self.advance();
         }
@@ -331,7 +901,82 @@ impl App {
         }
 
         if self.show_help {
-            self.show_help = false;
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.help_scroll = self.help_scroll.saturating_add(1);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.help_scroll = self.help_scroll.saturating_sub(1);
+                }
+                _ => {
+                    self.show_help = false;
+                    self.help_scroll = 0;
+                }
+            }
+            return;
+        }
+        if self.show_info {
+            self.show_info = false;
+            return;
+        }
+
+        if self.show_audio_panel {
+            self.handle_audio_panel_key(key);
+            return;
+        }
+
+        if self.show_device_selector {
+            self.handle_device_selector_key(key);
+            return;
+        }
+
+        if self.show_eq_tuner {
+            self.handle_eq_tuner_key(key);
+            return;
+        }
+
+        if self.show_playlist_browser {
+            self.handle_playlist_browser_key(key);
+            return;
+        }
+
+        if self.playlist_name_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.playlist_name_input.clear();
+                    self.playlist_name_editing = false;
+                }
+                KeyCode::Enter => {
+                    let name = self.playlist_name_input.trim().to_string();
+                    self.playlist_name_input.clear();
+                    self.playlist_name_editing = false;
+                    self.save_playlist_named(name);
+                }
+                KeyCode::Backspace => { self.playlist_name_input.pop(); }
+                KeyCode::Char(c) => { self.playlist_name_input.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.url_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.url_input.clear();
+                    self.url_editing = false;
+                }
+                KeyCode::Enter => {
+                    let url = self.url_input.trim().to_string();
+                    self.url_input.clear();
+                    self.url_editing = false;
+                    if !url.is_empty() {
+                        self.start_url_load(url);
+                    }
+                }
+                KeyCode::Backspace => { self.url_input.pop(); }
+                KeyCode::Char(c) => { self.url_input.push(c); }
+                _ => {}
+            }
             return;
         }
 
@@ -363,6 +1008,15 @@ impl App {
             return;
         }
 
+        // Browser: Backspace goes up a directory
+        if self.view_mode == ViewMode::Browser
+            && self.focus == Pane::Library
+            && key.code == KeyCode::Backspace
+        {
+            self.browser_up();
+            return;
+        }
+
         if let Some(action) = self.bindings.lookup(key.code, key.modifiers) {
             self.run_action(action);
         } else {
@@ -391,7 +1045,12 @@ impl App {
             Action::PlayPause => self.player.toggle(),
             Action::Next => self.next(),
             Action::Prev => self.prev(),
-            Action::Stop => self.player.stop(),
+            Action::Stop => {
+                self.player.stop();
+                if let Some(tx) = &self.discord_tx {
+                    let _ = tx.send(crate::discord::Cmd::Clear);
+                }
+            }
             Action::Shuffle => {
                 self.shuffle = !self.shuffle;
                 self.status = format!("Shuffle: {}", if self.shuffle { "on" } else { "off" });
@@ -402,7 +1061,7 @@ impl App {
             }
             Action::Sort => {
                 self.sort = self.sort.cycle();
-                sort_tracks(&mut self.library, self.sort);
+                sort_tracks_with_ratings(&mut self.library, self.sort, Some(&self.ratings));
                 self.library_state.select(if self.library.is_empty() {
                     None
                 } else {
@@ -411,8 +1070,14 @@ impl App {
                 self.status = format!("Sort: {}", self.sort.label());
             }
             Action::SleepTimer => self.toggle_sleep_timer(),
-            Action::SavePlaylist => self.save_playlist(),
-            Action::LoadPlaylist => self.load_first_playlist(),
+            Action::SavePlaylist => {
+                self.playlist_name_editing = true;
+                self.playlist_name_input.clear();
+                self.status = "Playlist name (Enter to save, Esc to cancel):".into();
+            }
+            Action::LoadPlaylist => {
+                self.open_playlist_browser();
+            }
             Action::VolumeUp => {
                 let v = (self.player.volume() + 0.05).min(1.5);
                 self.player.set_volume(v);
@@ -437,16 +1102,15 @@ impl App {
             Action::Enqueue => self.enqueue_selection(),
             Action::RemoveQueueItem => self.remove_from_queue(),
             Action::ClearQueue => self.clear_queue(),
-            Action::UndoQueueAction => self.undo_queue_action(),
             Action::SpotifyLogin => self.spotify_login(),
             Action::SpotifyToggle => self.spotify_toggle(),
             Action::ToggleView => {
                 self.view_mode = self.view_mode.toggle();
-                self.library_state.select(if self.visible_library().is_empty() {
-                    None
-                } else {
-                    Some(0)
-                });
+                if self.view_mode == ViewMode::Browser {
+                    self.browser_path = None;
+                    self.browser_music_root_idx = 0;
+                }
+                self.library_state.select(Some(0));
                 self.status = format!("View: {}", self.view_mode.label());
             }
             Action::EqLowUp => {
@@ -473,7 +1137,310 @@ impl App {
                 self.player.eq().adjust_high(-1.0);
                 self.status = "EQ high -1 dB".into();
             }
+            Action::OpenUrl => {
+                self.url_editing = true;
+                self.status = "URL/search — YouTube, ytmsearch:..., Spotify, radio M3U/PLS — Enter/Esc".into();
+            }
+            Action::EqPreset => {
+                let presets = crate::eq::PRESETS;
+                self.eq_preset_idx = (self.eq_preset_idx + 1) % presets.len();
+                let (name, state) = presets[self.eq_preset_idx];
+                self.player.eq().set(state);
+                self.status = format!("EQ preset: {name}");
+            }
+            Action::Rescan => self.start_async_scan(),
+            Action::TrackInfo => self.show_info = true,
+            Action::CycleTheme => self.cycle_theme(),
+            Action::VizSensUp => self.adjust_viz_sensitivity(crate::visualizer::SENS_STEP),
+            Action::VizSensDown => self.adjust_viz_sensitivity(-crate::visualizer::SENS_STEP),
+            Action::UndoQueue => self.undo_queue_action(),
+            Action::RecentlyPlayed => {
+                if self.view_mode == ViewMode::RecentlyPlayed {
+                    self.view_mode = ViewMode::Flat;
+                    self.status = "View: library".into();
+                } else {
+                    self.view_mode = ViewMode::RecentlyPlayed;
+                    self.status = format!("Recently played ({} tracks)", self.history.len());
+                }
+                self.library_state.select(if self.visible_library().is_empty() {
+                    None
+                } else {
+                    Some(0)
+                });
+            }
+            Action::ShowAudioPanel => {
+                self.show_audio_panel = !self.show_audio_panel;
+                self.audio_panel_row = 0;
+            }
+            Action::ReplayGain => {
+                self.replaygain_mode = self.replaygain_mode.cycle();
+                self.status = format!("ReplayGain: {}", self.replaygain_mode.label());
+            }
+            Action::CycleVizMode => {
+                self.viz_mode = self.viz_mode.cycle();
+                self.status = format!("Visualizer: {}", self.viz_mode.label());
+            }
+            Action::ToggleMini => {
+                self.mini_mode = !self.mini_mode;
+            }
+            Action::LastfmLogin => self.lastfm_login(),
+            Action::SelectDevice => self.open_device_selector(),
+            Action::EqTuner => {
+                self.show_eq_tuner = !self.show_eq_tuner;
+                self.eq_tuner_band = 0;
+            }
+            Action::ToggleFavorite => {
+                let path = match self.focus {
+                    Pane::Library => self.selected_library_track().map(|t| t.path),
+                    Pane::Queue => self
+                        .queue_state
+                        .selected()
+                        .and_then(|i| self.queue.get(i))
+                        .map(|t| t.path.clone()),
+                };
+                if let Some(p) = path {
+                    let fav = self.ratings.toggle_favorite(&p);
+                    self.status = if fav {
+                        "Added to favorites ♥".into()
+                    } else {
+                        "Removed from favorites".into()
+                    };
+                }
+            }
         }
+    }
+
+    fn adjust_viz_sensitivity(&mut self, delta: f32) {
+        let new_val = self.tap.adjust_sensitivity(delta);
+        self.config.visualizer.sensitivity = new_val;
+        self.status = format!("Visualizer sensitivity: ×{:.1}", new_val);
+        if let Err(e) = self.config.save() {
+            self.status = format!("sensitivity saved in memory only ({e})");
+        }
+    }
+
+    pub const AUDIO_PANEL_ROWS: usize = 7;
+
+    fn handle_audio_panel_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('e') => {
+                self.show_audio_panel = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.audio_panel_row =
+                    self.audio_panel_row.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.audio_panel_row + 1 < Self::AUDIO_PANEL_ROWS {
+                    self.audio_panel_row += 1;
+                }
+            }
+            KeyCode::Left => self.audio_panel_adjust(-1),
+            KeyCode::Right => self.audio_panel_adjust(1),
+            _ => {}
+        }
+    }
+
+    fn audio_panel_adjust(&mut self, dir: i32) {
+        match self.audio_panel_row {
+            0 => {
+                self.player.eq().adjust_low(dir as f32);
+                let db = self.player.eq().snapshot().low_db;
+                self.status = format!("EQ Low: {:+.0} dB", db);
+            }
+            1 => {
+                self.player.eq().adjust_mid(dir as f32);
+                let db = self.player.eq().snapshot().mid_db;
+                self.status = format!("EQ Mid: {:+.0} dB", db);
+            }
+            2 => {
+                self.player.eq().adjust_high(dir as f32);
+                let db = self.player.eq().snapshot().high_db;
+                self.status = format!("EQ High: {:+.0} dB", db);
+            }
+            3 => {
+                let presets = crate::eq::PRESETS;
+                self.eq_preset_idx = if dir > 0 {
+                    (self.eq_preset_idx + 1) % presets.len()
+                } else {
+                    self.eq_preset_idx.wrapping_sub(1).min(presets.len() - 1)
+                };
+                let (name, state) = presets[self.eq_preset_idx];
+                self.player.eq().set(state);
+                self.status = format!("EQ preset: {name}");
+            }
+            4 => {
+                let v = (self.player.volume() + dir as f32 * 0.05).clamp(0.0, 1.5);
+                self.player.set_volume(v);
+                self.status = format!("Volume: {}%", (v * 100.0) as u32);
+            }
+            5 => {
+                let xf = (self.player.crossfade_secs + dir as f32 * 0.5).clamp(0.0, 10.0);
+                self.player.crossfade_secs = xf;
+                self.status = format!("Crossfade: {:.1}s", xf);
+            }
+            6 => {
+                self.adjust_viz_sensitivity(dir as f32 * crate::visualizer::SENS_STEP);
+            }
+            _ => {}
+        }
+    }
+
+    fn cycle_theme(&mut self) {
+        if self.theme_names.is_empty() {
+            let dir = match crate::config::themes_dir() {
+                Ok(d) => d,
+                Err(e) => { self.status = format!("themes dir: {e}"); return; }
+            };
+            let mut names: Vec<String> = std::fs::read_dir(&dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().and_then(|s| s.to_str()) == Some("toml") {
+                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    } else { None }
+                })
+                .collect();
+            names.sort();
+            if names.is_empty() {
+                names.push("default".to_string());
+            }
+            self.theme_idx = names.iter().position(|n| n == &self.theme.name).unwrap_or(0);
+            self.theme_names = names;
+        }
+        if self.theme_names.is_empty() { return; }
+        self.theme_idx = (self.theme_idx + 1) % self.theme_names.len();
+        let name = &self.theme_names[self.theme_idx];
+        match crate::theme::Theme::load(name) {
+            Ok(t) => {
+                self.theme = t;
+                self.status = format!("Theme: {name}");
+            }
+            Err(e) => self.status = format!("Theme load error: {e}"),
+        }
+    }
+
+    fn start_async_scan(&mut self) {
+        if self.scan_rx.is_some() {
+            self.status = "Scan already in progress…".into();
+            return;
+        }
+        let dirs = self.config.music_dirs.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        self.scan_rx = Some(rx);
+        self.status = "Scanning library…".into();
+        std::thread::spawn(move || {
+            let cache_file = cache_path();
+            let mut cache = cache_file
+                .as_ref()
+                .map(|p| MetadataCache::load(p))
+                .unwrap_or_default();
+            let tracks = scan_library(&dirs, &mut cache);
+            if let Some(p) = &cache_file {
+                cache.save(p);
+            }
+            let _ = tx.send(tracks);
+        });
+    }
+
+    fn start_url_load(&mut self, url: String) {
+        if self.url_rx.is_some() {
+            self.status = "Already loading, please wait…".into();
+            return;
+        }
+
+        // Radio playlist (M3U / PLS) — fetch and parse synchronously, then enqueue streams
+        let lower = url.to_lowercase();
+        let is_playlist_file = (lower.ends_with(".m3u")
+            || lower.ends_with(".m3u8")
+            || lower.ends_with(".pls"))
+            && !url.contains("spotify.com")
+            && !url.starts_with("spotify:")
+            && !crate::ytdlp::is_youtube_url(&url);
+
+        if is_playlist_file {
+            self.status = "Loading radio playlist…".into();
+            match crate::radio::fetch_playlist(&url) {
+                Ok(tracks) if !tracks.is_empty() => {
+                    let n = tracks.len();
+                    let was_empty = self.queue.is_empty();
+                    self.queue.extend(tracks);
+                    if was_empty {
+                        self.queue_state.select(Some(0));
+                    }
+                    self.status = format!("Added {n} stream(s) from playlist.");
+                }
+                Ok(_) => self.status = "Playlist contained no playable streams.".into(),
+                Err(e) => self.status = format!("Playlist error: {e}"),
+            }
+            return;
+        }
+
+        // Plain HTTP stream (instant — no thread needed)
+        if !url.contains("spotify.com")
+            && !url.starts_with("spotify:")
+            && !crate::ytdlp::is_youtube_url(&url)
+            && (url.starts_with("http://") || url.starts_with("https://"))
+        {
+            self.queue.push(crate::audio::Track::from_url(url));
+            if self.queue_state.selected().is_none() {
+                self.queue_state.select(Some(self.queue.len().saturating_sub(1)));
+            }
+            self.status = "Added stream URL to queue.".into();
+            return;
+        }
+
+        if !url.starts_with("http://")
+            && !url.starts_with("https://")
+            && !url.starts_with("spotify:")
+            && !crate::ytdlp::is_youtube_url(&url)
+        {
+            self.status = format!("Unrecognised URL scheme: {url}");
+            return;
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
+        self.url_rx = Some(rx);
+
+        // Spotify
+        if url.contains("spotify.com") || url.starts_with("spotify:") {
+            let Some(api) = self.spotify.clone() else {
+                self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+                self.url_rx = None;
+                return;
+            };
+            let (kind, id) = parse_spotify_url(&url);
+            self.status = format!("Loading Spotify {kind}…");
+            std::thread::spawn(move || {
+                let mut api = api;
+                let result = match kind.as_str() {
+                    "track" => api.track_by_id(&id).map(|t| vec![t]),
+                    "playlist" => api.playlist_tracks(&id),
+                    "album" => api.album_tracks(&id),
+                    other => Err(anyhow::anyhow!("Unsupported Spotify type: {other}")),
+                };
+                let _ = tx.send(result.map_err(|e| e.to_string()));
+            });
+            return;
+        }
+
+        // YouTube / YT Music
+        self.status = format!("Loading {url}…");
+        std::thread::spawn(move || {
+            let result = crate::ytdlp::fetch_tracks(&url)
+                .map_err(|e| e.to_string())
+                .and_then(|tracks| {
+                    if tracks.is_empty() {
+                        Err("yt-dlp returned no tracks for that URL.".into())
+                    } else {
+                        Ok(tracks)
+                    }
+                });
+            let _ = tx.send(result);
+        });
     }
 
     fn spotify_login(&mut self) {
@@ -516,6 +1483,137 @@ impl App {
         }
     }
 
+    fn open_device_selector(&mut self) {
+        self.device_list = crate::audio::enumerate_output_devices();
+        let default = crate::audio::default_device_name().unwrap_or_default();
+        self.device_selector_row = self
+            .device_list
+            .iter()
+            .position(|n| *n == default)
+            .unwrap_or(0);
+        self.show_device_selector = true;
+    }
+
+    fn handle_device_selector_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('D') => {
+                self.show_device_selector = false;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.device_selector_row > 0 {
+                    self.device_selector_row -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.device_selector_row + 1 < self.device_list.len() {
+                    self.device_selector_row += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.show_device_selector = false;
+                if let Some(name) = self.device_list.get(self.device_selector_row).cloned() {
+                    match self.player.switch_device(&name) {
+                        Ok(_) => self.status = format!("Output device: {name}"),
+                        Err(e) => self.status = format!("Device error: {e}"),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_eq_tuner_key(&mut self, key: KeyEvent) {
+        let eq = self.player.eq();
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('E') => {
+                self.show_eq_tuner = false;
+            }
+            KeyCode::Left | KeyCode::Char('h') => match self.eq_tuner_band {
+                0 => eq.adjust_low(-1.0),
+                1 => eq.adjust_mid(-1.0),
+                _ => eq.adjust_high(-1.0),
+            },
+            KeyCode::Right | KeyCode::Char('l') => match self.eq_tuner_band {
+                0 => eq.adjust_low(1.0),
+                1 => eq.adjust_mid(1.0),
+                _ => eq.adjust_high(1.0),
+            },
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.eq_tuner_band > 0 {
+                    self.eq_tuner_band -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.eq_tuner_band < 2 {
+                    self.eq_tuner_band += 1;
+                }
+            }
+            KeyCode::Char('0') => {
+                let snap = eq.snapshot();
+                let presets = crate::eq::PRESETS;
+                let next = presets
+                    .iter()
+                    .position(|(_, s)| {
+                        (s.low_db - snap.low_db).abs() < 0.1
+                            && (s.mid_db - snap.mid_db).abs() < 0.1
+                            && (s.high_db - snap.high_db).abs() < 0.1
+                    })
+                    .map(|i| (i + 1) % presets.len())
+                    .unwrap_or(0);
+                eq.set(presets[next].1);
+                self.status = format!("EQ Preset: {}", presets[next].0);
+            }
+            _ => {}
+        }
+    }
+
+    fn lastfm_login(&mut self) {
+        let cfg = &self.config.lastfm;
+        if !cfg.is_configured() {
+            self.status = "Set [lastfm] api_key and api_secret in config.toml first.".into();
+            return;
+        }
+
+        // If a pending token exists, complete the auth
+        if let Some(token) = self.lastfm_pending_token.take() {
+            let api_key = cfg.api_key.clone();
+            let api_secret = cfg.api_secret.clone();
+            match crate::lastfm::get_session(&api_key, &api_secret, &token) {
+                Ok(session) => {
+                    let username = session.username.clone();
+                    crate::lastfm::save_session(&session);
+                    match crate::lastfm::LastfmClient::new(api_key, api_secret, session) {
+                        Ok(client) => {
+                            self.lastfm = Some(client);
+                            self.status = format!("Last.fm connected as {username}.");
+                        }
+                        Err(e) => self.status = format!("Last.fm client error: {e}"),
+                    }
+                }
+                Err(e) => {
+                    self.status = format!("Last.fm auth error: {e}");
+                }
+            }
+            return;
+        }
+
+        // Start new auth: get token and open browser
+        let api_key = cfg.api_key.clone();
+        let api_secret = cfg.api_secret.clone();
+        match crate::lastfm::get_token(&api_key, &api_secret) {
+            Ok(token) => {
+                let url = format!(
+                    "http://www.last.fm/api/auth/?api_key={}&token={}",
+                    api_key, token
+                );
+                let _ = webbrowser::open(&url);
+                self.lastfm_pending_token = Some(token);
+                self.status = "Last.fm: authorize in browser, then press F again.".into();
+            }
+            Err(e) => self.status = format!("Last.fm token error: {e}"),
+        }
+    }
+
     fn spotify_toggle(&mut self) {
         let Some(api) = self.spotify.as_mut() else {
             self.status = "Not logged in to Spotify. Press Shift+P first.".into();
@@ -541,8 +1639,41 @@ impl App {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                 self.handle_click(m.column, m.row);
             }
+            MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+                self.handle_drag(m.column, m.row);
+            }
+            MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                self.last_drag_seek = None;
+            }
+            MouseEventKind::Moved => {
+                let prog = self.layout.progress;
+                if m.row >= prog.y && m.row < prog.y + prog.height && prog.width > 0 {
+                    self.hover_x = Some(m.column);
+                } else {
+                    self.hover_x = None;
+                }
+            }
             _ => {}
         }
+    }
+
+    fn handle_drag(&mut self, x: u16, y: u16) {
+        let prog = self.layout.progress;
+        if !rect_contains(prog, x, y) || prog.width == 0 {
+            return;
+        }
+        // Debounce: max one seek every 120ms during a drag
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_drag_seek {
+            if now.duration_since(last) < Duration::from_millis(50) {
+                return;
+            }
+        }
+        let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
+        if let Err(e) = self.player.seek_absolute_fraction(frac) {
+            self.status = format!("Seek error: {e}");
+        }
+        self.last_drag_seek = Some(now);
     }
 
     fn handle_click(&mut self, x: u16, y: u16) {
@@ -591,9 +1722,12 @@ impl App {
                 let len = rows.len() as i32;
                 for _ in 0..len {
                     cur = (cur + delta).rem_euclid(len);
-                    if matches!(rows[cur as usize], LibraryRow::Track(_)) {
-                        self.library_state.select(Some(cur as usize));
-                        return;
+                    match &rows[cur as usize] {
+                        LibraryRow::Track(_) | LibraryRow::SmartHeader { .. } | LibraryRow::Dir(_) => {
+                            self.library_state.select(Some(cur as usize));
+                            return;
+                        }
+                        LibraryRow::Header(_) => {}
                     }
                 }
             }
@@ -612,8 +1746,19 @@ impl App {
     fn activate_selection(&mut self) {
         match self.focus {
             Pane::Library => {
+                if self.view_mode == ViewMode::Browser {
+                    self.browser_enter();
+                    return;
+                }
+                let sel = self.library_state.selected();
+                let row = sel.and_then(|i| self.library_rows().into_iter().nth(i));
+                if let Some(LibraryRow::SmartHeader { .. }) = row {
+                    if let Some(i) = sel {
+                        self.toggle_smart_category(i);
+                    }
+                    return;
+                }
                 if let Some(t) = self.selected_library_track() {
-                    self.undo_stack.clear();
                     self.queue.push(t);
                     let idx = self.queue.len() - 1;
                     self.queue_index = Some(idx);
@@ -646,7 +1791,7 @@ impl App {
         if self.focus == Pane::Queue {
             if let Some(i) = self.queue_state.selected() {
                 if i < self.queue.len() {
-                    let label = format!("removed {}", self.queue[i].display());
+                    let label = format!("removed '{}'", self.queue[i].display());
                     self.push_undo_snapshot(label);
                     self.queue.remove(i);
                     if self.queue_index == Some(i) {
@@ -668,22 +1813,35 @@ impl App {
         if self.queue.is_empty() {
             return;
         }
-        self.push_undo_snapshot(format!("cleared queue ({} tracks)", self.queue.len()));
+        let now = std::time::Instant::now();
+        let confirmed = self
+            .clear_confirm_until
+            .map(|until| now < until)
+            .unwrap_or(false);
+        if !confirmed {
+            self.clear_confirm_until = Some(now + Duration::from_secs(3));
+            self.status = format!("Press c again within 3s to clear {} tracks", self.queue.len());
+            return;
+        }
+        self.clear_confirm_until = None;
+        let n = self.queue.len();
+        self.push_undo_snapshot(format!("cleared queue ({n} tracks)"));
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
         self.player.stop();
+        self.status = format!("Queue cleared ({n} tracks). Press u to undo.");
     }
 
     fn push_undo_snapshot(&mut self, label: String) {
+        if self.undo_stack.len() >= MAX_UNDO_SNAPSHOTS {
+            self.undo_stack.pop_front();
+        }
         self.undo_stack.push_back(UndoSnapshot {
             queue: self.queue.clone(),
             queue_index: self.queue_index,
             label,
         });
-        while self.undo_stack.len() > MAX_UNDO_SNAPSHOTS {
-            self.undo_stack.pop_front();
-        }
     }
 
     fn undo_queue_action(&mut self) {
@@ -692,7 +1850,7 @@ impl App {
             return;
         };
         self.queue = snapshot.queue;
-        self.queue_index = snapshot.queue_index.filter(|i| *i < self.queue.len());
+        self.queue_index = snapshot.queue_index.filter(|&i| i < self.queue.len());
         self.queue_state.select(if self.queue.is_empty() {
             None
         } else {
@@ -702,17 +1860,58 @@ impl App {
     }
 
     fn play_current(&mut self) {
-        if let Some(i) = self.queue_index {
-            if let Some(t) = self.queue.get(i).cloned() {
-                match self.player.play(&t) {
+        self.current_play_recorded = false;
+        self.lastfm_scrobbled = false;
+        self.lastfm_scrobble_info = None;
+        self.undo_stack.clear();
+        let Some(i) = self.queue_index else { return };
+        let Some(t) = self.queue.get(i).cloned() else { return };
+
+        let path_str = t.path.to_string_lossy();
+        if path_str.starts_with("spotify:track:") {
+            // Route to Spotify Connect
+            let uri = path_str.to_string();
+            if let Some(api) = self.spotify.as_mut() {
+                match api.play_uri(&uri) {
                     Ok(_) => {
-                        self.status = format!("Playing: {}", t.display());
-                        self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                        self.status = format!("Spotify ▶ {}", t.display());
                         self.push_history(t);
                     }
-                    Err(e) => self.status = format!("Error: {e}"),
+                    Err(e) => self.status = format!("Spotify play error: {e}"),
                 }
+            } else {
+                self.status = "Not logged in to Spotify. Press Shift+P first.".into();
             }
+            return;
+        }
+
+        // Apply ReplayGain scaling
+        self.player.rg_scale = rg_scale(&t, self.replaygain_mode);
+
+        // Local file or HTTP/YouTube stream
+        match self.player.play(&t) {
+            Ok(_) => {
+                self.status = format!("Playing: {}", t.display());
+                self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+                let artist = t.artist.clone().unwrap_or_default();
+                let title = t.title.clone();
+                let ts = crate::lastfm::now_unix();
+                self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
+                if let Some(lfm) = self.lastfm.clone() {
+                    let a = artist.clone();
+                    let ti = title.clone();
+                    std::thread::spawn(move || { let _ = lfm.update_now_playing(&a, &ti); });
+                }
+                if let Some(tx) = &self.discord_tx {
+                    let _ = tx.send(crate::discord::Cmd::Update {
+                        title: title.clone(),
+                        artist: artist.clone(),
+                        start_secs: ts as i64,
+                    });
+                }
+                self.push_history(t);
+            }
+            Err(e) => self.status = format!("Error: {e}"),
         }
     }
 
@@ -774,7 +1973,7 @@ impl App {
         }
     }
 
-    fn save_playlist(&mut self) {
+    fn save_playlist_named(&mut self, name: String) {
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
@@ -786,23 +1985,33 @@ impl App {
             self.status = format!("Could not create {}", dir.display());
             return;
         }
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let path = dir.join(format!("queue-{stamp}.m3u"));
+        let safe_name = if name.is_empty() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            format!("queue-{stamp}")
+        } else {
+            name.chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+                .collect()
+        };
+        let path = dir.join(format!("{safe_name}.m3u"));
         let mut text = String::from("#EXTM3U\n");
         for t in &self.queue {
             text.push_str(&t.path.display().to_string());
             text.push('\n');
         }
         match std::fs::write(&path, text) {
-            Ok(_) => self.status = format!("Saved playlist: {}", path.display()),
+            Ok(_) => {
+                self.active_playlist_name = Some(safe_name.clone());
+                self.status = format!("Saved: {safe_name}.m3u");
+            }
             Err(e) => self.status = format!("Save error: {e}"),
         }
     }
 
-    fn load_first_playlist(&mut self) {
+    fn open_playlist_browser(&mut self) {
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
@@ -810,61 +2019,161 @@ impl App {
                 return;
             }
         };
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(r) => r,
-            Err(_) => {
-                self.status = format!("No playlists at {}", dir.display());
-                return;
+        let mut entries: Vec<PlaylistEntry> = std::fs::read_dir(&dir)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()) == Some("m3u")
+            })
+            .filter_map(|e| {
+                let path = e.path();
+                let name = path.file_stem()?.to_str()?.to_string();
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                let count = text.lines()
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .count();
+                Some(PlaylistEntry { name, path, track_count: count })
+            })
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        if entries.is_empty() {
+            self.status = "No playlists saved yet.".into();
+            return;
+        }
+        self.playlist_browser_entries = entries;
+        self.playlist_browser_row = 0;
+        self.playlist_browser_delete_confirm = None;
+        self.show_playlist_browser = true;
+    }
+
+    fn handle_playlist_browser_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_playlist_browser = false;
+                self.playlist_browser_delete_confirm = None;
             }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.playlist_browser_row = self.playlist_browser_row.saturating_sub(1);
+                self.playlist_browser_delete_confirm = None;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = self.playlist_browser_entries.len().saturating_sub(1);
+                if self.playlist_browser_row < max {
+                    self.playlist_browser_row += 1;
+                }
+                self.playlist_browser_delete_confirm = None;
+            }
+            KeyCode::Enter => {
+                self.load_playlist_at_row(false);
+            }
+            KeyCode::Char('a') => {
+                self.load_playlist_at_row(true);
+            }
+            KeyCode::Char('D') => {
+                let row = self.playlist_browser_row;
+                if self.playlist_browser_delete_confirm == Some(row) {
+                    if let Some(entry) = self.playlist_browser_entries.get(row).cloned() {
+                        if std::fs::remove_file(&entry.path).is_ok() {
+                            self.playlist_browser_entries.remove(row);
+                            self.playlist_browser_row =
+                                row.min(self.playlist_browser_entries.len().saturating_sub(1));
+                            self.status = format!("Deleted: {}", entry.name);
+                            if self.active_playlist_name.as_deref() == Some(&entry.name) {
+                                self.active_playlist_name = None;
+                            }
+                        }
+                    }
+                    self.playlist_browser_delete_confirm = None;
+                    if self.playlist_browser_entries.is_empty() {
+                        self.show_playlist_browser = false;
+                    }
+                } else {
+                    self.playlist_browser_delete_confirm = Some(row);
+                    self.status = "Press Shift+D again to confirm deletion.".into();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn load_playlist_at_row(&mut self, append: bool) {
+        let Some(entry) = self.playlist_browser_entries.get(self.playlist_browser_row).cloned() else {
+            return;
         };
-        let mut latest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("m3u") {
-                continue;
-            }
-            let mtime = e.metadata().and_then(|m| m.modified()).ok();
-            if let Some(mtime) = mtime {
-                if latest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
-                    latest = Some((mtime, path));
+        let Ok(text) = std::fs::read_to_string(&entry.path) else {
+            self.status = format!("Could not read {}", entry.path.display());
+            return;
+        };
+        // Snapshot before any mutation so undo restores the exact pre-load state
+        self.push_undo_snapshot(format!(
+            "{} playlist '{}'",
+            if append { "appended" } else { "loaded" },
+            entry.name
+        ));
+        if !append {
+            self.queue.clear();
+            self.queue_state.select(None);
+            self.queue_index = None;
+        }
+        let start = self.queue.len();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.starts_with("http://") || line.starts_with("https://") {
+                self.queue.push(Track::from_url(line.to_string()));
+            } else {
+                let p = std::path::PathBuf::from(line);
+                if p.exists() {
+                    self.queue.push(Track::from_path_with_meta(p));
                 }
             }
         }
-        let Some((_, path)) = latest else {
-            self.status = format!("No .m3u files in {}", dir.display());
-            return;
+        let loaded = self.queue.len() - start;
+        if loaded == 0 {
+            // Nothing added — discard the snapshot we just pushed
+            self.undo_stack.pop_back();
+        }
+        if !append {
+            if !self.queue.is_empty() {
+                self.queue_state.select(Some(0));
+            }
+            self.active_playlist_name = Some(entry.name.clone());
+        }
+        self.show_playlist_browser = false;
+        self.status = if append {
+            format!("Appended {} tracks from '{}'", loaded, entry.name)
+        } else {
+            format!("Loaded {} tracks from '{}'", loaded, entry.name)
         };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            self.status = format!("Could not read {}", path.display());
-            return;
-        };
-        let mut loaded = 0usize;
-        let original_queue_len = self.queue.len();
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if line.starts_with("http://") || line.starts_with("https://") {
-                self.queue.push(Track::from_url(line.to_string()));
-                loaded += 1;
-                continue;
-            }
-            let p = std::path::PathBuf::from(line);
-            if p.exists() {
-                self.queue.push(Track::from_path_with_meta(p));
-                loaded += 1;
-            }
-        }
-        if loaded > 0 {
-            let loaded_tracks = self.queue.split_off(original_queue_len);
-            self.push_undo_snapshot(format!("loaded playlist ({} tracks)", loaded));
-            self.queue.extend(loaded_tracks);
-        }
-        if loaded > 0 && self.queue_state.selected().is_none() {
-            self.queue_state.select(Some(0));
-        }
-        self.status = format!("Loaded {} tracks from {}", loaded, path.display());
+    }
+
+}
+
+fn rg_scale(track: &Track, mode: ReplayGainMode) -> f32 {
+    let db = match mode {
+        ReplayGainMode::Off => return 1.0,
+        ReplayGainMode::Track => track.replaygain_track_db,
+        ReplayGainMode::Album => track
+            .replaygain_album_db
+            .or(track.replaygain_track_db),
+    };
+    db.map(|db| 10f32.powf(db / 20.0)).unwrap_or(1.0)
+}
+
+fn parse_spotify_url(url: &str) -> (String, String) {
+    if let Some(path) = url.strip_prefix("spotify:") {
+        let mut parts = path.splitn(2, ':');
+        let k = parts.next().unwrap_or("").to_string();
+        let i = parts.next().unwrap_or("").to_string();
+        (k, i)
+    } else {
+        let trimmed = url.split('?').next().unwrap_or(url);
+        let segs: Vec<&str> = trimmed.rsplit('/').take(2).collect();
+        let i = segs.first().copied().unwrap_or("").to_string();
+        let k = segs.get(1).copied().unwrap_or("").to_string();
+        (k, i)
     }
 }
 
@@ -909,6 +2218,10 @@ fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
 }
 
 fn sort_tracks(tracks: &mut [Track], mode: SortMode) {
+    sort_tracks_with_ratings(tracks, mode, None);
+}
+
+fn sort_tracks_with_ratings(tracks: &mut [Track], mode: SortMode, ratings: Option<&crate::ratings::Ratings>) {
     match mode {
         SortMode::Title => tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
         SortMode::Artist => tracks.sort_by(|a, b| {
@@ -921,5 +2234,12 @@ fn sort_tracks(tracks: &mut [Track], mode: SortMode) {
             let bb = b.album.as_deref().unwrap_or("~").to_lowercase();
             aa.cmp(&bb).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
         }),
+        SortMode::Rating => {
+            tracks.sort_by(|a, b| {
+                let ra = ratings.map(|r| r.get(&a.path)).unwrap_or(0);
+                let rb = ratings.map(|r| r.get(&b.path)).unwrap_or(0);
+                rb.cmp(&ra).then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            });
+        }
     }
 }

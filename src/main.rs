@@ -4,15 +4,21 @@ mod app;
 mod audio;
 mod cache;
 mod config;
+mod discord;
+mod radio;
 mod eq;
 mod keybinds;
+mod history;
+mod lastfm;
 mod lyrics;
 mod metadata;
+mod ratings;
 mod spotify;
 mod theme;
 mod tui;
 mod ui;
 mod visualizer;
+mod ytdlp;
 
 fn main() -> Result<()> {
     let config = config::Config::load_or_default()?;

@@ -11,6 +11,23 @@ pub struct Config {
     pub playback: Playback,
     #[serde(default)]
     pub spotify: SpotifyConfig,
+    #[serde(default)]
+    pub visualizer: VisualizerConfig,
+    #[serde(default)]
+    pub lastfm: LastfmConfig,
+    #[serde(default)]
+    pub discord: DiscordConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VisualizerConfig {
+    pub sensitivity: f32,
+}
+
+impl Default for VisualizerConfig {
+    fn default() -> Self {
+        Self { sensitivity: 1.0 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +42,44 @@ impl Default for SpotifyConfig {
             client_id: String::new(),
             redirect_port: 8888,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastfmConfig {
+    pub api_key: String,
+    pub api_secret: String,
+}
+
+impl Default for LastfmConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            api_secret: String::new(),
+        }
+    }
+}
+
+impl LastfmConfig {
+    pub fn is_configured(&self) -> bool {
+        !self.api_key.is_empty() && !self.api_secret.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordConfig {
+    pub client_id: String,
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self { client_id: String::new() }
+    }
+}
+
+impl DiscordConfig {
+    pub fn is_configured(&self) -> bool {
+        !self.client_id.is_empty()
     }
 }
 
@@ -74,11 +129,23 @@ impl Default for Config {
                 repeat: false,
             },
             spotify: SpotifyConfig::default(),
+            visualizer: VisualizerConfig::default(),
+            lastfm: LastfmConfig::default(),
+            discord: DiscordConfig::default(),
         }
     }
 }
 
 impl Config {
+    pub fn save(&self) -> Result<()> {
+        let path = config_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+        fs::write(&path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
+
     pub fn load_or_default() -> Result<Self> {
         let path = config_path()?;
         if path.exists() {
