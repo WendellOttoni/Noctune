@@ -57,6 +57,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_profile_browser {
         render_profile_browser(f, area, app);
     }
+    if app.show_spotify_browser {
+        render_spotify_browser(f, area, app);
+    }
     if app.show_device_selector {
         render_device_selector(f, area, app);
     }
@@ -350,6 +353,169 @@ fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
     let mut state = ratatui::widgets::ListState::default();
     state.select(if profiles.is_empty() { None } else { Some(app.profile_browser_row) });
     f.render_stateful_widget(list, popup, &mut state);
+}
+
+fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
+    use crate::app::SpotifyTab;
+    let theme = &app.theme;
+    let accent = parse_color(&theme.colors.accent);
+    let muted = parse_color(&theme.colors.muted);
+    let fg = parse_color(&theme.colors.foreground);
+    let bg = parse_color(&theme.colors.background);
+    let secondary = parse_color(&theme.colors.secondary);
+
+    let w = 80.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(4).max(10);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    // Tab labels
+    let tab_line = Line::from(vec![
+        Span::styled(
+            if app.spotify_browser_tab == SpotifyTab::Search { " [Search] " } else { "  Search  " },
+            if app.spotify_browser_tab == SpotifyTab::Search {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else { Style::default().fg(muted) },
+        ),
+        Span::styled(
+            if app.spotify_browser_tab == SpotifyTab::MyPlaylists { " [My Playlists] " } else { "  My Playlists  " },
+            if app.spotify_browser_tab == SpotifyTab::MyPlaylists {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else { Style::default().fg(muted) },
+        ),
+        Span::styled(
+            if app.spotify_browser_tab == SpotifyTab::LikedSongs { " [Liked Songs] " } else { "  Liked Songs  " },
+            if app.spotify_browser_tab == SpotifyTab::LikedSongs {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else { Style::default().fg(muted) },
+        ),
+    ]);
+
+    let hint = Line::from(vec![
+        Span::styled("  Tab", Style::default().fg(accent)),
+        Span::styled(" switch  ", Style::default().fg(muted)),
+        Span::styled("/", Style::default().fg(accent)),
+        Span::styled(" search  ", Style::default().fg(muted)),
+        Span::styled("Enter", Style::default().fg(accent)),
+        Span::styled(" play  ", Style::default().fg(muted)),
+        Span::styled("a", Style::default().fg(accent)),
+        Span::styled(" enqueue  ", Style::default().fg(muted)),
+        Span::styled("Esc", Style::default().fg(accent)),
+        Span::styled(" close", Style::default().fg(muted)),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(" Spotify ", Style::default().fg(accent).add_modifier(Modifier::BOLD)))
+        .title_bottom(hint);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    // Layout: search bar (2 rows) + tab line (1) + results list (rest)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    // Search bar
+    let query_display = if app.spotify_browser_query_editing {
+        format!(" Search: {}█", app.spotify_browser_query)
+    } else if app.spotify_browser_query.is_empty() {
+        " Press / to search tracks…".to_string()
+    } else {
+        format!(" Search: {}", app.spotify_browser_query)
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(query_display, Style::default().fg(if app.spotify_browser_query_editing { fg } else { muted }))),
+        chunks[0],
+    );
+
+    // Tab bar
+    f.render_widget(Paragraph::new(tab_line), chunks[1]);
+
+    // Results
+    let list_area = chunks[2];
+    match app.spotify_browser_tab {
+        SpotifyTab::Search | SpotifyTab::LikedSongs => {
+            let results = &app.spotify_browser_results;
+            if results.is_empty() {
+                let msg = if app.spotify_browser_tab == SpotifyTab::LikedSongs {
+                    "  Loading liked songs…"
+                } else {
+                    "  No results. Type a query and press Enter."
+                };
+                f.render_widget(
+                    Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
+                    list_area,
+                );
+            } else {
+                let items: Vec<ListItem> = results.iter().enumerate().map(|(i, t)| {
+                    let selected = i == app.spotify_browser_row;
+                    let dur = t.duration.map(|d| {
+                        let s = d.as_secs();
+                        format!("{:02}:{:02}", s / 60, s % 60)
+                    }).unwrap_or_default();
+                    let label = format!(
+                        " {} {:<40} {:<24} {}",
+                        if selected { "▶" } else { " " },
+                        t.title.chars().take(38).collect::<String>(),
+                        t.artist.as_deref().unwrap_or("").chars().take(22).collect::<String>(),
+                        dur,
+                    );
+                    let style = if selected {
+                        Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(muted)
+                    };
+                    ListItem::new(Line::from(Span::styled(label, style)))
+                }).collect();
+                let mut state = ratatui::widgets::ListState::default();
+                state.select(Some(app.spotify_browser_row));
+                f.render_stateful_widget(
+                    List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+                    list_area,
+                    &mut state,
+                );
+            }
+        }
+        SpotifyTab::MyPlaylists => {
+            if app.spotify_my_playlists.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled("  Loading playlists…", Style::default().fg(muted))),
+                    list_area,
+                );
+            } else {
+                let items: Vec<ListItem> = app.spotify_my_playlists.iter().enumerate().map(|(i, (_, name, count))| {
+                    let selected = i == app.spotify_playlist_row;
+                    let label = format!(
+                        " {} {:<50} {} tracks",
+                        if selected { "▶" } else { " " },
+                        name.chars().take(48).collect::<String>(),
+                        count,
+                    );
+                    let style = if selected {
+                        Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(muted)
+                    };
+                    ListItem::new(Line::from(Span::styled(label, style)))
+                }).collect();
+                let mut state = ratatui::widgets::ListState::default();
+                state.select(Some(app.spotify_playlist_row));
+                f.render_stateful_widget(
+                    List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+                    list_area,
+                    &mut state,
+                );
+            }
+        }
+    }
 }
 
 fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
