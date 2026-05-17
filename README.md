@@ -10,7 +10,7 @@ A fully customizable terminal music player in Rust. ASCII-art TUI, multi-format 
 
 ## Demo
 
-<!-- Adicione o vídeo aqui: arraste um MP4/GIF no editor do GitHub -->
+<video src="https://github.com/WendellOttoni/Noctune/releases/download/v0.1.0/Gravacao.de.Tela.2026-05-17.123515.mp4" controls width="100%"></video>
 
 > Status: early MVP — plays local files, queue/library navigation, themable UI.
 
