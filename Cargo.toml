@@ -37,6 +37,7 @@ sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+sysinfo = { version = "0.32", default-features = false, features = ["system", "network"] }
 tiny_http = "0.12"
 webbrowser = "1"
 discord-rich-presence = "1"

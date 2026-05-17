@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 mod album_art;
+mod stats;
 mod app;
 mod audio;
 mod cache;
