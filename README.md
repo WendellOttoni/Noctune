@@ -10,7 +10,9 @@ A fully customizable terminal music player in Rust. ASCII-art TUI, multi-format 
 
 ## Demo
 
-<!-- cole aqui a URL do vídeo após fazer upload arrastando o MP4 no editor do GitHub -->
+
+https://github.com/user-attachments/assets/6c468eff-b23e-4064-b64a-c916262e46b4
+
 
 > Status: early MVP — plays local files, queue/library navigation, themable UI.
 
