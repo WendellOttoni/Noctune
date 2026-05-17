@@ -171,6 +171,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('[')), Action::VizSensDown),
             (KeyChord::new(KeyCode::Char(']')), Action::VizSensUp),
             (KeyChord::new(KeyCode::Char('u')), Action::UndoQueue),
+            (KeyChord::with_mods(KeyCode::Char('z'), KeyModifiers::CONTROL), Action::UndoQueue),
             (KeyChord::new(KeyCode::Char('H')), Action::RecentlyPlayed),
             (KeyChord::new(KeyCode::Char('e')), Action::ShowAudioPanel),
             (KeyChord::new(KeyCode::Char('G')), Action::ReplayGain),
