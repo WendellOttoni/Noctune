@@ -1,6 +1,6 @@
 [package]
 name = "noctune"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
@@ -51,6 +51,7 @@ souvlaki = "0.7"
 raw-window-handle = "0.6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_LibraryLoader",
 ] }
