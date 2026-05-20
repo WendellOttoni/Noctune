@@ -12,6 +12,38 @@ fn yt_dlp_install_hint() -> &'static str {
     }
 }
 
+/// Locate yt-dlp. On Windows the process PATH may differ from the user's shell PATH
+/// (e.g. winget-installed binary not yet visible to an already-running launcher), so
+/// also probe the standard winget shim directories before giving up (issue #55, bug 3).
+fn yt_dlp_executable() -> String {
+    if cfg!(target_os = "windows") {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let candidates = [
+                PathBuf::from(&local).join("Microsoft\\WinGet\\Links\\yt-dlp.exe"),
+                PathBuf::from(&local).join("Microsoft\\WindowsApps\\yt-dlp.exe"),
+            ];
+            for c in candidates {
+                if c.exists() {
+                    return c.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    "yt-dlp".into()
+}
+
+fn spawn_error(e: std::io::Error) -> anyhow::Error {
+    // Issue #55, bug 2: previously any spawn error was rewritten to the install hint,
+    // hiding the real cause (permission denied, AV block, broken winget shim, …).
+    // Surface the OS error so the user can diagnose, but keep the install hint for
+    // the common case where the binary really is missing.
+    if e.kind() == std::io::ErrorKind::NotFound {
+        anyhow!("{}", yt_dlp_install_hint())
+    } else {
+        anyhow!("{}\n(internal: {e})", yt_dlp_install_hint())
+    }
+}
+
 pub fn is_youtube_url(url: &str) -> bool {
     url.contains("youtube.com/")
         || url.contains("youtu.be/")
@@ -21,9 +53,8 @@ pub fn is_youtube_url(url: &str) -> bool {
         || url.starts_with("ytsearch5:")
 }
 
-#[allow(dead_code)]
 pub fn check_available() -> bool {
-    Command::new("yt-dlp")
+    Command::new(yt_dlp_executable())
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -90,12 +121,12 @@ fn pipe_from_yt_dlp(
     }
     args.push(youtube_url.into());
 
-    let child = Command::new("yt-dlp")
+    let child = Command::new(yt_dlp_executable())
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| anyhow!("{}\n(internal: {e})", yt_dlp_install_hint()))?;
+        .map_err(spawn_error)?;
 
     SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new(), stream_err)
         .map_err(|e| anyhow!("yt-dlp stream: {e}"))
@@ -131,10 +162,10 @@ fn download_via_tempfile(
     }
     args.push(youtube_url.into());
 
-    let out = Command::new("yt-dlp")
+    let out = Command::new(yt_dlp_executable())
         .args(&args)
         .output()
-        .map_err(|e| anyhow!("{}\n(internal: {e})", yt_dlp_install_hint()))?;
+        .map_err(spawn_error)?;
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -182,7 +213,7 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
         url.to_string()
     };
 
-    let output = Command::new("yt-dlp")
+    let output = Command::new(yt_dlp_executable())
         .args([
             "-J",
             "--flat-playlist",
@@ -190,7 +221,7 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
             &resolved,
         ])
         .output()
-        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
+        .map_err(spawn_error)?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
