@@ -13,6 +13,7 @@ mod keybinds;
 mod history;
 mod lastfm;
 mod lyrics;
+mod media_session;
 mod metadata;
 mod ratings;
 mod spotify;

@@ -42,6 +42,13 @@ tiny_http = "0.12"
 webbrowser = "1"
 discord-rich-presence = "1"
 
+# OS media-session integration (#54). souvlaki abstracts SMTC / MPRIS / MediaRemote.
+souvlaki = "0.7"
+
+# Raw-window-handle is needed by souvlaki on Windows to attach the SMTC session.
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+
 [profile.release]
 lto = true
 codegen-units = 1
