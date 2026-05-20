@@ -36,8 +36,17 @@ impl MediaSession {
             hwnd: hwnd.map(|_| std::ptr::null_mut()),
         };
 
-        let mut controls = MediaControls::new(config)
-            .map_err(|e| anyhow::anyhow!("media-session init: {e:?}"))?;
+        // souvlaki panics on Windows if it cannot get a usable HWND (we are a TUI
+        // and don't own a window). Wrap the constructor in catch_unwind so the
+        // failure cleanly disables the feature instead of crashing startup.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            MediaControls::new(config)
+        }));
+        let mut controls = match result {
+            Ok(Ok(c)) => c,
+            Ok(Err(e)) => return Err(anyhow::anyhow!("media-session init: {e:?}")),
+            Err(_) => return Err(anyhow::anyhow!("media-session unsupported on this platform")),
+        };
         let (tx, rx) = std::sync::mpsc::channel();
         controls
             .attach(move |event| { let _ = tx.send(event); })

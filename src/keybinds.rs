@@ -87,6 +87,15 @@ pub fn parse_chord(s: &str) -> Option<KeyChord> {
     if s.is_empty() {
         return None;
     }
+    // Bare "+" / "-" are literal keys, not modifier-key syntax. Without this short
+    // circuit, split('+') would shred "+" into ["", ""] and the chord would fail
+    // to parse — surfacing as "invalid keybind '+'" on startup.
+    if s == "+" {
+        return Some(KeyChord::new(KeyCode::Char('+')));
+    }
+    if s == "-" {
+        return Some(KeyChord::new(KeyCode::Char('-')));
+    }
     let mut mods = KeyModifiers::NONE;
     let mut parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
     let key = parts.pop()?;
