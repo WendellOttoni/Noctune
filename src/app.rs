@@ -355,14 +355,21 @@ impl App {
             let _ = scan_tx.send(tracks);
         });
 
-        // Start filesystem watcher
+        // Start filesystem watcher — opt-out via [library].watch_for_changes (#72).
         let (fs_tx, fs_event_rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
-        let mut _fs_watcher = notify::RecommendedWatcher::new(fs_tx, notify::Config::default()).ok();
-        if let Some(w) = &mut _fs_watcher {
-            for dir in &config.music_dirs {
-                let _ = w.watch(dir.as_path(), notify::RecursiveMode::Recursive);
+        let mut _fs_watcher = if config.library.watch_for_changes {
+            let w = notify::RecommendedWatcher::new(fs_tx, notify::Config::default()).ok();
+            if let Some(mut watcher) = w {
+                for dir in &config.music_dirs {
+                    let _ = watcher.watch(dir.as_path(), notify::RecursiveMode::Recursive);
+                }
+                Some(watcher)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         Ok(Self {
             config,
@@ -755,10 +762,29 @@ impl App {
             match rx.try_recv() {
                 Ok(mut tracks) => {
                     sort_tracks(&mut tracks, self.sort);
+                    let prev_n = self.library.len();
                     let n = tracks.len();
+                    // #72: drop queued tracks whose source file disappeared so the
+                    // queue doesn't accumulate dead entries when the user moves files
+                    // around while the app is open.
+                    let live_paths: std::collections::HashSet<PathBuf> =
+                        tracks.iter().map(|t| t.path.clone()).collect();
+                    let before_queue = self.queue.len();
+                    self.queue.retain(|t| {
+                        let p = t.path.to_string_lossy();
+                        p.starts_with("http://") || p.starts_with("https://") || p.starts_with("spotify:")
+                            || live_paths.contains(&t.path)
+                    });
+                    let removed_from_queue = before_queue - self.queue.len();
                     self.library = tracks;
                     self.library_state.select(if self.library.is_empty() { None } else { Some(0) });
-                    self.status = format!("Library: {n} tracks.");
+                    self.status = match (n as i64 - prev_n as i64, removed_from_queue) {
+                        (0, 0) if prev_n > 0 => format!("Library: {n} tracks (unchanged)."),
+                        (d, 0) if d > 0 => format!("Library: +{d} → {n} tracks."),
+                        (d, 0) if d < 0 => format!("Library: {d} → {n} tracks."),
+                        (_, r) if r > 0 => format!("Library: {n} tracks ({r} dropped from queue)."),
+                        _ => format!("Library: {n} tracks."),
+                    };
                     self.scan_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -781,8 +807,11 @@ impl App {
                                 | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
                         );
                         if relevant {
+                            // #72: debounce window comes from config so users can tune
+                            // for slow disks or large albums dropped in at once.
                             self.rescan_debounce_until = Some(
-                                std::time::Instant::now() + Duration::from_secs(2),
+                                std::time::Instant::now()
+                                    + Duration::from_millis(self.config.library.watch_debounce_ms),
                             );
                         }
                     }
