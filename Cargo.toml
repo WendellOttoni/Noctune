@@ -45,9 +45,15 @@ discord-rich-presence = "1"
 # OS media-session integration (#54). souvlaki abstracts SMTC / MPRIS / MediaRemote.
 souvlaki = "0.7"
 
-# Raw-window-handle is needed by souvlaki on Windows to attach the SMTC session.
+# souvlaki on Windows needs a real HWND. We create a hidden HWND_MESSAGE window
+# ourselves via the `windows` crate and pass the handle into PlatformConfig.
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+] }
 
 [profile.release]
 lto = true
