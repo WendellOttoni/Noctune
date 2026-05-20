@@ -97,7 +97,6 @@ impl SymphoniaSource {
         Self::from_mss(mss, hint, None)
     }
 
-    #[allow(dead_code)]
     pub fn from_reader<R: Read + Send + 'static>(reader: R, hint: Hint) -> Result<Self> {
         let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(reader))), Default::default());
         Self::from_mss(mss, hint, None)
@@ -367,8 +366,8 @@ impl Player {
             let source = if crate::ytdlp::is_youtube_url(&path_str) {
                 crate::ytdlp::spawn_yt_dlp(&path_str, self.stream_err.clone())?
             } else {
-                let bytes = http_get_bytes(&path_str)?;
-                SymphoniaSource::from_bytes(bytes, Hint::new())?
+                let reader = http_get_reader(&path_str)?;
+                SymphoniaSource::from_reader(reader, Hint::new())?
             };
             let viz = VizSource::new(source, self.tap.clone());
             let eq = EqSource::new(viz, self.eq.clone());
@@ -588,7 +587,10 @@ pub fn default_device_name() -> Option<String> {
     cpal::default_host().default_output_device()?.name().ok()
 }
 
-fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
+fn http_get_reader(url: &str) -> Result<impl Read + Send + 'static> {
+    // Streams the HTTP response body instead of buffering it all in RAM (issue #60).
+    // For formats requiring seek (mp4/m4a moov atom), the symphonia probe may fail
+    // — those URLs should be handled via yt-dlp or a future ranged-request path.
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()?;
@@ -599,8 +601,7 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
     if !resp.status().is_success() {
         return Err(anyhow!("{url} returned {}", resp.status()));
     }
-    let bytes = resp.bytes()?.to_vec();
-    Ok(bytes)
+    Ok(resp)
 }
 
 impl Track {
