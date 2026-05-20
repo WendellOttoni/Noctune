@@ -170,6 +170,41 @@ pub struct Keybinds {
     pub prev: String,
     pub volume_up: String,
     pub volume_down: String,
+    // #67: optional bindings — empty string means "fall back to the built-in default".
+    #[serde(default)]
+    pub seek_back: String,
+    #[serde(default)]
+    pub seek_forward: String,
+    #[serde(default)]
+    pub stop: String,
+    #[serde(default)]
+    pub shuffle: String,
+    #[serde(default)]
+    pub repeat: String,
+    #[serde(default)]
+    pub search: String,
+    #[serde(default)]
+    pub tab: String,
+    #[serde(default)]
+    pub enqueue: String,
+    #[serde(default)]
+    pub remove_from_queue: String,
+    #[serde(default)]
+    pub clear_queue: String,
+    #[serde(default)]
+    pub toggle_mini: String,
+    #[serde(default)]
+    pub toggle_view: String,
+    #[serde(default)]
+    pub rescan: String,
+    #[serde(default)]
+    pub help: String,
+    #[serde(default)]
+    pub cycle_theme: String,
+    #[serde(default)]
+    pub open_url: String,
+    #[serde(default)]
+    pub toggle_favorite: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +226,23 @@ impl Default for Config {
                 prev: "p".into(),
                 volume_up: "+".into(),
                 volume_down: "-".into(),
+                seek_back: String::new(),
+                seek_forward: String::new(),
+                stop: String::new(),
+                shuffle: String::new(),
+                repeat: String::new(),
+                search: String::new(),
+                tab: String::new(),
+                enqueue: String::new(),
+                remove_from_queue: String::new(),
+                clear_queue: String::new(),
+                toggle_mini: String::new(),
+                toggle_view: String::new(),
+                rescan: String::new(),
+                help: String::new(),
+                cycle_theme: String::new(),
+                open_url: String::new(),
+                toggle_favorite: String::new(),
             },
             playback: Playback {
                 default_volume: 0.7,

@@ -190,6 +190,8 @@ pub struct App {
     pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _fs_watcher: Option<notify::RecommendedWatcher>,
+    pub theme_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    pub _theme_watcher: Option<notify::RecommendedWatcher>,
     pub rescan_debounce_until: Option<std::time::Instant>,
     pub tick_count: u64,
     pub hover_x: Option<u16>,
@@ -371,7 +373,7 @@ impl App {
             None
         };
 
-        Ok(Self {
+        let mut app = Self {
             config,
             theme,
             player,
@@ -394,7 +396,13 @@ impl App {
             sort: SortMode::Title,
             sleep_until: None,
             history: std::collections::VecDeque::with_capacity(64),
-            bindings: Bindings::from_config(&config_keybinds),
+            bindings: {
+                let (b, warnings) = Bindings::from_config(&config_keybinds);
+                for w in warnings {
+                    eprintln!("[keybinds] {w}");
+                }
+                b
+            },
             lyrics: None,
             spotify_client_id,
             spotify_redirect_uri,
@@ -417,6 +425,8 @@ impl App {
             scan_rx: Some(scan_rx),
             fs_event_rx: Some(fs_event_rx),
             _fs_watcher,
+            theme_watcher_rx: None,
+            _theme_watcher: None,
             rescan_debounce_until: None,
             tick_count: 0,
             hover_x: None,
@@ -475,7 +485,10 @@ impl App {
             spotify_my_playlists: Vec::new(),
             spotify_playlist_row: 0,
             spotify_search_rx: None,
-        })
+        };
+        // Watch the active theme file so external edits hot-reload (#68).
+        app.rearm_theme_watcher();
+        Ok(app)
     }
 
     pub fn is_loading(&self) -> bool {
@@ -817,6 +830,25 @@ impl App {
                     }
                     Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                }
+            }
+        }
+
+        // Theme hot-reload — pick up external edits to the active theme file (#68).
+        if let Some(rx) = &self.theme_watcher_rx {
+            let mut reload = false;
+            loop {
+                match rx.try_recv() {
+                    Ok(Ok(_)) => { reload = true; }
+                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                }
+            }
+            if reload {
+                let name = self.theme.name.clone();
+                if let Ok(t) = crate::theme::Theme::load(&name) {
+                    self.theme = t;
+                    self.status = format!("Theme reloaded: {name}");
                 }
             }
         }
@@ -1541,10 +1573,36 @@ impl App {
         let name = &self.theme_names[self.theme_idx];
         match crate::theme::Theme::load(name) {
             Ok(t) => {
-                self.theme = t;
-                self.status = format!("Theme: {name}");
+                self.theme = t.clone();
+                self.config.theme = name.clone();
+                // #68: persist so the next launch picks up the user's selection. Saving
+                // is fire-and-forget; errors land in the status bar but do not interrupt
+                // the cycle.
+                if let Err(e) = self.config.save() {
+                    self.status = format!("Theme: {name} (config save failed: {e})");
+                } else {
+                    self.status = format!("Theme: {name} (saved)");
+                }
+                self.rearm_theme_watcher();
             }
             Err(e) => self.status = format!("Theme load error: {e}"),
+        }
+    }
+
+    /// (Re-)arm the filesystem watcher pointed at the currently active theme so edits
+    /// from an external editor are picked up live (#68). Called on startup and whenever
+    /// the theme switches.
+    fn rearm_theme_watcher(&mut self) {
+        let Ok(dir) = crate::config::themes_dir() else { return };
+        let path = dir.join(format!("{}.toml", self.theme.name));
+        let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+        let mut w = match notify::RecommendedWatcher::new(tx, notify::Config::default()) {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+        if w.watch(&path, notify::RecursiveMode::NonRecursive).is_ok() {
+            self.theme_watcher_rx = Some(rx);
+            self._theme_watcher = Some(w);
         }
     }
 

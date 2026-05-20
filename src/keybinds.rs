@@ -119,20 +119,52 @@ pub struct Bindings {
 }
 
 impl Bindings {
-    pub fn from_config(kb: &Keybinds) -> Self {
-        let defaults: &[(&str, Action)] = &[
+    pub fn from_config(kb: &Keybinds) -> (Self, Vec<String>) {
+        // #67: every action below can be overridden in [keybinds]. Empty strings fall
+        // back to the built-in defaults further down. Conflicts (two specs binding the
+        // same chord) are collected in `warnings` so App can surface them at startup.
+        let overrides: &[(&str, Action)] = &[
             (&kb.quit, Action::Quit),
             (&kb.play_pause, Action::PlayPause),
             (&kb.next, Action::Next),
             (&kb.prev, Action::Prev),
             (&kb.volume_up, Action::VolumeUp),
             (&kb.volume_down, Action::VolumeDown),
+            (&kb.seek_back, Action::SeekBack),
+            (&kb.seek_forward, Action::SeekForward),
+            (&kb.stop, Action::Stop),
+            (&kb.shuffle, Action::Shuffle),
+            (&kb.repeat, Action::Repeat),
+            (&kb.search, Action::Search),
+            (&kb.tab, Action::Tab),
+            (&kb.enqueue, Action::Enqueue),
+            (&kb.remove_from_queue, Action::RemoveQueueItem),
+            (&kb.clear_queue, Action::ClearQueue),
+            (&kb.toggle_mini, Action::ToggleMini),
+            (&kb.toggle_view, Action::ToggleView),
+            (&kb.rescan, Action::Rescan),
+            (&kb.help, Action::Help),
+            (&kb.cycle_theme, Action::CycleTheme),
+            (&kb.open_url, Action::OpenUrl),
+            (&kb.toggle_favorite, Action::ToggleFavorite),
         ];
         let mut table: Vec<(KeyChord, Action)> = Vec::new();
-        for (spec, action) in defaults {
-            if let Some(c) = parse_chord(spec) {
-                table.push((c, *action));
+        let mut warnings: Vec<String> = Vec::new();
+        for (spec, action) in overrides {
+            if spec.is_empty() {
+                continue;
             }
+            let Some(c) = parse_chord(spec) else {
+                warnings.push(format!("invalid keybind '{spec}' for {action:?}"));
+                continue;
+            };
+            if let Some((_, existing)) = table.iter().find(|(c2, _)| *c2 == c) {
+                warnings.push(format!(
+                    "conflicting keybind '{spec}' for {action:?} (already mapped to {existing:?})"
+                ));
+                continue;
+            }
+            table.push((c, *action));
         }
 
         let builtins: &[(KeyChord, Action)] = &[
@@ -192,7 +224,7 @@ impl Bindings {
             }
         }
 
-        Self { table }
+        (Self { table }, warnings)
     }
 
     pub fn lookup(&self, code: KeyCode, mods: KeyModifiers) -> Option<Action> {
