@@ -197,6 +197,7 @@ pub struct App {
     pub radio_fetch_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub radio_seed_editing: bool,
     pub radio_seed_input: String,
+    pub show_stats: bool,
     pub media_session: Option<crate::media_session::MediaSession>,
     pub media_session_rx: Option<std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>>,
     pub rescan_debounce_until: Option<std::time::Instant>,
@@ -439,6 +440,7 @@ impl App {
             radio_fetch_rx: None,
             radio_seed_editing: false,
             radio_seed_input: String::new(),
+            show_stats: false,
             media_session: None,
             media_session_rx: None,
             rescan_debounce_until: None,
@@ -1447,6 +1449,9 @@ impl App {
             Action::Profiles => {
                 self.show_profile_browser = true;
                 self.profile_browser_row = 0;
+            }
+            Action::ShowStats => {
+                self.show_stats = !self.show_stats;
             }
             Action::RadioMode => {
                 if self.radio_mode.active {
