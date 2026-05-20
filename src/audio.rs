@@ -20,6 +20,7 @@ use symphonia::core::{
 };
 
 use crate::{
+    compressor::{CompHandle, CompSource},
     eq::{EqHandle, EqSource},
     metadata::{probe, TrackMeta},
     visualizer::{VizSource, VizTap},
@@ -233,6 +234,7 @@ pub struct Player {
     paused_offset: Duration,
     tap: VizTap,
     eq: EqHandle,
+    comp: CompHandle,
     pub rg_scale: f32,
     // crossfade state
     fade_sink: Option<Sink>,
@@ -323,6 +325,7 @@ impl Player {
             paused_offset: Duration::ZERO,
             tap: VizTap::new(viz_sensitivity),
             eq: EqHandle::new(),
+            comp: CompHandle::new(),
             rg_scale: 1.0,
             fade_sink: None,
             fade_current: None,
@@ -342,6 +345,10 @@ impl Player {
 
     pub fn eq(&self) -> EqHandle {
         self.eq.clone()
+    }
+
+    pub fn comp(&self) -> CompHandle {
+        self.comp.clone()
     }
 
     /// Returns and clears the last error message from a streaming source, if any.
@@ -379,7 +386,8 @@ impl Player {
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
-        self.sink.append(eq);
+        let comp = CompSource::new(eq, self.comp.clone());
+        self.sink.append(comp);
         self.gapless_queued = Some(track.clone());
         Ok(())
     }
@@ -407,9 +415,10 @@ impl Player {
         self.gapless_queued = None;
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
+        let comp = CompSource::new(eq, self.comp.clone());
         let sink = Sink::try_new(&self.handle)?;
         sink.set_volume(self.volume * self.rg_scale);
-        sink.append(eq);
+        sink.append(comp);
         self.sink = sink;
         self.current = Some(track.clone());
         self.started_at = Some(Instant::now());
@@ -506,9 +515,10 @@ impl Player {
     fn attach_fade_source(&mut self, source: SymphoniaSource, track: Track) -> Result<()> {
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
+        let comp = CompSource::new(eq, self.comp.clone());
         let new_sink = Sink::try_new(&self.handle)?;
         new_sink.set_volume(0.0);
-        new_sink.append(eq);
+        new_sink.append(comp);
         self.fade_sink = Some(new_sink);
         self.fade_current = Some(track);
         self.fade_started_at = Some(Instant::now());

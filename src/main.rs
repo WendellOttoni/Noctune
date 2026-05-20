@@ -5,6 +5,7 @@ mod stats;
 mod app;
 mod audio;
 mod cache;
+mod compressor;
 mod config;
 mod discord;
 mod radio;
