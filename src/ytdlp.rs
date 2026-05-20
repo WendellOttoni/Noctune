@@ -12,6 +12,38 @@ fn yt_dlp_install_hint() -> &'static str {
     }
 }
 
+/// Locate yt-dlp. On Windows the process PATH may differ from the user's shell PATH
+/// (e.g. winget-installed binary not yet visible to an already-running launcher), so
+/// also probe the standard winget shim directories before giving up (issue #55, bug 3).
+fn yt_dlp_executable() -> String {
+    if cfg!(target_os = "windows") {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let candidates = [
+                PathBuf::from(&local).join("Microsoft\\WinGet\\Links\\yt-dlp.exe"),
+                PathBuf::from(&local).join("Microsoft\\WindowsApps\\yt-dlp.exe"),
+            ];
+            for c in candidates {
+                if c.exists() {
+                    return c.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    "yt-dlp".into()
+}
+
+fn spawn_error(e: std::io::Error) -> anyhow::Error {
+    // Issue #55, bug 2: previously any spawn error was rewritten to the install hint,
+    // hiding the real cause (permission denied, AV block, broken winget shim, …).
+    // Surface the OS error so the user can diagnose, but keep the install hint for
+    // the common case where the binary really is missing.
+    if e.kind() == std::io::ErrorKind::NotFound {
+        anyhow!("{}", yt_dlp_install_hint())
+    } else {
+        anyhow!("{}\n(internal: {e})", yt_dlp_install_hint())
+    }
+}
+
 pub fn is_youtube_url(url: &str) -> bool {
     url.contains("youtube.com/")
         || url.contains("youtu.be/")
@@ -21,9 +53,8 @@ pub fn is_youtube_url(url: &str) -> bool {
         || url.starts_with("ytsearch5:")
 }
 
-#[allow(dead_code)]
 pub fn check_available() -> bool {
-    Command::new("yt-dlp")
+    Command::new(yt_dlp_executable())
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -44,32 +75,68 @@ fn ffmpeg_available() -> bool {
 /// On Windows: pipes are unreliable for binary audio output (EINVAL), so yt-dlp
 /// writes to a temp file which is read and deleted immediately after.
 pub fn spawn_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
+    spawn_yt_dlp_at(youtube_url, Duration::ZERO, stream_err)
+}
+
+/// Same as `spawn_yt_dlp` but starts playback at `start_offset`. Used by seek in
+/// streams (#57). Requires ffmpeg for non-zero offsets; falls back to a regular
+/// (start-from-zero) spawn when ffmpeg is missing.
+pub fn spawn_yt_dlp_at(
+    youtube_url: &str,
+    start_offset: Duration,
+    stream_err: Arc<Mutex<Option<String>>>,
+) -> Result<SymphoniaSource> {
+    let offset_secs = start_offset.as_secs();
+    let want_offset = offset_secs > 0 && ffmpeg_available();
     if cfg!(target_os = "windows") {
-        download_via_tempfile(youtube_url, stream_err)
+        download_via_tempfile(youtube_url, want_offset.then_some(offset_secs), stream_err)
     } else {
-        pipe_from_yt_dlp(youtube_url, stream_err)
+        pipe_from_yt_dlp(youtube_url, want_offset.then_some(offset_secs), stream_err)
     }
 }
 
-fn pipe_from_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
+fn pipe_from_yt_dlp(
+    youtube_url: &str,
+    start_secs: Option<u64>,
+    stream_err: Arc<Mutex<Option<String>>>,
+) -> Result<SymphoniaSource> {
     let format_selector = if ffmpeg_available() {
         "bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio[ext=m4a]/bestaudio"
     } else {
         "18/22/best[ext=mp4][protocol^=https]"
     };
 
-    let child = Command::new("yt-dlp")
-        .args(["-f", format_selector, "--no-playlist", "--no-warnings", "-o", "-", youtube_url])
+    let mut args: Vec<String> = vec![
+        "-f".into(), format_selector.into(),
+        "--no-playlist".into(), "--no-warnings".into(),
+        "-o".into(), "-".into(),
+    ];
+    if let Some(secs) = start_secs {
+        // --download-sections asks yt-dlp to pipe via ffmpeg with `-ss`, so the stream
+        // already starts at the requested offset and seeking is instant on the player
+        // side (no per-sample skipping, no re-download from zero).
+        args.push("--download-sections".into());
+        args.push(format!("*{secs}-inf"));
+        args.push("--force-keyframes-at-cuts".into());
+    }
+    args.push(youtube_url.into());
+
+    let child = Command::new(yt_dlp_executable())
+        .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
+        .map_err(spawn_error)?;
 
     SymphoniaSource::from_child(child, symphonia::core::probe::Hint::new(), stream_err)
         .map_err(|e| anyhow!("yt-dlp stream: {e}"))
 }
 
-fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
+fn download_via_tempfile(
+    youtube_url: &str,
+    start_secs: Option<u64>,
+    _stream_err: Arc<Mutex<Option<String>>>,
+) -> Result<SymphoniaSource> {
     // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
     // DASH WebM/Opus has higher bitrate but triggers "unsupported feature: core" in
     // symphonia's Matroska reader when YouTube serves it as fragmented DASH segments.
@@ -83,10 +150,22 @@ fn download_via_tempfile(youtube_url: &str, _stream_err: Arc<Mutex<Option<String
     let tmp_pattern = tmp_dir.join(format!("noctune_{hash}.%(ext)s")).to_string_lossy().to_string();
     let tmp_base = tmp_dir.join(format!("noctune_{hash}"));
 
-    let out = Command::new("yt-dlp")
-        .args(["-f", format_selector, "--no-playlist", "--no-warnings", "-o", &tmp_pattern, youtube_url])
+    let mut args: Vec<String> = vec![
+        "-f".into(), format_selector.into(),
+        "--no-playlist".into(), "--no-warnings".into(),
+        "-o".into(), tmp_pattern.clone(),
+    ];
+    if let Some(secs) = start_secs {
+        args.push("--download-sections".into());
+        args.push(format!("*{secs}-inf"));
+        args.push("--force-keyframes-at-cuts".into());
+    }
+    args.push(youtube_url.into());
+
+    let out = Command::new(yt_dlp_executable())
+        .args(&args)
         .output()
-        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
+        .map_err(spawn_error)?;
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -134,7 +213,7 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
         url.to_string()
     };
 
-    let output = Command::new("yt-dlp")
+    let output = Command::new(yt_dlp_executable())
         .args([
             "-J",
             "--flat-playlist",
@@ -142,7 +221,7 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
             &resolved,
         ])
         .output()
-        .map_err(|_| anyhow!("{}", yt_dlp_install_hint()))?;
+        .map_err(spawn_error)?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);

@@ -1752,7 +1752,29 @@ fn build_progress(
     width: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    let total = total.unwrap_or_else(|| Duration::from_secs(240));
+    let empty_color = Style::default().fg(parse_color(&theme.colors.progress_empty));
+    let filled_color = Style::default().fg(parse_color(&theme.colors.progress_filled));
+    let head_color = Style::default().fg(parse_color(&theme.colors.accent));
+
+    // Issue #61: when total duration is unknown (e.g. live stream, M3U URL with no
+    // metadata), render an indeterminate bar instead of pretending the song is 240s
+    // long. A small marker scrolls left-to-right based on elapsed time so the user
+    // still gets visual feedback that audio is flowing.
+    let Some(total) = total else {
+        if width == 0 {
+            return Line::from("");
+        }
+        let pos = (elapsed.as_secs() as usize) % width.max(1);
+        let before = theme.symbols.progress_empty.repeat(pos);
+        let after = theme.symbols.progress_empty.repeat(width.saturating_sub(pos + 1));
+        return Line::from(vec![
+            Span::raw(" "),
+            Span::styled(before, empty_color),
+            Span::styled(theme.symbols.progress_head.clone(), head_color),
+            Span::styled(after, empty_color),
+        ]);
+    };
+
     let frac = if total.is_zero() {
         0.0
     } else {
@@ -1760,10 +1782,6 @@ fn build_progress(
     };
     let filled = ((width as f32) * frac).round() as usize;
     let empty = width.saturating_sub(filled);
-
-    let filled_color = Style::default().fg(parse_color(&theme.colors.progress_filled));
-    let empty_color = Style::default().fg(parse_color(&theme.colors.progress_empty));
-    let head_color = Style::default().fg(parse_color(&theme.colors.accent));
 
     let (fill, head, empt) = if filled == 0 {
         (String::new(), String::new(), theme.symbols.progress_empty.repeat(empty))
