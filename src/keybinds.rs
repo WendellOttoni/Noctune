@@ -60,6 +60,8 @@ pub enum Action {
     RadioMode,
     /// Toggle the listening-stats modal (#64).
     ShowStats,
+    /// Toggle the Last.fm dashboard (#63).
+    LastfmPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -223,6 +225,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('B')), Action::SpotifyBrowser),
             (KeyChord::with_mods(KeyCode::Char('r'), KeyModifiers::CONTROL), Action::RadioMode),
             (KeyChord::with_mods(KeyCode::Char('s'), KeyModifiers::CONTROL), Action::ShowStats),
+            (KeyChord::with_mods(KeyCode::Char('l'), KeyModifiers::CONTROL), Action::LastfmPanel),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

@@ -198,6 +198,13 @@ pub struct App {
     pub radio_seed_editing: bool,
     pub radio_seed_input: String,
     pub show_stats: bool,
+    pub show_lastfm_panel: bool,
+    pub lastfm_panel_recent: Vec<crate::lastfm::RecentTrack>,
+    pub lastfm_panel_top_artists: Vec<crate::lastfm::TopArtist>,
+    pub lastfm_panel_rx: Option<std::sync::mpsc::Receiver<(
+        Vec<crate::lastfm::RecentTrack>,
+        Vec<crate::lastfm::TopArtist>,
+    )>>,
     pub media_session: Option<crate::media_session::MediaSession>,
     pub media_session_rx: Option<std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>>,
     pub rescan_debounce_until: Option<std::time::Instant>,
@@ -441,6 +448,10 @@ impl App {
             radio_seed_editing: false,
             radio_seed_input: String::new(),
             show_stats: false,
+            show_lastfm_panel: false,
+            lastfm_panel_recent: Vec::new(),
+            lastfm_panel_top_artists: Vec::new(),
+            lastfm_panel_rx: None,
             media_session: None,
             media_session_rx: None,
             rescan_debounce_until: None,
@@ -988,6 +999,20 @@ impl App {
             }
         }
 
+        // Last.fm panel async load (#63)
+        if let Some(rx) = &self.lastfm_panel_rx {
+            match rx.try_recv() {
+                Ok((recent, top)) => {
+                    self.lastfm_panel_recent = recent;
+                    self.lastfm_panel_top_artists = top;
+                    self.lastfm_panel_rx = None;
+                    self.status = "Last.fm: ready.".into();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => { self.lastfm_panel_rx = None; }
+            }
+        }
+
         // LRCLIB async result (#62)
         if let Some(rx) = &self.lyrics_rx {
             match rx.try_recv() {
@@ -1452,6 +1477,25 @@ impl App {
             }
             Action::ShowStats => {
                 self.show_stats = !self.show_stats;
+            }
+            Action::LastfmPanel => {
+                if !self.show_lastfm_panel {
+                    if let Some(lfm) = self.lastfm.clone() {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.lastfm_panel_rx = Some(rx);
+                        std::thread::spawn(move || {
+                            let recent = lfm.recent_tracks(10).unwrap_or_default();
+                            let top = lfm.top_artists("1month", 10).unwrap_or_default();
+                            let _ = tx.send((recent, top));
+                        });
+                        self.show_lastfm_panel = true;
+                        self.status = "Last.fm: loading…".into();
+                    } else {
+                        self.status = "Not logged in to Last.fm.".into();
+                    }
+                } else {
+                    self.show_lastfm_panel = false;
+                }
             }
             Action::RadioMode => {
                 if self.radio_mode.active {

@@ -9,6 +9,19 @@ use std::{
 
 const API_BASE: &str = "https://ws.audioscrobbler.com/2.0/";
 
+#[derive(Debug, Clone)]
+pub struct RecentTrack {
+    pub artist: String,
+    pub title: String,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TopArtist {
+    pub name: String,
+    pub playcount: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LastfmSession {
     pub session_key: String,
@@ -68,6 +81,66 @@ impl LastfmClient {
         p.insert("sk", self.session.session_key.clone());
         self.post(p)?;
         Ok(())
+    }
+
+    /// Last `limit` scrobbled tracks. Issue #63.
+    pub fn recent_tracks(&self, limit: u32) -> Result<Vec<RecentTrack>> {
+        let url = format!(
+            "{API_BASE}?method=user.getrecenttracks&user={}&api_key={}&format=json&limit={}",
+            self.session.username, self.api_key, limit
+        );
+        let v: serde_json::Value = self.client.get(&url).send()?.json()?;
+        let entries = v
+            .get("recenttracks")
+            .and_then(|r| r.get("track"))
+            .and_then(|t| t.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut out = Vec::new();
+        for e in entries {
+            let artist = e
+                .get("artist")
+                .and_then(|a| a.get("#text").or_else(|| a.get("name")))
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = e.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let ts = e
+                .get("date")
+                .and_then(|d| d.get("uts"))
+                .and_then(|u| u.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            out.push(RecentTrack { artist, title: name, timestamp: ts });
+        }
+        Ok(out)
+    }
+
+    /// Top artists over the given period (overall / 7day / 1month / 12month). Issue #63.
+    pub fn top_artists(&self, period: &str, limit: u32) -> Result<Vec<TopArtist>> {
+        let url = format!(
+            "{API_BASE}?method=user.gettopartists&user={}&api_key={}&format=json&period={}&limit={}",
+            self.session.username, self.api_key, period, limit
+        );
+        let v: serde_json::Value = self.client.get(&url).send()?.json()?;
+        let entries = v
+            .get("topartists")
+            .and_then(|r| r.get("artist"))
+            .and_then(|t| t.as_array())
+            .cloned()
+            .unwrap_or_default();
+        Ok(entries
+            .into_iter()
+            .filter_map(|e| {
+                let name = e.get("name").and_then(|s| s.as_str())?.to_string();
+                let plays = e
+                    .get("playcount")
+                    .and_then(|s| s.as_str())
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(0);
+                Some(TopArtist { name, playcount: plays })
+            })
+            .collect())
     }
 
     pub fn scrobble(&self, artist: &str, title: &str, timestamp: u64) -> Result<()> {

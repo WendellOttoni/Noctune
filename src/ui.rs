@@ -51,6 +51,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_stats {
         render_stats(f, area, app);
     }
+    if app.show_lastfm_panel {
+        render_lastfm(f, area, app);
+    }
     if app.show_info {
         render_track_info(f, area, app);
     }
@@ -1901,6 +1904,52 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     ))
     .alignment(Alignment::Right);
     f.render_widget(hints, chunks[1]);
+}
+
+fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
+    use ratatui::widgets::Clear;
+    let w = (area.width as i32 - 8).max(50) as u16;
+    let h = (area.height as i32 - 4).max(20) as u16;
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let rect = Rect { x, y, width: w, height: h };
+
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            " Last.fm dashboard ",
+            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled("Recent scrobbles",
+            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))),
+    ];
+    if app.lastfm_panel_recent.is_empty() {
+        lines.push(Line::from(" (loading or no scrobbles yet)"));
+    } else {
+        for t in &app.lastfm_panel_recent {
+            lines.push(Line::from(format!(" • {} — {}", t.artist, t.title)));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Top artists (last month)",
+        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    if app.lastfm_panel_top_artists.is_empty() {
+        lines.push(Line::from(" (loading)"));
+    } else {
+        for (i, a) in app.lastfm_panel_top_artists.iter().enumerate() {
+            lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, a.name, a.playcount)));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(" [Ctrl+L] close ",
+        Style::default().fg(parse_color(&app.theme.colors.muted)))));
+
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.border(true))
+        .title(Span::styled(" Last.fm (#63) ", app.theme.accent()));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn format_duration(d: Duration) -> String {
