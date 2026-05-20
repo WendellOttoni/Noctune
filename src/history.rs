@@ -82,6 +82,33 @@ impl PlayHistory {
         v
     }
 
+    /// Drop entries past `retain_days` and trim down to `max_entries`, keeping the
+    /// most recently played (#70). 0 on either field disables that check.
+    pub fn prune(&mut self, max_entries: usize, retain_days: u64) {
+        if retain_days > 0 {
+            let cutoff = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+                .saturating_sub(retain_days * 86_400);
+            self.entries.retain(|_, r| r.last_played == 0 || r.last_played >= cutoff);
+        }
+        if max_entries > 0 && self.entries.len() > max_entries {
+            let mut by_recent: Vec<(String, u64)> = self
+                .entries
+                .iter()
+                .map(|(k, r)| (k.clone(), r.last_played))
+                .collect();
+            by_recent.sort_by(|a, b| b.1.cmp(&a.1));
+            let keep: std::collections::HashSet<String> = by_recent
+                .into_iter()
+                .take(max_entries)
+                .map(|(k, _)| k)
+                .collect();
+            self.entries.retain(|k, _| keep.contains(k));
+        }
+    }
+
     /// Paths sorted by last_played descending.
     pub fn recently_played_paths(&self, limit: usize) -> Vec<String> {
         let mut v: Vec<(String, u64)> = self

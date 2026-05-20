@@ -338,12 +338,16 @@ impl App {
         // Start async library scan
         let (scan_tx, scan_rx) = std::sync::mpsc::channel::<Vec<Track>>();
         let scan_dirs = config.music_dirs.clone();
+        let cache_cfg = config.cache.clone();
         std::thread::spawn(move || {
             let cache_file = cache_path();
             let mut cache = cache_file
                 .as_ref()
                 .map(|p| MetadataCache::load(p))
                 .unwrap_or_default();
+            // #70: drop stale entries before re-scanning so removed files do not stay
+            // in the cache forever.
+            cache.prune(cache_cfg.expire_days, cache_cfg.max_size_mb);
             let tracks = scan_library(&scan_dirs, &mut cache);
             if let Some(p) = &cache_file {
                 cache.save(p);
@@ -414,7 +418,12 @@ impl App {
             replaygain_mode: ReplayGainMode::Track,
             viz_mode: VizMode::Spectrum,
             ratings: crate::ratings::Ratings::load(),
-            play_history: crate::history::PlayHistory::load(),
+            play_history: {
+                let mut h = crate::history::PlayHistory::load();
+                // #70: enforce history retention at startup so it does not grow forever.
+                h.prune(config.history.max_entries, config.history.retain_days);
+                h
+            },
             smart_expanded: [true, false, false, false],
             play_threshold_secs: 30.0,
             current_play_recorded: false,
