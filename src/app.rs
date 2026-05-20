@@ -193,6 +193,18 @@ pub struct App {
     pub theme_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _theme_watcher: Option<notify::RecommendedWatcher>,
     pub lyrics_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<crate::lyrics::Lyrics>)>>,
+    pub radio_mode: crate::radio_mode::RadioMode,
+    pub radio_fetch_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
+    pub radio_seed_editing: bool,
+    pub radio_seed_input: String,
+    pub show_stats: bool,
+    pub show_lastfm_panel: bool,
+    pub lastfm_panel_recent: Vec<crate::lastfm::RecentTrack>,
+    pub lastfm_panel_top_artists: Vec<crate::lastfm::TopArtist>,
+    pub lastfm_panel_rx: Option<std::sync::mpsc::Receiver<(
+        Vec<crate::lastfm::RecentTrack>,
+        Vec<crate::lastfm::TopArtist>,
+    )>>,
     pub media_session: Option<crate::media_session::MediaSession>,
     pub media_session_rx: Option<std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>>,
     pub rescan_debounce_until: Option<std::time::Instant>,
@@ -431,6 +443,15 @@ impl App {
             theme_watcher_rx: None,
             _theme_watcher: None,
             lyrics_rx: None,
+            radio_mode: crate::radio_mode::RadioMode::default(),
+            radio_fetch_rx: None,
+            radio_seed_editing: false,
+            radio_seed_input: String::new(),
+            show_stats: false,
+            show_lastfm_panel: false,
+            lastfm_panel_recent: Vec::new(),
+            lastfm_panel_top_artists: Vec::new(),
+            lastfm_panel_rx: None,
             media_session: None,
             media_session_rx: None,
             rescan_debounce_until: None,
@@ -978,6 +999,20 @@ impl App {
             }
         }
 
+        // Last.fm panel async load (#63)
+        if let Some(rx) = &self.lastfm_panel_rx {
+            match rx.try_recv() {
+                Ok((recent, top)) => {
+                    self.lastfm_panel_recent = recent;
+                    self.lastfm_panel_top_artists = top;
+                    self.lastfm_panel_rx = None;
+                    self.status = "Last.fm: ready.".into();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => { self.lastfm_panel_rx = None; }
+            }
+        }
+
         // LRCLIB async result (#62)
         if let Some(rx) = &self.lyrics_rx {
             match rx.try_recv() {
@@ -1079,6 +1114,47 @@ impl App {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Radio Mode (#56) — kick off a refill when the upcoming queue runs low and
+        // collect the result. The fetch reuses ytdlp::fetch_tracks (which now has
+        // retry from #69), so transient YouTube failures don't kill the stream.
+        if self.radio_mode.active && self.radio_fetch_rx.is_none() {
+            let upcoming = self.queue.len().saturating_sub(
+                self.queue_index.map(|i| i + 1).unwrap_or(0),
+            );
+            if self.radio_mode.should_fetch(upcoming) {
+                let current_title = self.player.current().map(|t| t.title.clone());
+                let query = self.radio_mode.query(current_title.as_deref());
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.radio_fetch_rx = Some(rx);
+                self.radio_mode.is_fetching = true;
+                std::thread::spawn(move || {
+                    let res = crate::ytdlp::fetch_tracks(&query).map_err(|e| e.to_string());
+                    let _ = tx.send(res);
+                });
+            }
+        }
+        if let Some(rx) = &self.radio_fetch_rx {
+            match rx.try_recv() {
+                Ok(Ok(mut tracks)) => {
+                    let n = tracks.len();
+                    self.queue.append(&mut tracks);
+                    self.status = format!("Radio: +{n} tracks.");
+                    self.radio_mode.is_fetching = false;
+                    self.radio_fetch_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.status = format!("Radio fetch error: {e}");
+                    self.radio_mode.is_fetching = false;
+                    self.radio_fetch_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.radio_mode.is_fetching = false;
+                    self.radio_fetch_rx = None;
                 }
             }
         }
@@ -1231,6 +1307,32 @@ impl App {
             return;
         }
 
+        if self.radio_seed_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.radio_seed_input.clear();
+                    self.radio_seed_editing = false;
+                    self.status = "Radio cancelled.".into();
+                }
+                KeyCode::Enter => {
+                    let seed = self.radio_seed_input.trim().to_string();
+                    self.radio_seed_editing = false;
+                    self.radio_seed_input.clear();
+                    if seed.is_empty() {
+                        self.status = "Radio: empty seed.".into();
+                    } else {
+                        self.radio_mode.seed = seed.clone();
+                        self.radio_mode.active = true;
+                        self.status = format!("Radio: '{seed}' — fetching first batch…");
+                    }
+                }
+                KeyCode::Backspace => { self.radio_seed_input.pop(); }
+                KeyCode::Char(c) => { self.radio_seed_input.push(c); }
+                _ => {}
+            }
+            return;
+        }
+
         if self.playlist_name_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1372,6 +1474,38 @@ impl App {
             Action::Profiles => {
                 self.show_profile_browser = true;
                 self.profile_browser_row = 0;
+            }
+            Action::ShowStats => {
+                self.show_stats = !self.show_stats;
+            }
+            Action::LastfmPanel => {
+                if !self.show_lastfm_panel {
+                    if let Some(lfm) = self.lastfm.clone() {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.lastfm_panel_rx = Some(rx);
+                        std::thread::spawn(move || {
+                            let recent = lfm.recent_tracks(10).unwrap_or_default();
+                            let top = lfm.top_artists("1month", 10).unwrap_or_default();
+                            let _ = tx.send((recent, top));
+                        });
+                        self.show_lastfm_panel = true;
+                        self.status = "Last.fm: loading…".into();
+                    } else {
+                        self.status = "Not logged in to Last.fm.".into();
+                    }
+                } else {
+                    self.show_lastfm_panel = false;
+                }
+            }
+            Action::RadioMode => {
+                if self.radio_mode.active {
+                    self.radio_mode.active = false;
+                    self.status = "Radio Mode off.".into();
+                } else {
+                    self.radio_seed_editing = true;
+                    self.radio_seed_input = self.radio_mode.seed.clone();
+                    self.status = "Radio seed (Enter=confirm, Esc=cancel):".into();
+                }
             }
             Action::SpotifyBrowser => {
                 if self.spotify.is_none() {

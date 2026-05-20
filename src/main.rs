@@ -9,6 +9,7 @@ mod compressor;
 mod config;
 mod discord;
 mod radio;
+mod radio_mode;
 mod eq;
 mod keybinds;
 mod history;

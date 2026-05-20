@@ -48,6 +48,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         render_help(f, area, app.help_scroll, &app.theme);
     }
+    if app.show_stats {
+        render_stats(f, area, app);
+    }
+    if app.show_lastfm_panel {
+        render_lastfm(f, area, app);
+    }
     if app.show_info {
         render_track_info(f, area, app);
     }
@@ -1900,7 +1906,103 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(hints, chunks[1]);
 }
 
+fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
+    use ratatui::widgets::Clear;
+    let w = (area.width as i32 - 8).max(50) as u16;
+    let h = (area.height as i32 - 4).max(20) as u16;
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let rect = Rect { x, y, width: w, height: h };
+
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            " Last.fm dashboard ",
+            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled("Recent scrobbles",
+            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))),
+    ];
+    if app.lastfm_panel_recent.is_empty() {
+        lines.push(Line::from(" (loading or no scrobbles yet)"));
+    } else {
+        for t in &app.lastfm_panel_recent {
+            lines.push(Line::from(format!(" • {} — {}", t.artist, t.title)));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Top artists (last month)",
+        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    if app.lastfm_panel_top_artists.is_empty() {
+        lines.push(Line::from(" (loading)"));
+    } else {
+        for (i, a) in app.lastfm_panel_top_artists.iter().enumerate() {
+            lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, a.name, a.playcount)));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(" [Ctrl+L] close ",
+        Style::default().fg(parse_color(&app.theme.colors.muted)))));
+
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.border(true))
+        .title(Span::styled(" Last.fm (#63) ", app.theme.accent()));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
 fn format_duration(d: Duration) -> String {
     let s = d.as_secs();
     format!("{:02}:{:02}", s / 60, s % 60)
+}
+
+fn render_stats(f: &mut Frame, area: Rect, app: &App) {
+    use ratatui::widgets::Clear;
+    let stats = crate::stats::PlaybackStats::compute(&app.play_history, &app.library, 10);
+
+    let w = (area.width as i32 - 8).max(50) as u16;
+    let h = (area.height as i32 - 4).max(20) as u16;
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let rect = Rect { x, y, width: w, height: h };
+
+    let listen_h = stats.estimated_listen_secs / 3600;
+    let listen_m = (stats.estimated_listen_secs % 3600) / 60;
+
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            format!(" Listening stats — total {}h{:02}m, {} plays across {} tracks ",
+                listen_h, listen_m, stats.total_plays, stats.unique_tracks),
+            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled("Top tracks",
+            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))),
+    ];
+    for (i, (display, _path, count)) in stats.top_tracks.iter().enumerate() {
+        lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, display, count)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Top artists",
+        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    for (i, (artist, count)) in stats.top_artists.iter().enumerate() {
+        lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, artist, count)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Recently played",
+        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    for (i, (display, _)) in stats.recent_tracks.iter().enumerate() {
+        lines.push(Line::from(format!(" {:>2}. {}", i + 1, display)));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(" [Ctrl+S] close ",
+        Style::default().fg(parse_color(&app.theme.colors.muted)))));
+
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.border(true))
+        .title(Span::styled(" Stats (#64) ", app.theme.accent()));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
