@@ -131,6 +131,26 @@ impl SymphoniaSource {
         Self::from_mss(mss, hint, Some(child))
     }
 
+    /// Seek the underlying container to `time`. Cheap on indexed formats (mp3/flac/ogg);
+    /// returns Err for unseekable sources (e.g. piped yt-dlp stdout, HTTP streams without
+    /// range support). Issue #59.
+    pub fn seek_to(&mut self, time: Duration) -> Result<()> {
+        use symphonia::core::formats::{SeekMode, SeekTo};
+        use symphonia::core::units::Time;
+        let secs = time.as_secs();
+        let frac = f64::from(time.subsec_nanos()) / 1_000_000_000.0;
+        self.format
+            .seek(
+                SeekMode::Coarse,
+                SeekTo::Time { time: Time { seconds: secs, frac }, track_id: Some(self.track_id) },
+            )
+            .map_err(|e| anyhow!("seek: {e}"))?;
+        let _ = self.decoder.reset();
+        self.buf.clear();
+        self.buf_pos = 0;
+        Ok(())
+    }
+
     fn fill_buf(&mut self) -> bool {
         loop {
             let packet = match self.format.next_packet() {
@@ -357,47 +377,28 @@ impl Player {
     }
 
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
+        let source = build_source(track, offset, self.stream_err.clone())?;
+        self.play_prepared(source, track, offset)
+    }
+
+    /// Returns a clone of the streaming-error slot so background loaders can write to it.
+    pub fn stream_err_handle(&self) -> Arc<Mutex<Option<String>>> {
+        self.stream_err.clone()
+    }
+
+    /// Attach a pre-built `SymphoniaSource` to a fresh sink and start playback.
+    /// All blocking work (file open, symphonia probe, yt-dlp spawn) must have already
+    /// happened in `build_source` — this method only does the cheap sink swap, so it is
+    /// safe to call from the UI thread when a background loader finishes (issue #58).
+    pub fn play_prepared(&mut self, source: SymphoniaSource, track: &Track, offset: Duration) -> Result<()> {
         self.cancel_crossfade();
         self.gapless_queued = None;
-        let path_str = track.path.to_string_lossy().to_string();
-        let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
-
-        if is_url {
-            let source = if crate::ytdlp::is_youtube_url(&path_str) {
-                crate::ytdlp::spawn_yt_dlp(&path_str, self.stream_err.clone())?
-            } else {
-                let reader = http_get_reader(&path_str)?;
-                SymphoniaSource::from_reader(reader, Hint::new())?
-            };
-            let viz = VizSource::new(source, self.tap.clone());
-            let eq = EqSource::new(viz, self.eq.clone());
-            let sink = Sink::try_new(&self.handle)?;
-            sink.set_volume(self.volume * self.rg_scale);
-            sink.append(eq);
-            self.sink = sink;
-        } else {
-            let file = File::open(&track.path)
-                .with_context(|| format!("opening {}", track.path.display()))?;
-            let mut source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
-                .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
-            if offset > Duration::ZERO {
-                let rate = source.sample_rate() as u64;
-                let ch = source.channels() as u64;
-                let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
-                for _ in 0..to_skip {
-                    if source.next().is_none() {
-                        break;
-                    }
-                }
-            }
-            let viz = VizSource::new(source, self.tap.clone());
-            let eq = EqSource::new(viz, self.eq.clone());
-            let sink = Sink::try_new(&self.handle)?;
-            sink.set_volume(self.volume * self.rg_scale);
-            sink.append(eq);
-            self.sink = sink;
-        }
-
+        let viz = VizSource::new(source, self.tap.clone());
+        let eq = EqSource::new(viz, self.eq.clone());
+        let sink = Sink::try_new(&self.handle)?;
+        sink.set_volume(self.volume * self.rg_scale);
+        sink.append(eq);
+        self.sink = sink;
         self.current = Some(track.clone());
         self.started_at = Some(Instant::now());
         self.paused_offset = offset;
@@ -585,6 +586,51 @@ pub fn enumerate_output_devices() -> Vec<String> {
 
 pub fn default_device_name() -> Option<String> {
     cpal::default_host().default_output_device()?.name().ok()
+}
+
+/// Build a ready-to-play `SymphoniaSource` for a track. Performs all blocking work
+/// (file open, symphonia probe, yt-dlp spawn, HTTP connect) — call from a background
+/// thread when responsiveness matters (issue #58).
+pub fn build_source(
+    track: &Track,
+    offset: Duration,
+    stream_err: Arc<Mutex<Option<String>>>,
+) -> Result<SymphoniaSource> {
+    let path_str = track.path.to_string_lossy().to_string();
+    let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
+
+    let mut source = if is_url {
+        if crate::ytdlp::is_youtube_url(&path_str) {
+            crate::ytdlp::spawn_yt_dlp(&path_str, stream_err)?
+        } else {
+            let reader = http_get_reader(&path_str)?;
+            SymphoniaSource::from_reader(reader, Hint::new())?
+        }
+    } else {
+        let file = File::open(&track.path)
+            .with_context(|| format!("opening {}", track.path.display()))?;
+        SymphoniaSource::from_file(file, hint_from_path(&track.path))
+            .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?
+    };
+
+    if offset > Duration::ZERO && !is_url {
+        // Symphonia's container-level seek is O(log n) on indexed formats; falls back
+        // to scanning otherwise. Either way it avoids the per-sample loop used before
+        // (issue #59). Streams (yt-dlp/HTTP) handle seek by respawning with a start
+        // offset — handled at the caller layer (#57).
+        if source.seek_to(offset).is_err() {
+            // Fallback: skip frames the slow way if container seek is unsupported.
+            let rate = source.sample_rate() as u64;
+            let ch = source.channels() as u64;
+            let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
+            for _ in 0..to_skip {
+                if source.next().is_none() {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(source)
 }
 
 fn http_get_reader(url: &str) -> Result<impl Read + Send + 'static> {

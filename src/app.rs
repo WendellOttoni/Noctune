@@ -184,6 +184,8 @@ pub struct App {
     pub last_drag_seek: Option<std::time::Instant>,
     pub clear_confirm_until: Option<std::time::Instant>,
     pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
+    pub load_rx: Option<std::sync::mpsc::Receiver<Result<crate::audio::SymphoniaSource, String>>>,
+    pub loading_track: Option<Track>,
     pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _fs_watcher: Option<notify::RecommendedWatcher>,
@@ -396,6 +398,8 @@ impl App {
             last_drag_seek: None,
             clear_confirm_until: None,
             url_rx: None,
+            load_rx: None,
+            loading_track: None,
             scan_rx: Some(scan_rx),
             fs_event_rx: Some(fs_event_rx),
             _fs_watcher,
@@ -828,6 +832,32 @@ impl App {
                 }
             }
         }
+        // Poll the background track loader (#58)
+        if let Some(rx) = &self.load_rx {
+            match rx.try_recv() {
+                Ok(Ok(source)) => {
+                    let track = self.loading_track.take();
+                    self.load_rx = None;
+                    if let Some(t) = track {
+                        match self.player.play_prepared(source, &t, Duration::ZERO) {
+                            Ok(_) => self.on_track_started(t),
+                            Err(e) => self.status = format!("Error: {e}"),
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.status = format!("Load error: {e}");
+                    self.load_rx = None;
+                    self.loading_track = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.load_rx = None;
+                    self.loading_track = None;
+                }
+            }
+        }
+
         if let Some(err) = self.player.take_stream_error() {
             self.status = err;
         }
@@ -2052,36 +2082,48 @@ impl App {
         // Apply ReplayGain scaling
         self.player.rg_scale = rg_scale(&t, self.replaygain_mode);
 
-        // Local file or HTTP/YouTube stream
-        // Load album art (blocking but fast — typically a JPEG thumbnail in the tag)
+        // Local file or HTTP/YouTube stream — build the source off the UI thread so
+        // yt-dlp spawn / HTTP connect / symphonia probe don't freeze input (issue #58).
+        let stream_err = self.player.stream_err_handle();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let t_clone = t.clone();
+        std::thread::spawn(move || {
+            let result = crate::audio::build_source(
+                &t_clone,
+                std::time::Duration::ZERO,
+                stream_err,
+            )
+            .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+        self.load_rx = Some(rx);
+        self.loading_track = Some(t.clone());
+        self.status = format!("Loading: {}…", t.display());
+    }
+
+    fn on_track_started(&mut self, t: Track) {
         let new_art = crate::metadata::probe_picture(&t.path)
             .and_then(|bytes| self.art_picker.load(&bytes));
-
-        match self.player.play(&t) {
-            Ok(_) => {
-                self.album_art = new_art;
-                self.status = format!("Playing: {}", t.display());
-                self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
-                let artist = t.artist.clone().unwrap_or_default();
-                let title = t.title.clone();
-                let ts = crate::lastfm::now_unix();
-                self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
-                if let Some(lfm) = self.lastfm.clone() {
-                    let a = artist.clone();
-                    let ti = title.clone();
-                    std::thread::spawn(move || { let _ = lfm.update_now_playing(&a, &ti); });
-                }
-                if let Some(tx) = &self.discord_tx {
-                    let _ = tx.send(crate::discord::Cmd::Update {
-                        title: title.clone(),
-                        artist: artist.clone(),
-                        start_secs: ts as i64,
-                    });
-                }
-                self.push_history(t);
-            }
-            Err(e) => self.status = format!("Error: {e}"),
+        self.album_art = new_art;
+        self.status = format!("Playing: {}", t.display());
+        self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+        let artist = t.artist.clone().unwrap_or_default();
+        let title = t.title.clone();
+        let ts = crate::lastfm::now_unix();
+        self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
+        if let Some(lfm) = self.lastfm.clone() {
+            let a = artist.clone();
+            let ti = title.clone();
+            std::thread::spawn(move || { let _ = lfm.update_now_playing(&a, &ti); });
         }
+        if let Some(tx) = &self.discord_tx {
+            let _ = tx.send(crate::discord::Cmd::Update {
+                title: title.clone(),
+                artist: artist.clone(),
+                start_secs: ts as i64,
+            });
+        }
+        self.push_history(t);
     }
 
     fn pick_next_index(&self, current: usize) -> Option<usize> {
