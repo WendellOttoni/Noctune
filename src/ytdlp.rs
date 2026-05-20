@@ -32,6 +32,80 @@ fn yt_dlp_executable() -> String {
     "yt-dlp".into()
 }
 
+/// Classification of yt-dlp / network failures used by the retry logic (#69).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YtErrorKind {
+    /// Network blip — retry with normal backoff.
+    Transient,
+    /// HTTP 429 / 'too many requests' — back off significantly longer.
+    RateLimit,
+    /// Video removed, geo-blocked, age-gated, etc. — no point retrying.
+    Permanent,
+}
+
+fn classify(stderr_lower: &str) -> YtErrorKind {
+    if stderr_lower.contains("429")
+        || stderr_lower.contains("too many requests")
+        || stderr_lower.contains("rate limit")
+    {
+        return YtErrorKind::RateLimit;
+    }
+    if stderr_lower.contains("private")
+        || stderr_lower.contains("removed")
+        || stderr_lower.contains("unavailable")
+        || stderr_lower.contains("age")
+        || stderr_lower.contains("copyright")
+        || stderr_lower.contains("not found")
+        || stderr_lower.contains("404")
+    {
+        return YtErrorKind::Permanent;
+    }
+    YtErrorKind::Transient
+}
+
+/// Tunables read from `config.toml` `[ytdlp]` (set by `App::new`).
+static RETRY_CFG: std::sync::OnceLock<crate::config::YtdlpConfig> = std::sync::OnceLock::new();
+
+pub fn configure_retries(cfg: crate::config::YtdlpConfig) {
+    let _ = RETRY_CFG.set(cfg);
+}
+
+fn retry_cfg() -> crate::config::YtdlpConfig {
+    RETRY_CFG.get().cloned().unwrap_or_default()
+}
+
+/// Run a fallible yt-dlp operation with exponential backoff. `classify_err`
+/// inspects the error string and decides whether to retry, give up, or wait
+/// longer (for rate limits). Returns the last error if all attempts fail.
+fn with_retry<T, F>(mut op: F) -> Result<T>
+where
+    F: FnMut() -> Result<T>,
+{
+    let cfg = retry_cfg();
+    let mut backoff = cfg.backoff_secs.max(1);
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
+        match op() {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                let msg = format!("{e}").to_lowercase();
+                let kind = classify(&msg);
+                if kind == YtErrorKind::Permanent || attempt >= cfg.max_retries.max(1) {
+                    return Err(e);
+                }
+                let wait = if kind == YtErrorKind::RateLimit {
+                    cfg.ratelimit_backoff_secs.max(backoff)
+                } else {
+                    backoff
+                };
+                std::thread::sleep(Duration::from_secs(wait));
+                backoff = backoff.saturating_mul(2);
+            }
+        }
+    }
+}
+
 fn spawn_error(e: std::io::Error) -> anyhow::Error {
     // Issue #55, bug 2: previously any spawn error was rewritten to the install hint,
     // hiding the real cause (permission denied, AV block, broken winget shim, …).
@@ -88,11 +162,15 @@ pub fn spawn_yt_dlp_at(
 ) -> Result<SymphoniaSource> {
     let offset_secs = start_offset.as_secs();
     let want_offset = offset_secs > 0 && ffmpeg_available();
-    if cfg!(target_os = "windows") {
-        download_via_tempfile(youtube_url, want_offset.then_some(offset_secs), stream_err)
-    } else {
-        pipe_from_yt_dlp(youtube_url, want_offset.then_some(offset_secs), stream_err)
-    }
+    // #69: wrap the spawn in a backoff retry — transient network errors no longer kill
+    // playback. Permanent errors (video removed, private) short-circuit immediately.
+    with_retry(|| {
+        if cfg!(target_os = "windows") {
+            download_via_tempfile(youtube_url, want_offset.then_some(offset_secs), stream_err.clone())
+        } else {
+            pipe_from_yt_dlp(youtube_url, want_offset.then_some(offset_secs), stream_err.clone())
+        }
+    })
 }
 
 fn pipe_from_yt_dlp(
@@ -213,22 +291,20 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
         url.to_string()
     };
 
-    let output = Command::new(yt_dlp_executable())
-        .args([
-            "-J",
-            "--flat-playlist",
-            "--no-warnings",
-            &resolved,
-        ])
-        .output()
-        .map_err(spawn_error)?;
+    // #69: retry transient failures (network blip, temporary 5xx) before giving up.
+    let json_str = with_retry(|| {
+        let output = Command::new(yt_dlp_executable())
+            .args(["-J", "--flat-playlist", "--no-warnings", &resolved])
+            .output()
+            .map_err(spawn_error)?;
 
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("yt-dlp: {}", err.trim()));
-    }
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("yt-dlp: {}", err.trim()));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    })?;
 
-    let json_str = String::from_utf8_lossy(&output.stdout);
     let info: YtInfo = serde_json::from_str(&json_str)
         .map_err(|e| anyhow!("yt-dlp JSON parse error: {e}"))?;
 
