@@ -394,7 +394,13 @@ impl App {
             sort: SortMode::Title,
             sleep_until: None,
             history: std::collections::VecDeque::with_capacity(64),
-            bindings: Bindings::from_config(&config_keybinds),
+            bindings: {
+                let (b, warnings) = Bindings::from_config(&config_keybinds);
+                for w in warnings {
+                    eprintln!("[keybinds] {w}");
+                }
+                b
+            },
             lyrics: None,
             spotify_client_id,
             spotify_redirect_uri,
