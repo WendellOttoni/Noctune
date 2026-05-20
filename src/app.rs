@@ -319,6 +319,7 @@ impl ViewMode {
 impl App {
     pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
         crate::ytdlp::configure_retries(config.ytdlp.clone());
+        let history_cfg = config.history.clone();
         let player = Player::new(config.playback.default_volume, config.visualizer.sensitivity)?;
         let tap = player.tap();
 
@@ -465,7 +466,7 @@ impl App {
             play_history: {
                 let mut h = crate::history::PlayHistory::load();
                 // #70: enforce history retention at startup so it does not grow forever.
-                h.prune(config.history.max_entries, config.history.retain_days);
+                h.prune(history_cfg.max_entries, history_cfg.retain_days);
                 h
             },
             smart_expanded: [true, false, false, false],
@@ -981,15 +982,20 @@ impl App {
         // OS media-session events (#54) — play/pause/next/prev pressed on the SMTC,
         // MPRIS, or MediaRemote card. Drain everything queued this tick.
         if let Some(rx) = &self.media_session_rx {
+            let mut events = Vec::new();
+            let mut disconnected = false;
             loop {
                 match rx.try_recv() {
-                    Ok(ev) => self.handle_media_event(ev),
+                    Ok(ev) => events.push(ev),
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.media_session_rx = None;
-                        break;
-                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => { disconnected = true; break; }
                 }
+            }
+            for ev in events {
+                self.handle_media_event(ev);
+            }
+            if disconnected {
+                self.media_session_rx = None;
             }
         }
         // Keep the OS card progress in sync with playback. Cheap (just sets a field).
