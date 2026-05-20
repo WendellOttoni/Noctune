@@ -1305,10 +1305,20 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                     .unwrap_or_default();
                 let mut spans = Vec::new();
                 if let Some(s) = fav_span { spans.push(s); }
-                spans.push(Span::styled(
-                    t.display(),
-                    Style::default().fg(parse_color(&app.theme.colors.foreground)),
-                ));
+                let display = t.display();
+                let fg = parse_color(&app.theme.colors.foreground);
+                let needle = app.search_query();
+                if !needle.is_empty() {
+                    // #66: highlight the matched substring inside the row.
+                    spans.extend(highlight_match(
+                        &display,
+                        needle,
+                        fg,
+                        parse_color(&app.theme.colors.accent),
+                    ));
+                } else {
+                    spans.push(Span::styled(display, Style::default().fg(fg)));
+                }
                 spans.push(Span::styled(dur, Style::default().fg(parse_color(&app.theme.colors.muted))));
                 ListItem::new(Line::from(spans))
             }
@@ -1744,6 +1754,35 @@ fn build_volume_bar(volume: f32, width: usize, theme: &Theme) -> Line<'static> {
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
     ])
+}
+
+/// Split `text` into spans, applying `match_color` to occurrences of `needle`
+/// (case-insensitive) and `base_color` to the rest. Used by the search filter to
+/// highlight matched substrings (#66).
+fn highlight_match(text: &str, needle: &str, base: ratatui::style::Color, hit: ratatui::style::Color) -> Vec<Span<'static>> {
+    let lower = text.to_lowercase();
+    let needle_l = needle.to_lowercase();
+    let mut out: Vec<Span<'static>> = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel) = lower[cursor..].find(&needle_l) {
+        let abs = cursor + rel;
+        if abs > cursor {
+            out.push(Span::styled(text[cursor..abs].to_string(), Style::default().fg(base)));
+        }
+        let end = abs + needle_l.len();
+        out.push(Span::styled(
+            text[abs..end].to_string(),
+            Style::default().fg(hit).add_modifier(Modifier::BOLD),
+        ));
+        cursor = end;
+    }
+    if cursor < text.len() {
+        out.push(Span::styled(text[cursor..].to_string(), Style::default().fg(base)));
+    }
+    if out.is_empty() {
+        out.push(Span::styled(text.to_string(), Style::default().fg(base)));
+    }
+    out
 }
 
 fn build_progress(
