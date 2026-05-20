@@ -601,7 +601,9 @@ pub fn build_source(
 
     let mut source = if is_url {
         if crate::ytdlp::is_youtube_url(&path_str) {
-            crate::ytdlp::spawn_yt_dlp(&path_str, stream_err)?
+            // Issue #57: pass the seek offset down to yt-dlp/ffmpeg so the stream
+            // starts at the requested position instead of from zero.
+            crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)?
         } else {
             let reader = http_get_reader(&path_str)?;
             SymphoniaSource::from_reader(reader, Hint::new())?

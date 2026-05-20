@@ -186,6 +186,7 @@ pub struct App {
     pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub load_rx: Option<std::sync::mpsc::Receiver<Result<crate::audio::SymphoniaSource, String>>>,
     pub loading_track: Option<Track>,
+    pub pending_seek_offset: Option<Duration>,
     pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _fs_watcher: Option<notify::RecommendedWatcher>,
@@ -400,6 +401,7 @@ impl App {
             url_rx: None,
             load_rx: None,
             loading_track: None,
+            pending_seek_offset: None,
             scan_rx: Some(scan_rx),
             fs_event_rx: Some(fs_event_rx),
             _fs_watcher,
@@ -837,10 +839,18 @@ impl App {
             match rx.try_recv() {
                 Ok(Ok(source)) => {
                     let track = self.loading_track.take();
+                    let seek_offset = self.pending_seek_offset.take();
                     self.load_rx = None;
                     if let Some(t) = track {
-                        match self.player.play_prepared(source, &t, Duration::ZERO) {
-                            Ok(_) => self.on_track_started(t),
+                        let offset = seek_offset.unwrap_or(Duration::ZERO);
+                        match self.player.play_prepared(source, &t, offset) {
+                            Ok(_) => {
+                                if seek_offset.is_some() {
+                                    self.status = format!("Playing: {}", t.display());
+                                } else {
+                                    self.on_track_started(t);
+                                }
+                            }
                             Err(e) => self.status = format!("Error: {e}"),
                         }
                     }
@@ -849,11 +859,13 @@ impl App {
                     self.status = format!("Load error: {e}");
                     self.load_rx = None;
                     self.loading_track = None;
+                    self.pending_seek_offset = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.load_rx = None;
                     self.loading_track = None;
+                    self.pending_seek_offset = None;
                 }
             }
         }
@@ -1264,14 +1276,10 @@ impl App {
                 self.config.playback.default_volume = v;
             }
             Action::SeekBack => {
-                if let Err(e) = self.player.seek_relative(-5) {
-                    self.status = format!("Seek error: {e}");
-                }
+                self.seek_relative_async(-5);
             }
             Action::SeekForward => {
-                if let Err(e) = self.player.seek_relative(5) {
-                    self.status = format!("Seek error: {e}");
-                }
+                self.seek_relative_async(5);
             }
             Action::SelectionUp => self.move_selection(-1),
             Action::SelectionDown => self.move_selection(1),
@@ -1863,7 +1871,7 @@ impl App {
             }
         }
         let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
-        if let Err(e) = self.player.seek_absolute_fraction(frac) {
+        if let Err(e) = self.seek_fraction_async(frac) {
             self.status = format!("Seek error: {e}");
         }
         self.last_drag_seek = Some(now);
@@ -1898,7 +1906,7 @@ impl App {
         }
         if rect_contains(prog, x, y) && prog.width > 0 {
             let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
-            if let Err(e) = self.player.seek_absolute_fraction(frac) {
+            if let Err(e) = self.seek_fraction_async(frac) {
                 self.status = format!("Seek error: {e}");
             }
         }
@@ -2099,6 +2107,58 @@ impl App {
         self.load_rx = Some(rx);
         self.loading_track = Some(t.clone());
         self.status = format!("Loading: {}…", t.display());
+    }
+
+    /// Returns true if the given track is an HTTP/YouTube stream — for streams we
+    /// must rebuild the source (yt-dlp respawn) and therefore want to go through the
+    /// background loader so the UI does not freeze (issue #57).
+    fn track_is_stream(t: &Track) -> bool {
+        let p = t.path.to_string_lossy();
+        p.starts_with("http://") || p.starts_with("https://")
+    }
+
+    fn seek_relative_async(&mut self, delta_secs: i64) {
+        let Some(track) = self.player.current().cloned() else { return };
+        if !Self::track_is_stream(&track) {
+            if let Err(e) = self.player.seek_relative(delta_secs) {
+                self.status = format!("Seek error: {e}");
+            }
+            return;
+        }
+        let cur_ms = self.player.elapsed().as_millis() as i64;
+        let mut new_ms = cur_ms + delta_secs * 1000;
+        if new_ms < 0 { new_ms = 0; }
+        if let Some(total) = track.duration {
+            let max_ms = total.as_millis().saturating_sub(500) as i64;
+            if new_ms > max_ms { new_ms = max_ms; }
+        }
+        self.spawn_seek_load(track, Duration::from_millis(new_ms as u64));
+    }
+
+    fn seek_fraction_async(&mut self, frac: f32) -> Result<()> {
+        let Some(track) = self.player.current().cloned() else { return Ok(()) };
+        if !Self::track_is_stream(&track) {
+            return self.player.seek_absolute_fraction(frac);
+        }
+        let Some(total) = track.duration else { return Ok(()) };
+        let target_ms = (total.as_millis() as f32 * frac.clamp(0.0, 1.0)) as u64;
+        self.spawn_seek_load(track, Duration::from_millis(target_ms));
+        Ok(())
+    }
+
+    fn spawn_seek_load(&mut self, track: Track, offset: Duration) {
+        let stream_err = self.player.stream_err_handle();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let t_clone = track.clone();
+        std::thread::spawn(move || {
+            let result = crate::audio::build_source(&t_clone, offset, stream_err)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+        self.load_rx = Some(rx);
+        self.loading_track = Some(track);
+        self.pending_seek_offset = Some(offset);
+        self.status = "Seeking…".into();
     }
 
     fn on_track_started(&mut self, t: Track) {
