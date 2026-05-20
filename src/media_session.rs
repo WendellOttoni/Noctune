@@ -13,12 +13,11 @@ use std::{sync::mpsc::Receiver, time::Duration};
 #[cfg(target_os = "windows")]
 mod win {
     use anyhow::{anyhow, Result};
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::Win32::UI::WindowsAndMessaging::{
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, HWND_MESSAGE,
-        WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW,
+        WNDCLASSEXW,
     };
 
     /// Hidden message-only window — souvlaki uses its HWND as the SMTC handle.
@@ -30,35 +29,37 @@ mod win {
         pub fn new() -> Result<Self> {
             unsafe {
                 let class_name: Vec<u16> = "NoctuneMediaSession\0".encode_utf16().collect();
-                let hinstance = GetModuleHandleW(None)
-                    .map_err(|e| anyhow!("GetModuleHandleW: {e:?}"))?;
+                let hinstance = GetModuleHandleW(std::ptr::null());
+                if hinstance.is_null() {
+                    return Err(anyhow!("GetModuleHandleW returned null"));
+                }
 
-                let wc = WNDCLASSEXW {
-                    cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-                    lpfnWndProc: Some(wnd_proc),
-                    hInstance: hinstance.into(),
-                    lpszClassName: PCWSTR(class_name.as_ptr()),
-                    ..Default::default()
-                };
-                // Re-registering the same class returns 0 but sets ERROR_CLASS_ALREADY_EXISTS.
-                // That's fine — we just need the class to exist by the time CreateWindowExW runs.
+                let mut wc: WNDCLASSEXW = std::mem::zeroed();
+                wc.cbSize = std::mem::size_of::<WNDCLASSEXW>() as u32;
+                wc.lpfnWndProc = Some(wnd_proc);
+                wc.hInstance = hinstance as _;
+                wc.lpszClassName = class_name.as_ptr();
+                // Re-registering the same class returns 0 + ERROR_CLASS_ALREADY_EXISTS.
+                // We don't care — we only need the class to exist before CreateWindowExW.
                 let _ = RegisterClassExW(&wc);
 
                 let hwnd = CreateWindowExW(
-                    WINDOW_EX_STYLE(0),
-                    PCWSTR(class_name.as_ptr()),
-                    PCWSTR(class_name.as_ptr()),
-                    WINDOW_STYLE(0),
+                    0,
+                    class_name.as_ptr(),
+                    class_name.as_ptr(),
                     0,
                     0,
                     0,
                     0,
-                    Some(HWND_MESSAGE),
-                    None,
-                    Some(hinstance.into()),
-                    None,
-                )
-                .map_err(|e| anyhow!("CreateWindowExW: {e:?}"))?;
+                    0,
+                    HWND_MESSAGE,
+                    std::ptr::null_mut(),
+                    hinstance as _,
+                    std::ptr::null(),
+                );
+                if hwnd.is_null() {
+                    return Err(anyhow!("CreateWindowExW returned null"));
+                }
 
                 Ok(Self { hwnd })
             }
@@ -100,7 +101,7 @@ impl MediaSession {
         let config = PlatformConfig {
             dbus_name: "noctune",
             display_name: app_name,
-            hwnd: Some(hidden.hwnd.0 as *mut std::ffi::c_void),
+            hwnd: Some(hidden.hwnd as *mut std::ffi::c_void),
         };
         #[cfg(not(target_os = "windows"))]
         let config = PlatformConfig {

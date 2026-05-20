@@ -1,6 +1,6 @@
 [package]
 name = "noctune"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
@@ -49,7 +49,7 @@ souvlaki = "0.7"
 # ourselves via the `windows` crate and pass the handle into PlatformConfig.
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
-windows = { version = "0.58", features = [
+windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_LibraryLoader",
