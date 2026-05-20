@@ -20,6 +20,7 @@ use symphonia::core::{
 };
 
 use crate::{
+    compressor::{CompHandle, CompSource},
     eq::{EqHandle, EqSource},
     metadata::{probe, TrackMeta},
     visualizer::{VizSource, VizTap},
@@ -233,6 +234,7 @@ pub struct Player {
     paused_offset: Duration,
     tap: VizTap,
     eq: EqHandle,
+    comp: CompHandle,
     pub rg_scale: f32,
     // crossfade state
     fade_sink: Option<Sink>,
@@ -240,6 +242,10 @@ pub struct Player {
     fade_started_at: Option<Instant>,
     crossfade_start: Option<Instant>,
     pub crossfade_secs: f32,
+    // Streams cannot synchronously open during the few seconds before the song ends,
+    // so the source is built in a worker thread and attached when ready (#71).
+    crossfade_load_rx: Option<std::sync::mpsc::Receiver<Result<SymphoniaSource, String>>>,
+    crossfade_pending: Option<Track>,
     // gapless state
     pub gapless_queued: Option<Track>,
     // last error from a streaming source (yt-dlp stderr)
@@ -319,12 +325,15 @@ impl Player {
             paused_offset: Duration::ZERO,
             tap: VizTap::new(viz_sensitivity),
             eq: EqHandle::new(),
+            comp: CompHandle::new(),
             rg_scale: 1.0,
             fade_sink: None,
             fade_current: None,
             fade_started_at: None,
             crossfade_start: None,
             crossfade_secs: 3.0,
+            crossfade_load_rx: None,
+            crossfade_pending: None,
             gapless_queued: None,
             stream_err: Arc::new(Mutex::new(None)),
         })
@@ -336,6 +345,10 @@ impl Player {
 
     pub fn eq(&self) -> EqHandle {
         self.eq.clone()
+    }
+
+    pub fn comp(&self) -> CompHandle {
+        self.comp.clone()
     }
 
     /// Returns and clears the last error message from a streaming source, if any.
@@ -352,6 +365,12 @@ impl Player {
         self.fade_current = None;
         self.fade_started_at = None;
         self.crossfade_start = None;
+        self.crossfade_load_rx = None;
+        self.crossfade_pending = None;
+    }
+
+    pub fn is_crossfading(&self) -> bool {
+        self.crossfade_start.is_some() || self.crossfade_load_rx.is_some()
     }
 
     /// Appends the next track to the sink queue for gapless playback.
@@ -367,7 +386,8 @@ impl Player {
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
-        self.sink.append(eq);
+        let comp = CompSource::new(eq, self.comp.clone());
+        self.sink.append(comp);
         self.gapless_queued = Some(track.clone());
         Ok(())
     }
@@ -395,9 +415,10 @@ impl Player {
         self.gapless_queued = None;
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
+        let comp = CompSource::new(eq, self.comp.clone());
         let sink = Sink::try_new(&self.handle)?;
         sink.set_volume(self.volume * self.rg_scale);
-        sink.append(eq);
+        sink.append(comp);
         self.sink = sink;
         self.current = Some(track.clone());
         self.started_at = Some(Instant::now());
@@ -460,13 +481,27 @@ impl Player {
         Some(total.saturating_sub(self.elapsed()))
     }
 
-    pub fn is_crossfading(&self) -> bool {
-        self.crossfade_start.is_some()
-    }
-
     pub fn begin_crossfade(&mut self, track: &Track) -> Result<()> {
         let path_str = track.path.to_string_lossy();
-        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+        let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
+        if is_url {
+            // #71: build the stream source on a worker thread; the fade itself starts
+            // once the source is ready (update_crossfade polls the receiver). If the
+            // load takes longer than the remaining time of the current track, the
+            // fade simply degrades to a hard cut handled by the normal next() flow.
+            if self.crossfade_load_rx.is_some() {
+                return Ok(()); // already preparing
+            }
+            let stream_err = self.stream_err.clone();
+            let track_owned = track.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let res = build_source(&track_owned, Duration::ZERO, stream_err)
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(res);
+            });
+            self.crossfade_load_rx = Some(rx);
+            self.crossfade_pending = Some(track.clone());
             return Ok(());
         }
 
@@ -474,21 +509,51 @@ impl Player {
             .with_context(|| format!("opening {}", track.path.display()))?;
         let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
+        self.attach_fade_source(source, track.clone())
+    }
+
+    fn attach_fade_source(&mut self, source: SymphoniaSource, track: Track) -> Result<()> {
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
-
+        let comp = CompSource::new(eq, self.comp.clone());
         let new_sink = Sink::try_new(&self.handle)?;
         new_sink.set_volume(0.0);
-        new_sink.append(eq);
-
+        new_sink.append(comp);
         self.fade_sink = Some(new_sink);
-        self.fade_current = Some(track.clone());
+        self.fade_current = Some(track);
         self.fade_started_at = Some(Instant::now());
         self.crossfade_start = Some(Instant::now());
         Ok(())
     }
 
     pub fn update_crossfade(&mut self) -> CrossfadeStatus {
+        // #71: if we're waiting on a background stream load, check it before doing
+        // anything else. When the source arrives, attach it and the fade timer starts.
+        if let Some(rx) = &self.crossfade_load_rx {
+            match rx.try_recv() {
+                Ok(Ok(source)) => {
+                    self.crossfade_load_rx = None;
+                    if let Some(track) = self.crossfade_pending.take() {
+                        if self.attach_fade_source(source, track).is_err() {
+                            self.cancel_crossfade();
+                            return CrossfadeStatus::None;
+                        }
+                    }
+                }
+                Ok(Err(_)) => {
+                    // Source build failed — drop the pending fade and let the normal
+                    // queue-advance flow take over via a hard cut.
+                    self.cancel_crossfade();
+                    return CrossfadeStatus::None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return CrossfadeStatus::InProgress,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.cancel_crossfade();
+                    return CrossfadeStatus::None;
+                }
+            }
+        }
+
         let Some(start) = self.crossfade_start else {
             return CrossfadeStatus::None;
         };

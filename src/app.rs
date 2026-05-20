@@ -192,6 +192,9 @@ pub struct App {
     pub _fs_watcher: Option<notify::RecommendedWatcher>,
     pub theme_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _theme_watcher: Option<notify::RecommendedWatcher>,
+    pub lyrics_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<crate::lyrics::Lyrics>)>>,
+    pub media_session: Option<crate::media_session::MediaSession>,
+    pub media_session_rx: Option<std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>>,
     pub rescan_debounce_until: Option<std::time::Instant>,
     pub tick_count: u64,
     pub hover_x: Option<u16>,
@@ -427,6 +430,9 @@ impl App {
             _fs_watcher,
             theme_watcher_rx: None,
             _theme_watcher: None,
+            lyrics_rx: None,
+            media_session: None,
+            media_session_rx: None,
             rescan_debounce_until: None,
             tick_count: 0,
             hover_x: None,
@@ -488,6 +494,12 @@ impl App {
         };
         // Watch the active theme file so external edits hot-reload (#68).
         app.rearm_theme_watcher();
+        // OS media session (#54) — silently disabled if souvlaki cannot create the
+        // controls (e.g. headless Linux without a dbus session).
+        if let Ok((session, rx)) = crate::media_session::MediaSession::new("Noctune") {
+            app.media_session = Some(session);
+            app.media_session_rx = Some(rx);
+        }
         Ok(app)
     }
 
@@ -943,6 +955,43 @@ impl App {
 
         if let Some(err) = self.player.take_stream_error() {
             self.status = err;
+        }
+
+        // OS media-session events (#54) — play/pause/next/prev pressed on the SMTC,
+        // MPRIS, or MediaRemote card. Drain everything queued this tick.
+        if let Some(rx) = &self.media_session_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(ev) => self.handle_media_event(ev),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.media_session_rx = None;
+                        break;
+                    }
+                }
+            }
+        }
+        // Keep the OS card progress in sync with playback. Cheap (just sets a field).
+        if let Some(s) = &mut self.media_session {
+            if self.player.current().is_some() {
+                s.update_playback(!self.player.is_paused(), self.player.elapsed());
+            }
+        }
+
+        // LRCLIB async result (#62)
+        if let Some(rx) = &self.lyrics_rx {
+            match rx.try_recv() {
+                Ok((track_path, Some(lyrics))) => {
+                    // Only apply if the user did not move on to another track meanwhile.
+                    if self.player.current().map(|c| c.path == track_path).unwrap_or(false) {
+                        self.lyrics = Some(lyrics);
+                    }
+                    self.lyrics_rx = None;
+                }
+                Ok((_, None)) => { self.lyrics_rx = None; }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => { self.lyrics_rx = None; }
+            }
         }
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
@@ -2258,12 +2307,66 @@ impl App {
         self.status = "Seeking…".into();
     }
 
+    fn handle_media_event(&mut self, ev: souvlaki::MediaControlEvent) {
+        use souvlaki::MediaControlEvent as E;
+        match ev {
+            E::Play => {
+                if self.player.is_paused() {
+                    self.player.toggle();
+                }
+            }
+            E::Pause => {
+                if !self.player.is_paused() {
+                    self.player.toggle();
+                }
+            }
+            E::Toggle => self.player.toggle(),
+            E::Next => self.next(),
+            E::Previous => self.prev(),
+            E::Stop => self.player.stop(),
+            _ => {}
+        }
+    }
+
+    fn spawn_lyrics_fetch(&mut self, t: &Track) {
+        let artist = t.artist.clone().unwrap_or_default();
+        let title = t.title.clone();
+        let album = t.album.clone();
+        let duration = t.duration;
+        let path = t.path.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.lyrics_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = crate::lyrics::Lyrics::fetch_lrclib(
+                &artist,
+                &title,
+                album.as_deref(),
+                duration,
+            );
+            let _ = tx.send((path, result));
+        });
+    }
+
     fn on_track_started(&mut self, t: Track) {
         let new_art = crate::metadata::probe_picture(&t.path)
             .and_then(|bytes| self.art_picker.load(&bytes));
         self.album_art = new_art;
         self.status = format!("Playing: {}", t.display());
+        if let Some(s) = &mut self.media_session {
+            s.update_metadata(
+                &t.title,
+                t.artist.as_deref().unwrap_or(""),
+                t.album.as_deref(),
+                t.duration,
+            );
+            s.update_playback(true, Duration::ZERO);
+        }
         self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
+        // #62: if no local .lrc was found, ask LRCLIB asynchronously. The result is
+        // delivered via lyrics_rx so the UI does not block on the HTTP call.
+        if self.lyrics.is_none() {
+            self.spawn_lyrics_fetch(&t);
+        }
         let artist = t.artist.clone().unwrap_or_default();
         let title = t.title.clone();
         let ts = crate::lastfm::now_unix();
