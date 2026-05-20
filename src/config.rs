@@ -17,6 +17,75 @@ pub struct Config {
     pub lastfm: LastfmConfig,
     #[serde(default)]
     pub discord: DiscordConfig,
+    #[serde(default)]
+    pub ytdlp: YtdlpConfig,
+    #[serde(default)]
+    pub cache: CacheConfig,
+    #[serde(default)]
+    pub history: HistoryConfig,
+    #[serde(default)]
+    pub library: LibraryConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YtdlpConfig {
+    /// Max attempts per yt-dlp invocation. 1 = no retry. (#69)
+    pub max_retries: u32,
+    /// Initial backoff in seconds; doubled each attempt.
+    pub backoff_secs: u64,
+    /// Backoff used after a 429 / rate-limit response.
+    pub ratelimit_backoff_secs: u64,
+}
+
+impl Default for YtdlpConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            backoff_secs: 2,
+            ratelimit_backoff_secs: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    /// 0 = no limit. (#70)
+    pub max_size_mb: u64,
+    /// Delete entries older than N days. 0 = never expire.
+    pub expire_days: u64,
+    pub album_art_max_mb: u64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self { max_size_mb: 500, expire_days: 30, album_art_max_mb: 100 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryConfig {
+    pub max_entries: usize,
+    /// 0 = keep forever.
+    pub retain_days: u64,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self { max_entries: 1000, retain_days: 90 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryConfig {
+    /// Watch music_dirs for filesystem changes (#72).
+    pub watch_for_changes: bool,
+    pub watch_debounce_ms: u64,
+}
+
+impl Default for LibraryConfig {
+    fn default() -> Self {
+        Self { watch_for_changes: true, watch_debounce_ms: 500 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +201,10 @@ impl Default for Config {
             visualizer: VisualizerConfig::default(),
             lastfm: LastfmConfig::default(),
             discord: DiscordConfig::default(),
+            ytdlp: YtdlpConfig::default(),
+            cache: CacheConfig::default(),
+            history: HistoryConfig::default(),
+            library: LibraryConfig::default(),
         }
     }
 }

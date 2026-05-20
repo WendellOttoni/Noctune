@@ -301,6 +301,7 @@ impl ViewMode {
 
 impl App {
     pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
+        crate::ytdlp::configure_retries(config.ytdlp.clone());
         let player = Player::new(config.playback.default_volume, config.visualizer.sensitivity)?;
         let tap = player.tap();
 
