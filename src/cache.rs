@@ -122,7 +122,7 @@ impl MetadataCache {
     }
 }
 
-fn file_stat(path: &Path) -> (u64, u64) {
+pub(crate) fn file_stat(path: &Path) -> (u64, u64) {
     let md = match fs::metadata(path) {
         Ok(m) => m,
         Err(_) => return (0, 0),
@@ -136,7 +136,7 @@ fn file_stat(path: &Path) -> (u64, u64) {
     (mtime, md.len())
 }
 
-fn track_from_cache(path: &Path, entry: &CacheEntry) -> Track {
+pub(crate) fn track_from_cache(path: &Path, entry: &CacheEntry) -> Track {
     let fallback = path
         .file_stem()
         .and_then(|s| s.to_str())

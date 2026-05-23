@@ -3268,7 +3268,11 @@ fn pseudo_random(modulo: usize) -> usize {
 }
 
 fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
-    let mut out = Vec::new();
+    // #88: split the scan into a cheap serial walk that collects paths and a
+    // parallel probe phase. The expensive `metadata::probe` is symphonia
+    // I/O — embarrassingly parallel, dominates wall time for large libraries.
+
+    let mut paths: Vec<PathBuf> = Vec::new();
     for dir in dirs {
         if !dir.exists() {
             continue;
@@ -3284,11 +3288,57 @@ fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
                 .map(|s| s.to_lowercase());
             if let Some(e) = ext {
                 if AUDIO_EXTS.contains(&e.as_str()) {
-                    out.push(cache.track_for(path));
+                    paths.push(path.to_path_buf());
                 }
             }
         }
     }
+
+    // Hand the cache's HashMap to a Mutex while the parallel phase runs.
+    // Workers lock briefly to consult/insert; the heavy `probe()` happens
+    // outside the critical section.
+    use rayon::prelude::*;
+    let entries = std::mem::take(&mut cache.entries);
+    let cache_mtx = parking_lot::Mutex::new(entries);
+
+    let mut out: Vec<Track> = paths
+        .par_iter()
+        .map(|path| {
+            let key = path.display().to_string();
+            let (mtime, size) = crate::cache::file_stat(path);
+            let now = crate::cache::now_unix();
+            {
+                let mut map = cache_mtx.lock();
+                if let Some(entry) = map.get_mut(&key) {
+                    if entry.mtime == mtime && entry.size == size {
+                        entry.last_accessed = now;
+                        return crate::cache::track_from_cache(path, entry);
+                    }
+                }
+            }
+            // Cache miss — probe under no lock.
+            let meta: crate::metadata::TrackMeta = crate::metadata::probe(path);
+            let entry = crate::cache::CacheEntry {
+                mtime,
+                size,
+                title: meta.title.clone(),
+                artist: meta.artist.clone(),
+                album: meta.album.clone(),
+                genre: meta.genre.clone(),
+                year: meta.year.clone(),
+                duration_ms: meta.duration.map(|d| d.as_millis() as u64),
+                replaygain_track_db: meta.replaygain_track_db,
+                replaygain_album_db: meta.replaygain_album_db,
+                last_accessed: now,
+                added_at: Some(mtime),
+            };
+            let track = crate::cache::track_from_cache(path, &entry);
+            cache_mtx.lock().insert(key, entry);
+            track
+        })
+        .collect();
+
+    cache.entries = cache_mtx.into_inner();
     out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     out
 }

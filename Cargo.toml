@@ -31,6 +31,8 @@ notify = "6"
 unicode-width = "0.2"
 rustfft = "6"
 parking_lot = "0.12"
+# #88: parallel library scan. Used in app.rs::scan_library.
+rayon = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
 url = "2"
 sha2 = "0.10"
