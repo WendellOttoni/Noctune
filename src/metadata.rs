@@ -39,15 +39,22 @@ pub struct FullMeta {
 }
 
 pub fn probe_full(path: &Path) -> FullMeta {
-    let Ok(file) = File::open(path) else { return FullMeta::default() };
+    let Ok(file) = File::open(path) else {
+        return FullMeta::default();
+    };
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
         hint.with_extension(ext);
     }
     let Ok(mut probed) = symphonia::default::get_probe().format(
-        &hint, mss, &FormatOptions::default(), &MetadataOptions::default(),
-    ) else { return FullMeta::default() };
+        &hint,
+        mss,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) else {
+        return FullMeta::default();
+    };
 
     let mut m = FullMeta::default();
 
@@ -71,8 +78,9 @@ pub fn probe_full(path: &Path) -> FullMeta {
                 StandardTagKey::Artist if m.artist.is_none() => m.artist = Some(v),
                 StandardTagKey::AlbumArtist if m.album_artist.is_none() => m.album_artist = Some(v),
                 StandardTagKey::Album if m.album.is_none() => m.album = Some(v),
-                StandardTagKey::Date | StandardTagKey::ReleaseDate
-                    if m.year.is_none() => m.year = Some(v),
+                StandardTagKey::Date | StandardTagKey::ReleaseDate if m.year.is_none() => {
+                    m.year = Some(v)
+                }
                 StandardTagKey::Genre if m.genre.is_none() => m.genre = Some(v),
                 StandardTagKey::TrackNumber if m.track_number.is_none() => m.track_number = Some(v),
                 _ => {}
@@ -98,7 +106,12 @@ pub fn probe_picture(path: &Path) -> Option<Vec<u8>> {
         hint.with_extension(ext);
     }
     let mut probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .ok()?;
 
     let pick = |visuals: &[Visual]| -> Option<Vec<u8>> {
@@ -124,7 +137,14 @@ pub fn probe_picture(path: &Path) -> Option<Vec<u8>> {
 
     // Fallback: look for folder art files next to the track
     if let Some(dir) = path.parent() {
-        for name in &["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "album.png"] {
+        for name in &[
+            "cover.jpg",
+            "cover.png",
+            "folder.jpg",
+            "folder.png",
+            "album.jpg",
+            "album.png",
+        ] {
             let p = dir.join(name);
             if p.exists() {
                 if let Ok(bytes) = std::fs::read(&p) {
@@ -201,8 +221,9 @@ pub fn probe(path: &Path) -> TrackMeta {
                 StandardTagKey::AlbumArtist if meta.artist.is_none() => meta.artist = Some(value),
                 StandardTagKey::Album if meta.album.is_none() => meta.album = Some(value),
                 StandardTagKey::Genre if meta.genre.is_none() => meta.genre = Some(value),
-                StandardTagKey::Date | StandardTagKey::ReleaseDate
-                    if meta.year.is_none() => meta.year = Some(value),
+                StandardTagKey::Date | StandardTagKey::ReleaseDate if meta.year.is_none() => {
+                    meta.year = Some(value)
+                }
                 StandardTagKey::ReplayGainTrackGain if meta.replaygain_track_db.is_none() => {
                     meta.replaygain_track_db = parse_rg_db(&value);
                 }

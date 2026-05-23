@@ -31,11 +31,42 @@ impl Default for CompState {
 impl CompState {
     pub fn preset(name: &str) -> Option<Self> {
         Some(match name {
-            "Off" => Self { enabled: false, ..Self::default() },
-            "Light" => Self { enabled: true, threshold_db: -16.0, ratio: 2.0, attack_ms: 30.0, release_ms: 200.0, makeup_db: 1.0 },
-            "Podcast" => Self { enabled: true, threshold_db: -20.0, ratio: 4.0, attack_ms: 8.0, release_ms: 120.0, makeup_db: 3.0 },
-            "Live Music" => Self { enabled: true, threshold_db: -18.0, ratio: 3.0, attack_ms: 15.0, release_ms: 180.0, makeup_db: 2.0 },
-            "Loud" => Self { enabled: true, threshold_db: -24.0, ratio: 8.0, attack_ms: 5.0, release_ms: 100.0, makeup_db: 6.0 },
+            "Off" => Self {
+                enabled: false,
+                ..Self::default()
+            },
+            "Light" => Self {
+                enabled: true,
+                threshold_db: -16.0,
+                ratio: 2.0,
+                attack_ms: 30.0,
+                release_ms: 200.0,
+                makeup_db: 1.0,
+            },
+            "Podcast" => Self {
+                enabled: true,
+                threshold_db: -20.0,
+                ratio: 4.0,
+                attack_ms: 8.0,
+                release_ms: 120.0,
+                makeup_db: 3.0,
+            },
+            "Live Music" => Self {
+                enabled: true,
+                threshold_db: -18.0,
+                ratio: 3.0,
+                attack_ms: 15.0,
+                release_ms: 180.0,
+                makeup_db: 2.0,
+            },
+            "Loud" => Self {
+                enabled: true,
+                threshold_db: -24.0,
+                ratio: 8.0,
+                attack_ms: 5.0,
+                release_ms: 100.0,
+                makeup_db: 6.0,
+            },
             _ => return None,
         })
     }
@@ -57,11 +88,19 @@ impl CompHandle {
         }
     }
 
-    pub fn snapshot(&self) -> CompState { *self.inner.lock() }
-    pub fn set(&self, s: CompState) { *self.inner.lock() = s; }
+    pub fn snapshot(&self) -> CompState {
+        *self.inner.lock()
+    }
+    pub fn set(&self, s: CompState) {
+        *self.inner.lock() = s;
+    }
     /// Last reported gain reduction in dB (>= 0), for the UI meter.
-    pub fn gr_db(&self) -> f32 { *self.last_gr_db.lock() }
-    pub(crate) fn report_gr(&self, value: f32) { *self.last_gr_db.lock() = value; }
+    pub fn gr_db(&self) -> f32 {
+        *self.last_gr_db.lock()
+    }
+    pub(crate) fn report_gr(&self, value: f32) {
+        *self.last_gr_db.lock() = value;
+    }
 }
 
 pub struct CompSource<S: Source<Item = f32>> {
@@ -156,8 +195,16 @@ impl<S: Source<Item = f32>> Iterator for CompSource<S> {
 }
 
 impl<S: Source<Item = f32>> Source for CompSource<S> {
-    fn current_frame_len(&self) -> Option<usize> { self.inner.current_frame_len() }
-    fn channels(&self) -> u16 { self.inner.channels() }
-    fn sample_rate(&self) -> u32 { self.inner.sample_rate() }
-    fn total_duration(&self) -> Option<Duration> { self.inner.total_duration() }
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
 }

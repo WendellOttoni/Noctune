@@ -98,7 +98,8 @@ impl PlayHistory {
                 .map(|d| d.as_secs())
                 .unwrap_or(0)
                 .saturating_sub(retain_days * 86_400);
-            self.entries.retain(|_, r| r.last_played == 0 || r.last_played >= cutoff);
+            self.entries
+                .retain(|_, r| r.last_played == 0 || r.last_played >= cutoff);
         }
         if max_entries > 0 && self.entries.len() > max_entries {
             let mut by_recent: Vec<(String, u64)> = self

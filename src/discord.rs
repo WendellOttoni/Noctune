@@ -2,7 +2,11 @@ use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use std::sync::mpsc;
 
 pub enum Cmd {
-    Update { title: String, artist: String, start_secs: i64 },
+    Update {
+        title: String,
+        artist: String,
+        start_secs: i64,
+    },
     Clear,
 }
 
@@ -25,8 +29,16 @@ fn run(client_id: String, rx: mpsc::Receiver<Cmd>) {
         }
 
         match cmd {
-            Cmd::Update { title, artist, start_secs } => {
-                let state = if artist.is_empty() { "Noctune".to_string() } else { artist };
+            Cmd::Update {
+                title,
+                artist,
+                start_secs,
+            } => {
+                let state = if artist.is_empty() {
+                    "Noctune".to_string()
+                } else {
+                    artist
+                };
                 let act = activity::Activity::new()
                     .details(&title)
                     .state(&state)

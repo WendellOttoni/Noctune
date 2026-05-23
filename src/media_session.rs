@@ -7,7 +7,9 @@
 //! `mpsc::Receiver` returned by `spawn`.
 
 use anyhow::Result;
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig};
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
+};
 use std::{sync::mpsc::Receiver, time::Duration};
 
 #[cfg(target_os = "windows")]
@@ -16,8 +18,7 @@ mod win {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, HWND_MESSAGE,
-        WNDCLASSEXW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, HWND_MESSAGE, WNDCLASSEXW,
     };
 
     /// Hidden message-only window — souvlaki uses its HWND as the SMTC handle.
@@ -110,11 +111,13 @@ impl MediaSession {
             hwnd: None,
         };
 
-        let mut controls = MediaControls::new(config)
-            .map_err(|e| anyhow::anyhow!("media-session init: {e:?}"))?;
+        let mut controls =
+            MediaControls::new(config).map_err(|e| anyhow::anyhow!("media-session init: {e:?}"))?;
         let (tx, rx) = std::sync::mpsc::channel();
         controls
-            .attach(move |event| { let _ = tx.send(event); })
+            .attach(move |event| {
+                let _ = tx.send(event);
+            })
             .map_err(|e| anyhow::anyhow!("media-session attach: {e:?}"))?;
 
         Ok((
@@ -127,7 +130,13 @@ impl MediaSession {
         ))
     }
 
-    pub fn update_metadata(&mut self, title: &str, artist: &str, album: Option<&str>, duration: Option<Duration>) {
+    pub fn update_metadata(
+        &mut self,
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        duration: Option<Duration>,
+    ) {
         let _ = self.controls.set_metadata(MediaMetadata {
             title: Some(title),
             artist: Some(artist),
@@ -140,9 +149,13 @@ impl MediaSession {
     pub fn update_playback(&mut self, playing: bool, elapsed: Duration) {
         let pos = MediaPosition(elapsed);
         let state = if playing {
-            MediaPlayback::Playing { progress: Some(pos) }
+            MediaPlayback::Playing {
+                progress: Some(pos),
+            }
         } else {
-            MediaPlayback::Paused { progress: Some(pos) }
+            MediaPlayback::Paused {
+                progress: Some(pos),
+            }
         };
         let _ = self.controls.set_playback(state);
     }

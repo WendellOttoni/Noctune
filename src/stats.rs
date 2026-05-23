@@ -81,7 +81,10 @@ impl PlaybackStats {
     }
 
     pub fn now_unix() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     }
 }
 
@@ -98,12 +101,17 @@ impl SystemStats {
     pub fn new() -> Self {
         let pid = Pid::from_u32(std::process::id());
         let sys = System::new_with_specifics(
-            RefreshKind::new().with_processes(
-                ProcessRefreshKind::new().with_cpu().with_memory(),
-            ),
+            RefreshKind::new().with_processes(ProcessRefreshKind::new().with_cpu().with_memory()),
         );
         let networks = Networks::new_with_refreshed_list();
-        Self { sys, networks, pid, cpu_pct: 0.0, ram_mb: 0, net_down_kbps: 0.0 }
+        Self {
+            sys,
+            networks,
+            pid,
+            cpu_pct: 0.0,
+            ram_mb: 0,
+            net_down_kbps: 0.0,
+        }
     }
 
     /// Call once per second from the tick loop.

@@ -19,15 +19,12 @@ impl Protocol {
     /// Detect from environment variables (safe to call after raw mode).
     pub fn detect() -> Self {
         if std::env::var("KITTY_WINDOW_ID").is_ok()
-            || std::env::var("TERM")
-                .map_or(false, |t| t.contains("kitty"))
+            || std::env::var("TERM").is_ok_and(|t| t.contains("kitty"))
         {
             return Self::Kitty;
         }
-        if std::env::var("TERM_PROGRAM")
-            .map_or(false, |t| t == "iTerm.app")
-            || std::env::var("LC_TERMINAL")
-                .map_or(false, |t| t == "iTerm2")
+        if std::env::var("TERM_PROGRAM").is_ok_and(|t| t == "iTerm.app")
+            || std::env::var("LC_TERMINAL").is_ok_and(|t| t == "iTerm2")
         {
             return Self::Iterm2;
         }
@@ -79,7 +76,10 @@ impl ArtPicker {
             self.cache = Some((key, build()));
         }
         // Safe: we just ensured cache is Some.
-        self.cache.as_ref().map(|(_, b)| b.as_slice()).unwrap_or(&[])
+        self.cache
+            .as_ref()
+            .map(|(_, b)| b.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Drop the cached payload — call when the album art image itself changes.

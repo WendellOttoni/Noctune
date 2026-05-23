@@ -58,7 +58,11 @@ pub struct CacheConfig {
 
 impl Default for CacheConfig {
     fn default() -> Self {
-        Self { max_size_mb: 500, expire_days: 30, album_art_max_mb: 100 }
+        Self {
+            max_size_mb: 500,
+            expire_days: 30,
+            album_art_max_mb: 100,
+        }
     }
 }
 
@@ -71,7 +75,10 @@ pub struct HistoryConfig {
 
 impl Default for HistoryConfig {
     fn default() -> Self {
-        Self { max_entries: 1000, retain_days: 90 }
+        Self {
+            max_entries: 1000,
+            retain_days: 90,
+        }
     }
 }
 
@@ -84,7 +91,10 @@ pub struct LibraryConfig {
 
 impl Default for LibraryConfig {
     fn default() -> Self {
-        Self { watch_for_changes: true, watch_debounce_ms: 500 }
+        Self {
+            watch_for_changes: true,
+            watch_debounce_ms: 500,
+        }
     }
 }
 
@@ -114,19 +124,10 @@ impl Default for SpotifyConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LastfmConfig {
     pub api_key: String,
     pub api_secret: String,
-}
-
-impl Default for LastfmConfig {
-    fn default() -> Self {
-        Self {
-            api_key: String::new(),
-            api_secret: String::new(),
-        }
-    }
 }
 
 impl LastfmConfig {
@@ -135,15 +136,9 @@ impl LastfmConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DiscordConfig {
     pub client_id: String,
-}
-
-impl Default for DiscordConfig {
-    fn default() -> Self {
-        Self { client_id: String::new() }
-    }
 }
 
 impl DiscordConfig {
@@ -284,9 +279,7 @@ impl Config {
                 Ok(text) => match toml::from_str::<Self>(&text) {
                     Ok(c) => c,
                     Err(e) => {
-                        warnings.push(format!(
-                            "config.toml: parse error — {e}; using defaults"
-                        ));
+                        warnings.push(format!("config.toml: parse error — {e}; using defaults"));
                         Self::default()
                     }
                 },
@@ -302,11 +295,17 @@ impl Config {
             let cfg = Self::default();
             if let Some(parent) = path.parent() {
                 if let Err(e) = fs::create_dir_all(parent) {
-                    warnings.push(format!("config: failed to create dir {}: {e}", parent.display()));
+                    warnings.push(format!(
+                        "config: failed to create dir {}: {e}",
+                        parent.display()
+                    ));
                 }
             }
             if let Err(e) = fs::write(&path, toml::to_string_pretty(&cfg).unwrap_or_default()) {
-                warnings.push(format!("config: failed to write default config {}: {e}", path.display()));
+                warnings.push(format!(
+                    "config: failed to write default config {}: {e}",
+                    path.display()
+                ));
             }
             cfg
         };
@@ -324,8 +323,7 @@ impl Config {
 }
 
 pub fn project_dirs() -> Result<ProjectDirs> {
-    ProjectDirs::from("dev", "noctune", "noctune")
-        .context("could not determine config directory")
+    ProjectDirs::from("dev", "noctune", "noctune").context("could not determine config directory")
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -366,8 +364,12 @@ pub struct EqPresets {
 
 impl EqPresets {
     pub fn load() -> Self {
-        let Ok(path) = eq_presets_path() else { return Self::default() };
-        let Ok(text) = std::fs::read_to_string(&path) else { return Self::default() };
+        let Ok(path) = eq_presets_path() else {
+            return Self::default();
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
         toml::from_str(&text).unwrap_or_default()
     }
 
@@ -405,8 +407,12 @@ pub struct Profiles {
 
 impl Profiles {
     pub fn load() -> Self {
-        let Ok(path) = profiles_path() else { return Self::default() };
-        let Ok(text) = std::fs::read_to_string(&path) else { return Self::default() };
+        let Ok(path) = profiles_path() else {
+            return Self::default();
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
         toml::from_str(&text).unwrap_or_default()
     }
 
