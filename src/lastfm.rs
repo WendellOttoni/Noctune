@@ -2,7 +2,6 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    fs,
     path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -252,6 +251,10 @@ pub fn get_session(api_key: &str, api_secret: &str, token: &str) -> Result<Lastf
     })
 }
 
+const SECRETS_SERVICE: &str = "lastfm";
+const SECRETS_KEY: &str = "session";
+
+/// Legacy file path — only used for one-time migration into the keyring (#98).
 pub fn session_path() -> Option<PathBuf> {
     crate::config::project_dirs()
         .ok()
@@ -259,27 +262,25 @@ pub fn session_path() -> Option<PathBuf> {
 }
 
 pub fn load_session() -> Option<LastfmSession> {
-    let p = session_path()?;
-    let s = fs::read_to_string(p).ok()?;
-    serde_json::from_str(&s).ok()
+    if let Some(legacy) = session_path() {
+        crate::secrets::migrate_from_file(SECRETS_SERVICE, SECRETS_KEY, &legacy);
+    }
+    let text = crate::secrets::load(SECRETS_SERVICE, SECRETS_KEY)?;
+    serde_json::from_str(&text).ok()
 }
 
 pub fn save_session(s: &LastfmSession) {
-    if let Some(p) = session_path() {
-        if let Some(parent) = p.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                tracing::warn!(target: "lastfm", "failed to create dir {}: {e}", parent.display());
-            }
+    match serde_json::to_string(s) {
+        Ok(text) => {
+            crate::secrets::store(SECRETS_SERVICE, SECRETS_KEY, &text);
         }
-        match serde_json::to_string(s) {
-            Ok(j) => {
-                if let Err(e) = fs::write(&p, j) {
-                    tracing::warn!(target: "lastfm", "failed to save session {}: {e}", p.display());
-                }
-            }
-            Err(e) => tracing::warn!(target: "lastfm", "failed to serialize session: {e}"),
-        }
+        Err(e) => tracing::warn!(target: "lastfm", "failed to serialize session: {e}"),
     }
+}
+
+#[allow(dead_code)]
+pub fn delete_session() {
+    crate::secrets::delete(SECRETS_SERVICE, SECRETS_KEY);
 }
 
 pub fn now_unix() -> u64 {

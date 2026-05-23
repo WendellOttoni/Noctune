@@ -18,6 +18,7 @@ mod metadata;
 mod radio;
 mod radio_mode;
 mod ratings;
+mod secrets;
 mod spotify;
 mod stats;
 mod theme;

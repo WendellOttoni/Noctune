@@ -53,6 +53,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
+# Token storage (#98). Wraps Secret Service / Keychain / Credential Manager
+# with a file fallback for headless systems.
+keyring = "3"
+
 # souvlaki on Windows needs a real HWND. We create a hidden HWND_MESSAGE window
 # ourselves via the `windows` crate and pass the handle into PlatformConfig.
 [target.'cfg(target_os = "windows")'.dependencies]
