@@ -1,3 +1,6 @@
+mod scan;
+mod util;
+
 use anyhow::Result;
 use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
@@ -5,9 +8,15 @@ use crossterm::event::{
 use image::DynamicImage;
 use ratatui::widgets::ListState;
 use std::{path::PathBuf, time::Duration};
-use walkdir::WalkDir;
 
 use notify::Watcher as _;
+
+// Re-exports of moved-out helpers so the rest of this module compiles unchanged.
+use self::scan::scan_library_with_progress;
+use self::util::{
+    parse_spotify_url, pseudo_random, rect_contains, rg_scale, sort_tracks,
+    sort_tracks_with_ratings,
+};
 
 use crate::{
     album_art::ArtPicker,
@@ -3469,175 +3478,5 @@ impl App {
         let mut out = std::io::stdout().lock();
         let _ = std::io::Write::write_all(&mut out, bytes);
         let _ = std::io::Write::flush(&mut out);
-    }
-}
-
-fn rg_scale(track: &Track, mode: ReplayGainMode) -> f32 {
-    let db = match mode {
-        ReplayGainMode::Off => return 1.0,
-        ReplayGainMode::Track => track.replaygain_track_db,
-        ReplayGainMode::Album => track.replaygain_album_db.or(track.replaygain_track_db),
-    };
-    db.map(|db| 10f32.powf(db / 20.0)).unwrap_or(1.0)
-}
-
-fn parse_spotify_url(url: &str) -> (String, String) {
-    if let Some(path) = url.strip_prefix("spotify:") {
-        let mut parts = path.splitn(2, ':');
-        let k = parts.next().unwrap_or("").to_string();
-        let i = parts.next().unwrap_or("").to_string();
-        (k, i)
-    } else {
-        let trimmed = url.split('?').next().unwrap_or(url);
-        let segs: Vec<&str> = trimmed.rsplit('/').take(2).collect();
-        let i = segs.first().copied().unwrap_or("").to_string();
-        let k = segs.get(1).copied().unwrap_or("").to_string();
-        (k, i)
-    }
-}
-
-fn rect_contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
-    r.width > 0 && r.height > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
-}
-
-fn pseudo_random(modulo: usize) -> usize {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(1);
-    let mut x = nanos
-        .wrapping_mul(2862933555777941757)
-        .wrapping_add(3037000493);
-    x ^= x >> 33;
-    (x as usize) % modulo.max(1)
-}
-
-fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
-    scan_library_with_progress(dirs, cache, None)
-}
-
-fn scan_library_with_progress(
-    dirs: &[PathBuf],
-    cache: &mut MetadataCache,
-    progress_tx: Option<std::sync::mpsc::Sender<(usize, usize)>>,
-) -> Vec<Track> {
-    // #88: split the scan into a cheap serial walk that collects paths and a
-    // parallel probe phase. The expensive `metadata::probe` is symphonia
-    // I/O — embarrassingly parallel, dominates wall time for large libraries.
-    // #104: `progress_tx` receives `(done, total)` ticks so the UI status bar
-    // can display "Scanning library… [1234/5000]" without blocking.
-
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for dir in dirs {
-        if !dir.exists() {
-            continue;
-        }
-        for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
-            let ext = path
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_lowercase());
-            if let Some(e) = ext {
-                if AUDIO_EXTS.contains(&e.as_str()) {
-                    paths.push(path.to_path_buf());
-                }
-            }
-        }
-    }
-
-    // Hand the cache's HashMap to a Mutex while the parallel phase runs.
-    // Workers lock briefly to consult/insert; the heavy `probe()` happens
-    // outside the critical section.
-    use rayon::prelude::*;
-    let entries = std::mem::take(&mut cache.entries);
-    let cache_mtx = parking_lot::Mutex::new(entries);
-    let total = paths.len();
-    let done = std::sync::atomic::AtomicUsize::new(0);
-
-    let mut out: Vec<Track> = paths
-        .par_iter()
-        .map(|path| {
-            let key = path.display().to_string();
-            let (mtime, size) = crate::cache::file_stat(path);
-            let now = crate::cache::now_unix();
-            {
-                let mut map = cache_mtx.lock();
-                if let Some(entry) = map.get_mut(&key) {
-                    if entry.mtime == mtime && entry.size == size {
-                        entry.last_accessed = now;
-                        return crate::cache::track_from_cache(path, entry);
-                    }
-                }
-            }
-            // Cache miss — probe under no lock.
-            let meta: crate::metadata::TrackMeta = crate::metadata::probe(path);
-            let entry = crate::cache::CacheEntry {
-                mtime,
-                size,
-                title: meta.title.clone(),
-                artist: meta.artist.clone(),
-                album: meta.album.clone(),
-                genre: meta.genre.clone(),
-                year: meta.year.clone(),
-                duration_ms: meta.duration.map(|d| d.as_millis() as u64),
-                replaygain_track_db: meta.replaygain_track_db,
-                replaygain_album_db: meta.replaygain_album_db,
-                last_accessed: now,
-                added_at: Some(mtime),
-            };
-            let track = crate::cache::track_from_cache(path, &entry);
-            cache_mtx.lock().insert(key, entry);
-            // Emit progress every ~32 tracks to avoid flooding the channel
-            // on large libraries.
-            let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if let Some(tx) = &progress_tx {
-                if d == total || d.is_multiple_of(32) {
-                    let _ = tx.send((d, total));
-                }
-            }
-            track
-        })
-        .collect();
-
-    cache.entries = cache_mtx.into_inner();
-    out.sort_by_key(|a| a.title.to_lowercase());
-    out
-}
-
-fn sort_tracks(tracks: &mut [Track], mode: SortMode) {
-    sort_tracks_with_ratings(tracks, mode, None);
-}
-
-fn sort_tracks_with_ratings(
-    tracks: &mut [Track],
-    mode: SortMode,
-    ratings: Option<&crate::ratings::Ratings>,
-) {
-    match mode {
-        SortMode::Title => tracks.sort_by_key(|a| a.title.to_lowercase()),
-        SortMode::Artist => tracks.sort_by(|a, b| {
-            let aa = a.artist.as_deref().unwrap_or("~").to_lowercase();
-            let bb = b.artist.as_deref().unwrap_or("~").to_lowercase();
-            aa.cmp(&bb)
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-        }),
-        SortMode::Album => tracks.sort_by(|a, b| {
-            let aa = a.album.as_deref().unwrap_or("~").to_lowercase();
-            let bb = b.album.as_deref().unwrap_or("~").to_lowercase();
-            aa.cmp(&bb)
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-        }),
-        SortMode::Rating => {
-            tracks.sort_by(|a, b| {
-                let ra = ratings.map(|r| r.get(&a.path)).unwrap_or(0);
-                let rb = ratings.map(|r| r.get(&b.path)).unwrap_or(0);
-                rb.cmp(&ra)
-                    .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-            });
-        }
     }
 }
