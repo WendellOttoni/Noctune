@@ -61,7 +61,7 @@ impl SpotifyApi {
             .ok_or_else(|| anyhow!("no refresh token; re-authenticate"))?;
         let new_tokens = refresh_token(&self.client_id, &refresh)?;
         if let Err(e) = save_tokens(&new_tokens) {
-            eprintln!("spotify: failed to save refreshed tokens: {e}");
+            tracing::warn!(target: "spotify", "failed to save refreshed tokens: {e}");
         }
         self.tokens = new_tokens;
         Ok(())

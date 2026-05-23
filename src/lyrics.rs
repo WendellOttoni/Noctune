@@ -68,11 +68,11 @@ impl Lyrics {
         if let Some(path) = lyrics_cache_path(&cache_key) {
             if let Some(parent) = path.parent() {
                 if let Err(e) = fs::create_dir_all(parent) {
-                    eprintln!("lyrics: failed to create dir {}: {e}", parent.display());
+                    tracing::warn!(target: "lyrics", "failed to create dir {}: {e}", parent.display());
                 }
             }
             if let Err(e) = fs::write(&path, &lrc) {
-                eprintln!("lyrics: failed to cache {}: {e}", path.display());
+                tracing::warn!(target: "lyrics", "failed to cache {}: {e}", path.display());
             }
         }
         Self::parse_lrc(&lrc)

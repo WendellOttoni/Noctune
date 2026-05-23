@@ -11,6 +11,7 @@ mod eq;
 mod history;
 mod keybinds;
 mod lastfm;
+mod logging;
 mod lyrics;
 mod media_session;
 mod metadata;
@@ -26,8 +27,13 @@ mod visualizer;
 mod ytdlp;
 
 fn main() -> Result<()> {
+    let log_opts = logging::parse_cli_flags();
+    let _log_guard = logging::init(&log_opts)?;
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "noctune starting");
+
     let (config, config_warnings) = config::Config::load_or_default()?;
     for w in &config_warnings {
+        tracing::warn!(target: "config", "{w}");
         eprintln!("noctune: {w}");
     }
     let theme = theme::Theme::load(&config.theme)?;

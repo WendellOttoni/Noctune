@@ -442,14 +442,14 @@ impl App {
             let w = match notify::RecommendedWatcher::new(fs_tx, notify::Config::default()) {
                 Ok(w) => Some(w),
                 Err(e) => {
-                    eprintln!("fs watcher: failed to init: {e}");
+                    tracing::warn!(target: "library", "fs watcher: failed to init: {e}");
                     None
                 }
             };
             if let Some(mut watcher) = w {
                 for dir in &config.music_dirs {
                     if let Err(e) = watcher.watch(dir.as_path(), notify::RecursiveMode::Recursive) {
-                        eprintln!("fs watcher: failed to watch {}: {e}", dir.display());
+                        tracing::warn!(target: "library", "fs watcher: failed to watch {}: {e}", dir.display());
                     }
                 }
                 Some(watcher)
@@ -490,7 +490,7 @@ impl App {
             bindings: {
                 let (b, warnings) = Bindings::from_config(&config_keybinds);
                 for w in warnings {
-                    eprintln!("[keybinds] {w}");
+                    tracing::warn!(target: "keybinds", "{w}");
                 }
                 b
             },
