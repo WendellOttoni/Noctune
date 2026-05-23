@@ -255,12 +255,21 @@ fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
         format!(" {}", app.status)
     };
     f.render_widget(
-        Paragraph::new(Span::styled(
-            status_text,
-            Style::default().fg(parse_color(&theme.colors.secondary)),
-        )),
+        Paragraph::new(Span::styled(status_text, status_style(app))),
         rows[4],
     );
+}
+
+/// Pick the status-bar foreground color from the current `StatusKind` (#102).
+/// Error → red, Warning → yellow, Info → theme.secondary.
+fn status_style(app: &App) -> Style {
+    use crate::app::StatusKind;
+    use ratatui::style::{Color, Modifier};
+    match app.status_kind {
+        StatusKind::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        StatusKind::Warning => Style::default().fg(Color::Yellow),
+        StatusKind::Info => Style::default().fg(parse_color(&app.theme.colors.secondary)),
+    }
 }
 
 fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
@@ -2247,11 +2256,8 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     } else {
         format!(" {}", app.status)
     };
-    let status = Paragraph::new(Span::styled(
-        status_text,
-        Style::default().fg(parse_color(&app.theme.colors.secondary)),
-    ))
-    .wrap(Wrap { trim: true });
+    let status =
+        Paragraph::new(Span::styled(status_text, status_style(app))).wrap(Wrap { trim: true });
     f.render_widget(status, chunks[0]);
 
     let shuf = if app.shuffle { "shuf " } else { "" };
