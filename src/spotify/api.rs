@@ -182,6 +182,7 @@ impl SpotifyApi {
             replaygain_track_db: None,
             replaygain_album_db: None,
             cover_url: None,
+            added_at: None,
         })
     }
 
@@ -234,6 +235,7 @@ impl SpotifyApi {
                     replaygain_track_db: None,
                     replaygain_album_db: None,
                     cover_url: None,
+                    added_at: None,
                 });
             }
         }
@@ -280,6 +282,7 @@ impl SpotifyApi {
                     replaygain_track_db: None,
                     replaygain_album_db: None,
                     cover_url: None,
+                    added_at: None,
                 });
             }
         }
@@ -345,6 +348,7 @@ impl SpotifyApi {
             replaygain_track_db: None,
             replaygain_album_db: None,
             cover_url: None,
+            added_at: None,
         }).collect())
     }
 
@@ -387,6 +391,7 @@ impl SpotifyApi {
                     duration: Some(Duration::from_millis(t.duration_ms)),
                     replaygain_track_db: None, replaygain_album_db: None,
                     cover_url: None,
+                    added_at: None,
                 });
             }
         }

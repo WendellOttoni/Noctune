@@ -268,6 +268,11 @@ pub struct Track {
     /// Resolved asynchronously by `App` after the track starts; `None` for
     /// local files (cover comes from in-file tags via `metadata::probe_picture`).
     pub cover_url: Option<String>,
+    /// Unix timestamp of the file's modification time, captured at scan time
+    /// (#87). Persisted in `CacheEntry`. Used by the Smart view's "Recently
+    /// Added" category to avoid a per-frame `fs::metadata` call. `None` for
+    /// streaming tracks where no local file exists.
+    pub added_at: Option<u64>,
 }
 
 impl Track {
@@ -288,6 +293,7 @@ impl Track {
             replaygain_track_db: None,
             replaygain_album_db: None,
             cover_url: None,
+            added_at: None,
         }
     }
 
@@ -736,6 +742,7 @@ impl Track {
             replaygain_track_db: None,
             replaygain_album_db: None,
             cover_url: None,
+            added_at: None,
         }
     }
 }

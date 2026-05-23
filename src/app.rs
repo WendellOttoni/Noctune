@@ -197,6 +197,15 @@ pub struct App {
     /// thumbnails). Sender is spawned from `on_track_started`; result is
     /// applied in `tick` only if the player is still on the same track.
     pub art_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<Vec<u8>>)>>,
+    /// #86/#87: monotonic counters bumped whenever the underlying data
+    /// changes. Used as the fingerprint for the cached library-view rows so
+    /// the render loop skips recomputation when nothing relevant moved.
+    pub library_revision: u64,
+    pub history_revision: u64,
+    pub play_history_revision: u64,
+    /// #87: memoised result of `smart_rows()`. Recomputed only when the
+    /// fingerprint (library + play history + expanded categories) changes.
+    pub smart_cache: Option<SmartRowsCache>,
     pub radio_mode: crate::radio_mode::RadioMode,
     pub radio_fetch_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub radio_seed_editing: bool,
@@ -292,6 +301,17 @@ pub enum LibraryRow {
     SmartHeader { label: String, count: usize, expanded: bool },
     Track(Track),
     Dir(std::path::PathBuf),
+}
+
+/// #87: cached Smart-view rows + the fingerprint of inputs that produced them.
+/// Stored on `App` and reused across frames while the fingerprint matches.
+#[derive(Debug)]
+pub struct SmartRowsCache {
+    pub library_revision: u64,
+    pub history_revision: u64,
+    pub play_history_revision: u64,
+    pub expanded: [bool; 4],
+    pub rows: Vec<LibraryRow>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -453,6 +473,10 @@ impl App {
             _theme_watcher: None,
             lyrics_rx: None,
             art_rx: None,
+            library_revision: 0,
+            history_revision: 0,
+            play_history_revision: 0,
+            smart_cache: None,
             radio_mode: crate::radio_mode::RadioMode::default(),
             radio_fetch_rx: None,
             radio_seed_editing: false,
@@ -570,9 +594,9 @@ impl App {
         }
     }
 
-    pub fn library_rows(&self) -> Vec<LibraryRow> {
+    pub fn library_rows(&mut self) -> Vec<LibraryRow> {
         if self.view_mode == ViewMode::Smart {
-            return self.smart_rows();
+            return self.smart_rows_cached().to_vec();
         }
         if self.view_mode == ViewMode::Browser {
             return self.browser_rows();
@@ -600,7 +624,36 @@ impl App {
         out
     }
 
-    fn smart_rows(&self) -> Vec<LibraryRow> {
+    /// Returns the cached Smart-view rows, rebuilding them only when the
+    /// fingerprint (library / history / play-history revisions, expanded
+    /// flags) has changed since the last call (#87). The previous version
+    /// rebuilt all four categories — and ran `fs::metadata` per library track
+    /// for "Recently Added" — every frame.
+    fn smart_rows_cached(&mut self) -> &[LibraryRow] {
+        let stale = match &self.smart_cache {
+            Some(c) => {
+                c.library_revision != self.library_revision
+                    || c.history_revision != self.history_revision
+                    || c.play_history_revision != self.play_history_revision
+                    || c.expanded != self.smart_expanded
+            }
+            None => true,
+        };
+        if stale {
+            let rows = self.build_smart_rows();
+            self.smart_cache = Some(SmartRowsCache {
+                library_revision: self.library_revision,
+                history_revision: self.history_revision,
+                play_history_revision: self.play_history_revision,
+                expanded: self.smart_expanded,
+                rows,
+            });
+        }
+        // Just refreshed (or already fresh) above.
+        self.smart_cache.as_ref().map(|c| c.rows.as_slice()).unwrap_or(&[])
+    }
+
+    fn build_smart_rows(&self) -> Vec<LibraryRow> {
         const LIMIT: usize = 50;
         let track_map: std::collections::HashMap<String, &Track> = self
             .library
@@ -611,14 +664,14 @@ impl App {
         let most_played: Vec<Track> = {
             let paths = self.play_history.most_played_paths(LIMIT);
             paths.iter()
-                .filter_map(|(k, _)| track_map.get(k).copied().cloned().map(Some).unwrap_or(None))
+                .filter_map(|(k, _)| track_map.get(k).copied().cloned())
                 .collect()
         };
 
         let recently_played: Vec<Track> = {
             let paths = self.play_history.recently_played_paths(LIMIT);
             paths.iter()
-                .filter_map(|k| track_map.get(k).copied().cloned().map(Some).unwrap_or(None))
+                .filter_map(|k| track_map.get(k).copied().cloned())
                 .collect()
         };
 
@@ -633,23 +686,18 @@ impl App {
             v
         };
 
+        // #87: use the `added_at` field populated at scan time instead of
+        // calling `fs::metadata` per track on every frame.
         let recently_added: Vec<Track> = {
-            let mut v: Vec<(Track, u64)> = self
+            let mut idx: Vec<(usize, u64)> = self
                 .library
                 .iter()
-                .filter_map(|t| {
-                    let mtime = std::fs::metadata(&t.path)
-                        .ok()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    Some((t.clone(), mtime))
-                })
+                .enumerate()
+                .map(|(i, t)| (i, t.added_at.unwrap_or(0)))
                 .collect();
-            v.sort_by(|a, b| b.1.cmp(&a.1));
-            v.truncate(LIMIT);
-            v.into_iter().map(|(t, _)| t).collect()
+            idx.sort_by(|a, b| b.1.cmp(&a.1));
+            idx.truncate(LIMIT);
+            idx.into_iter().map(|(i, _)| self.library[i].clone()).collect()
         };
 
         let categories: [(&str, &Vec<Track>, bool); 4] = [
@@ -762,7 +810,7 @@ impl App {
         }
     }
 
-    fn selected_library_track(&self) -> Option<Track> {
+    fn selected_library_track(&mut self) -> Option<Track> {
         let rows = self.library_rows();
         let idx = self.library_state.selected()?;
         match rows.get(idx)? {
@@ -834,6 +882,7 @@ impl App {
                     });
                     let removed_from_queue = before_queue - self.queue.len();
                     self.library = tracks;
+                    self.library_revision = self.library_revision.wrapping_add(1);
                     self.library_state.select(if self.library.is_empty() { None } else { Some(0) });
                     self.status = match (n as i64 - prev_n as i64, removed_from_queue) {
                         (0, 0) if prev_n > 0 => format!("Library: {n} tracks (unchanged)."),
@@ -1199,6 +1248,7 @@ impl App {
             if let Some(track) = self.player.current().cloned() {
                 if self.player.elapsed().as_secs_f64() >= self.play_threshold_secs {
                     self.play_history.record_play(&track.path);
+                    self.play_history_revision = self.play_history_revision.wrapping_add(1);
                     self.current_play_recorded = true;
 
                     // Scrobble to Last.fm (once per track)
@@ -1246,6 +1296,7 @@ impl App {
         while self.history.len() > 64 {
             self.history.pop_back();
         }
+        self.history_revision = self.history_revision.wrapping_add(1);
     }
 
     fn on_key(&mut self, key: KeyEvent) {

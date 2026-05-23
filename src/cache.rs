@@ -24,6 +24,12 @@ pub struct CacheEntry {
     /// Used by `prune` to expire stale entries (#70).
     #[serde(default)]
     pub last_accessed: u64,
+    /// File mtime captured the first time we scanned this track (#87). Used by
+    /// the Smart view's "Recently Added" category. `#[serde(default)]` so older
+    /// caches without the field migrate silently — they'll fall back to `mtime`
+    /// at read time.
+    #[serde(default)]
+    pub added_at: Option<u64>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -72,6 +78,7 @@ impl MetadataCache {
             replaygain_track_db: meta.replaygain_track_db,
             replaygain_album_db: meta.replaygain_album_db,
             last_accessed: now,
+            added_at: Some(mtime),
         };
         let track = track_from_cache(path, &entry);
         self.entries.insert(key, entry);
@@ -146,6 +153,9 @@ fn track_from_cache(path: &Path, entry: &CacheEntry) -> Track {
         replaygain_track_db: entry.replaygain_track_db,
         replaygain_album_db: entry.replaygain_album_db,
         cover_url: None,
+        // Fall back to mtime when migrating from an older cache that lacks the
+        // dedicated field (#87).
+        added_at: entry.added_at.or(Some(entry.mtime)),
     }
 }
 

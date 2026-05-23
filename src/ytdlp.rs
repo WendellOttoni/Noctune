@@ -386,5 +386,6 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
         replaygain_track_db: None,
         replaygain_album_db: None,
         cover_url,
+        added_at: None,
     })
 }
