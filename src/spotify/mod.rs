@@ -53,7 +53,9 @@ pub fn load_tokens() -> Option<Tokens> {
 pub fn save_tokens(tokens: &Tokens) -> Result<()> {
     let path = tokens_path()?;
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("spotify: failed to create dir {}: {e}", parent.display());
+        }
     }
     fs::write(&path, serde_json::to_string_pretty(tokens)?)?;
     Ok(())

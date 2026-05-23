@@ -265,7 +265,9 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).ok();
+            if let Err(e) = fs::create_dir_all(parent) {
+                eprintln!("config: failed to create dir {}: {e}", parent.display());
+            }
         }
         fs::write(&path, toml::to_string_pretty(self)?)?;
         Ok(())
@@ -299,9 +301,13 @@ impl Config {
         } else {
             let cfg = Self::default();
             if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
+                if let Err(e) = fs::create_dir_all(parent) {
+                    warnings.push(format!("config: failed to create dir {}: {e}", parent.display()));
+                }
             }
-            let _ = fs::write(&path, toml::to_string_pretty(&cfg).unwrap_or_default());
+            if let Err(e) = fs::write(&path, toml::to_string_pretty(&cfg).unwrap_or_default()) {
+                warnings.push(format!("config: failed to write default config {}: {e}", path.display()));
+            }
             cfg
         };
         // Validate music_dirs — warn for each that doesn't exist on disk.
@@ -367,7 +373,11 @@ impl EqPresets {
 
     pub fn save(&self) -> Result<()> {
         let path = eq_presets_path()?;
-        if let Some(p) = path.parent() { std::fs::create_dir_all(p).ok(); }
+        if let Some(p) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(p) {
+                eprintln!("config: failed to create dir {}: {e}", p.display());
+            }
+        }
         std::fs::write(&path, toml::to_string_pretty(self)?)?;
         Ok(())
     }
@@ -402,7 +412,11 @@ impl Profiles {
 
     pub fn save(&self) -> Result<()> {
         let path = profiles_path()?;
-        if let Some(p) = path.parent() { std::fs::create_dir_all(p).ok(); }
+        if let Some(p) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(p) {
+                eprintln!("config: failed to create dir {}: {e}", p.display());
+            }
+        }
         std::fs::write(&path, toml::to_string_pretty(self)?)?;
         Ok(())
     }

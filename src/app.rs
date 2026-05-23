@@ -429,10 +429,15 @@ impl App {
         // Start filesystem watcher — opt-out via [library].watch_for_changes (#72).
         let (fs_tx, fs_event_rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
         let mut _fs_watcher = if config.library.watch_for_changes {
-            let w = notify::RecommendedWatcher::new(fs_tx, notify::Config::default()).ok();
+            let w = match notify::RecommendedWatcher::new(fs_tx, notify::Config::default()) {
+                Ok(w) => Some(w),
+                Err(e) => { eprintln!("fs watcher: failed to init: {e}"); None }
+            };
             if let Some(mut watcher) = w {
                 for dir in &config.music_dirs {
-                    let _ = watcher.watch(dir.as_path(), notify::RecursiveMode::Recursive);
+                    if let Err(e) = watcher.watch(dir.as_path(), notify::RecursiveMode::Recursive) {
+                        eprintln!("fs watcher: failed to watch {}: {e}", dir.display());
+                    }
                 }
                 Some(watcher)
             } else {

@@ -57,9 +57,13 @@ impl Lyrics {
         let lrc = body.synced_lyrics.or(body.plain_lyrics)?;
         if let Some(path) = lyrics_cache_path(&cache_key) {
             if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
+                if let Err(e) = fs::create_dir_all(parent) {
+                    eprintln!("lyrics: failed to create dir {}: {e}", parent.display());
+                }
             }
-            let _ = fs::write(&path, &lrc);
+            if let Err(e) = fs::write(&path, &lrc) {
+                eprintln!("lyrics: failed to cache {}: {e}", path.display());
+            }
         }
         Self::parse_lrc(&lrc)
     }

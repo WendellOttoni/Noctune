@@ -52,7 +52,9 @@ pub struct Symbols {
 impl Theme {
     pub fn load(name: &str) -> Result<Self> {
         let dir = config::themes_dir()?;
-        fs::create_dir_all(&dir).ok();
+        if let Err(e) = fs::create_dir_all(&dir) {
+            eprintln!("theme: failed to create dir {}: {e}", dir.display());
+        }
         let path = dir.join(format!("{name}.toml"));
         let theme: Self = if path.exists() {
             let text = fs::read_to_string(&path)
@@ -60,7 +62,9 @@ impl Theme {
             toml::from_str(&text)?
         } else {
             let theme = Theme::default();
-            fs::write(&path, toml::to_string_pretty(&theme)?).ok();
+            if let Err(e) = fs::write(&path, toml::to_string_pretty(&theme)?) {
+                eprintln!("theme: failed to write default {}: {e}", path.display());
+            }
             theme
         };
         // #103: validate color fields once on load and emit aggregated warnings to

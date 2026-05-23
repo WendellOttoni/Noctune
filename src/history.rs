@@ -34,10 +34,17 @@ impl PlayHistory {
     pub fn save(&self) {
         let Some(p) = &self.path else { return };
         if let Some(parent) = p.parent() {
-            let _ = fs::create_dir_all(parent);
+            if let Err(e) = fs::create_dir_all(parent) {
+                eprintln!("history: failed to create dir {}: {e}", parent.display());
+            }
         }
-        if let Ok(s) = serde_json::to_string(self) {
-            let _ = fs::write(p, s);
+        match serde_json::to_string(self) {
+            Ok(s) => {
+                if let Err(e) = fs::write(p, s) {
+                    eprintln!("history: failed to save {}: {e}", p.display());
+                }
+            }
+            Err(e) => eprintln!("history: failed to serialize: {e}"),
         }
     }
 
