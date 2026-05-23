@@ -200,6 +200,12 @@ pub struct App {
     pub loading_track: Option<Track>,
     pub pending_seek_offset: Option<Duration>,
     pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
+    /// (#104) Live progress events from the scan worker — `(done, total)`.
+    pub scan_progress_rx: Option<std::sync::mpsc::Receiver<(usize, usize)>>,
+    /// Latest progress reading consumed from `scan_progress_rx`. Cleared when
+    /// the scan completes. `None` means we're idle or have not yet received a
+    /// progress event.
+    pub scan_progress: Option<(usize, usize)>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _fs_watcher: Option<notify::RecommendedWatcher>,
     pub theme_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
@@ -448,6 +454,7 @@ impl App {
 
         // Start async library scan
         let (scan_tx, scan_rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let (progress_tx, scan_progress_rx) = std::sync::mpsc::channel::<(usize, usize)>();
         let scan_dirs = config.music_dirs.clone();
         let cache_cfg = config.cache.clone();
         std::thread::spawn(move || {
@@ -459,7 +466,7 @@ impl App {
             // #70: drop stale entries before re-scanning so removed files do not stay
             // in the cache forever.
             cache.prune(cache_cfg.expire_days, cache_cfg.max_size_mb);
-            let tracks = scan_library(&scan_dirs, &mut cache);
+            let tracks = scan_library_with_progress(&scan_dirs, &mut cache, Some(progress_tx));
             if let Some(p) = &cache_file {
                 cache.save(p);
             }
@@ -545,6 +552,8 @@ impl App {
             loading_track: None,
             pending_seek_offset: None,
             scan_rx: Some(scan_rx),
+            scan_progress_rx: Some(scan_progress_rx),
+            scan_progress: None,
             fs_event_rx: Some(fs_event_rx),
             _fs_watcher,
             theme_watcher_rx: None,
@@ -987,6 +996,15 @@ impl App {
             self.sys_stats.refresh();
         }
 
+        // (#104) Drain any pending scan progress events into the latest reading
+        // before polling the completion channel. Keeping the latest only — the
+        // status bar doesn't care about intermediate states.
+        if let Some(rx) = &self.scan_progress_rx {
+            while let Ok(p) = rx.try_recv() {
+                self.scan_progress = Some(p);
+            }
+        }
+
         // Poll completed library scan
         if let Some(rx) = &self.scan_rx {
             match rx.try_recv() {
@@ -1023,6 +1041,8 @@ impl App {
                         _ => format!("Library: {n} tracks."),
                     });
                     self.scan_rx = None;
+                    self.scan_progress_rx = None;
+                    self.scan_progress = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -1030,6 +1050,8 @@ impl App {
                         "Library: scan failed — check permissions on music_dirs in config.toml",
                     );
                     self.scan_rx = None;
+                    self.scan_progress_rx = None;
+                    self.scan_progress = None;
                 }
             }
         }
@@ -2094,7 +2116,10 @@ impl App {
         }
         let dirs = self.config.music_dirs.clone();
         let (tx, rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let (ptx, prx) = std::sync::mpsc::channel::<(usize, usize)>();
         self.scan_rx = Some(rx);
+        self.scan_progress_rx = Some(prx);
+        self.scan_progress = None;
         self.set_info("Scanning library…");
         std::thread::spawn(move || {
             let cache_file = cache_path();
@@ -2102,7 +2127,7 @@ impl App {
                 .as_ref()
                 .map(|p| MetadataCache::load(p))
                 .unwrap_or_default();
-            let tracks = scan_library(&dirs, &mut cache);
+            let tracks = scan_library_with_progress(&dirs, &mut cache, Some(ptx));
             if let Some(p) = &cache_file {
                 cache.save(p);
             }
@@ -3488,9 +3513,19 @@ fn pseudo_random(modulo: usize) -> usize {
 }
 
 fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
+    scan_library_with_progress(dirs, cache, None)
+}
+
+fn scan_library_with_progress(
+    dirs: &[PathBuf],
+    cache: &mut MetadataCache,
+    progress_tx: Option<std::sync::mpsc::Sender<(usize, usize)>>,
+) -> Vec<Track> {
     // #88: split the scan into a cheap serial walk that collects paths and a
     // parallel probe phase. The expensive `metadata::probe` is symphonia
     // I/O — embarrassingly parallel, dominates wall time for large libraries.
+    // #104: `progress_tx` receives `(done, total)` ticks so the UI status bar
+    // can display "Scanning library… [1234/5000]" without blocking.
 
     let mut paths: Vec<PathBuf> = Vec::new();
     for dir in dirs {
@@ -3520,6 +3555,8 @@ fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
     use rayon::prelude::*;
     let entries = std::mem::take(&mut cache.entries);
     let cache_mtx = parking_lot::Mutex::new(entries);
+    let total = paths.len();
+    let done = std::sync::atomic::AtomicUsize::new(0);
 
     let mut out: Vec<Track> = paths
         .par_iter()
@@ -3554,6 +3591,14 @@ fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
             };
             let track = crate::cache::track_from_cache(path, &entry);
             cache_mtx.lock().insert(key, entry);
+            // Emit progress every ~32 tracks to avoid flooding the channel
+            // on large libraries.
+            let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if let Some(tx) = &progress_tx {
+                if d == total || d.is_multiple_of(32) {
+                    let _ = tx.send((d, total));
+                }
+            }
             track
         })
         .collect();
