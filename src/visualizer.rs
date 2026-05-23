@@ -44,29 +44,45 @@ impl SampleRing {
 }
 
 struct VizState {
+    ring: SampleRing,
     sensitivity: f32,
     peak_db: f32,
     smoothed: Vec<f32>,
     // waveform-specific state
     wave_smooth: Vec<f32>,
     wave_peaks: Vec<f32>,
+    // #90: scratch buffers reused across `compute_bars` calls so the critical
+    // section does not allocate. `fft_input` is sized to FFT_SIZE up front;
+    // `mags` is sized to FFT_SIZE/2; `raw_db` grows lazily to `n_bars`.
+    fft_input: Vec<Complex32>,
+    mags: Vec<f32>,
+    raw_db: Vec<f32>,
 }
 
 impl VizState {
     fn new(sensitivity: f32) -> Self {
         Self {
+            ring: SampleRing::new(),
             sensitivity: sensitivity.clamp(SENS_MIN, SENS_MAX),
             peak_db: -20.0,
             smoothed: Vec::new(),
             wave_smooth: Vec::new(),
             wave_peaks: Vec::new(),
+            fft_input: vec![Complex32::new(0.0, 0.0); FFT_SIZE],
+            mags: vec![0.0; FFT_SIZE / 2],
+            raw_db: Vec::new(),
         }
     }
 }
 
+/// #90: single `Mutex<VizState>` consolidates the audio-side ring buffer with
+/// the visualiser-side state and scratch buffers. The audio thread holds it
+/// only for the trivial `ring.push` (a couple of integer ops); the render
+/// thread holds it once per `compute_bars` call for ~100µs of FFT+bin work.
+/// rodio's output sink buffers samples downstream of `push_mono`, so the
+/// occasional render-thread contention does not surface as audio dropouts.
 #[derive(Clone)]
 pub struct VizTap {
-    ring: Arc<Mutex<SampleRing>>,
     state: Arc<Mutex<VizState>>,
     fft: Arc<dyn Fft<f32>>,
 }
@@ -76,7 +92,6 @@ impl VizTap {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(FFT_SIZE);
         Self {
-            ring: Arc::new(Mutex::new(SampleRing::new())),
             state: Arc::new(Mutex::new(VizState::new(sensitivity))),
             fft,
         }
@@ -94,11 +109,13 @@ impl VizTap {
     }
 
     pub fn compute_bars(&self, n_bars: usize) -> Vec<f32> {
+        // Allocate the output Vec *before* taking the lock so the critical
+        // section is free of allocations (#90).
+        let mut bars = vec![0.0f32; n_bars];
         let mut window = [0.0f32; FFT_SIZE];
-        {
-            let ring = self.ring.lock();
-            ring.snapshot(&mut window);
-        }
+
+        let mut state = self.state.lock();
+        state.ring.snapshot(&mut window);
 
         for (i, s) in window.iter_mut().enumerate() {
             let n = FFT_SIZE as f32;
@@ -106,18 +123,23 @@ impl VizTap {
             *s *= w;
         }
 
-        let mut buf: Vec<Complex32> = window.iter().map(|&r| Complex32::new(r, 0.0)).collect();
-        self.fft.process(&mut buf);
+        for (i, &r) in window.iter().enumerate() {
+            state.fft_input[i] = Complex32::new(r, 0.0);
+        }
+        self.fft.process(&mut state.fft_input);
 
         let half = FFT_SIZE / 2;
-        // Normalize FFT magnitude by window length so peak_db is roughly in dBFS.
         let norm_factor = 2.0 / FFT_SIZE as f32;
-        let mags: Vec<f32> = buf[..half].iter().map(|c| c.norm() * norm_factor).collect();
+        for i in 0..half {
+            state.mags[i] = state.fft_input[i].norm() * norm_factor;
+        }
 
-        let mut state = self.state.lock();
+        if state.raw_db.len() != n_bars {
+            state.raw_db.resize(n_bars, -100.0);
+        } else {
+            state.raw_db.fill(-100.0);
+        }
         let sensitivity = state.sensitivity;
-
-        let mut raw_db = vec![-100.0f32; n_bars];
         let mut frame_peak_db = -100.0f32;
         let min_bin = 2.0_f32;
         let max_bin = half as f32;
@@ -126,26 +148,24 @@ impl VizTap {
             let hi = min_bin * (max_bin / min_bin).powf((b + 1) as f32 / n_bars as f32);
             let lo_i = (lo as usize).max(1);
             let hi_i = (hi as usize).max(lo_i + 1).min(half);
-            let slice = &mags[lo_i..hi_i];
+            let slice = &state.mags[lo_i..hi_i];
             let avg = if slice.is_empty() {
                 0.0
             } else {
                 slice.iter().sum::<f32>() / slice.len() as f32
             };
             let db = 20.0 * (avg * sensitivity + 1e-6).log10();
-            raw_db[b] = db;
+            state.raw_db[b] = db;
             if db > frame_peak_db {
                 frame_peak_db = db;
             }
         }
 
-        // Fast attack, slow release on the peak reference (the "0 dB" of the display).
         if frame_peak_db > state.peak_db {
             state.peak_db = frame_peak_db;
         } else {
-            state.peak_db = state.peak_db + (frame_peak_db - state.peak_db) * PEAK_RELEASE;
+            state.peak_db += (frame_peak_db - state.peak_db) * PEAK_RELEASE;
         }
-        // Don't let the peak collapse to silence — keep a sane minimum reference.
         if state.peak_db < -30.0 {
             state.peak_db = -30.0;
         }
@@ -155,11 +175,10 @@ impl VizTap {
         let span = (peak - floor).max(1.0);
 
         if state.smoothed.len() != n_bars {
-            state.smoothed = vec![0.0; n_bars];
+            state.smoothed.resize(n_bars, 0.0);
         }
-        let mut bars = vec![0.0f32; n_bars];
         for b in 0..n_bars {
-            let norm = ((raw_db[b] - floor) / span).clamp(0.0, 1.0);
+            let norm = ((state.raw_db[b] - floor) / span).clamp(0.0, 1.0);
             let prev = state.smoothed[b];
             let v = norm.max(prev * BAR_FALL);
             state.smoothed[b] = v;
@@ -180,7 +199,8 @@ impl VizTap {
 
     /// Returns `n` evenly-spaced recent samples using linear interpolation.
     pub fn raw_snapshot(&self, n: usize) -> Vec<f32> {
-        let ring = self.ring.lock();
+        let state = self.state.lock();
+        let ring = &state.ring;
         let mut out = Vec::with_capacity(n);
         let step = (FFT_SIZE as f32 / n as f32).max(1.0);
         for i in 0..n {
@@ -225,7 +245,8 @@ impl VizTap {
 
     /// Returns RMS level in [0, 1] for the most recent 1024 samples.
     pub fn rms_level(&self) -> f32 {
-        let ring = self.ring.lock();
+        let state = self.state.lock();
+        let ring = &state.ring;
         let n = 1024usize;
         let sum_sq: f32 = (0..n)
             .map(|i| {
@@ -237,7 +258,7 @@ impl VizTap {
     }
 
     fn push_mono(&self, s: f32) {
-        self.ring.lock().push(s);
+        self.state.lock().ring.push(s);
     }
 }
 
