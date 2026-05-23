@@ -1,0 +1,107 @@
+//! Help overlay (#100). Extracted from `ui.rs` — pure code move.
+
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    Frame,
+};
+
+use crate::theme::{parse_color, Theme};
+
+pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
+    let w = 62.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(2).max(6);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let lines: Vec<Line> = vec![
+        Line::from("  Playback"),
+        Line::from("    Space        play / pause"),
+        Line::from("    n / p        next / previous"),
+        Line::from("    s            stop"),
+        Line::from("    ← / →        seek -5s / +5s"),
+        Line::from("    + / -        volume up / down"),
+        Line::from("    m            toggle mini mode"),
+        Line::from(""),
+        Line::from("  Library / Queue"),
+        Line::from("    Tab          switch focus"),
+        Line::from("    ↑↓ / jk      move selection"),
+        Line::from("    Enter        play selected"),
+        Line::from("    a / d        add / remove from queue"),
+        Line::from("    c            clear queue (confirm twice)"),
+        Line::from("    u            undo last clear / remove"),
+        Line::from("    f            toggle favorite"),
+        Line::from("    /            search (title, artist, album, genre, year)"),
+        Line::from("    H            toggle recently played view"),
+        Line::from(""),
+        Line::from("  Modes & playlists"),
+        Line::from("    S            toggle shuffle"),
+        Line::from("    r            cycle repeat (off/all/one)"),
+        Line::from("    o            cycle sort (title/artist/album/year)"),
+        Line::from("    T            sleep timer (30 min)"),
+        Line::from("    w            save queue as .m3u"),
+        Line::from("    L            load / browse saved playlists"),
+        Line::from("    O            open profiles browser (save/load settings)"),
+        Line::from(""),
+        Line::from("  View"),
+        Line::from("    V            toggle flat / album view"),
+        Line::from("    Shift+Tab    cycle color themes"),
+        Line::from("    Click        play library / queue row"),
+        Line::from("    Click bar    seek to position"),
+        Line::from("    Scroll       scroll list"),
+        Line::from(""),
+        Line::from("  EQ (-12..+12 dB)"),
+        Line::from("    1 / 2        low  -/+"),
+        Line::from("    3 / 4        mid  -/+"),
+        Line::from("    5 / 6        high -/+"),
+        Line::from("    0            cycle preset (Flat/Bass/Vocal/Treble/Loud + custom)"),
+        Line::from("    E            open EQ tuner popup"),
+        Line::from("    Ctrl+S       save EQ as custom preset (in EQ tuner)"),
+        Line::from(""),
+        Line::from("  Audio & Visualizer"),
+        Line::from("    e            open audio panel (crossfade, compressor…)"),
+        Line::from("    v            cycle viz mode (spectrum/waveform/vu-meter)"),
+        Line::from("    [ / ]        viz sensitivity -/+"),
+        Line::from("    G            cycle ReplayGain (off/track/album)"),
+        Line::from(""),
+        Line::from("  Library tools"),
+        Line::from("    R            rescan music_dirs"),
+        Line::from("    I            track info popup"),
+        Line::from("    D            select audio output device"),
+        Line::from(""),
+        Line::from("  Online / Streaming"),
+        Line::from("    i            open URL prompt"),
+        Line::from("                 • YouTube / youtu.be links"),
+        Line::from("                 • ytsearch:query  (top 5 results)"),
+        Line::from("                 • ytmsearch:query (YouTube Music)"),
+        Line::from("                 • M3U / PLS radio playlist URLs"),
+        Line::from("                 • Direct HTTP stream URL"),
+        Line::from(""),
+        Line::from("  Integrations"),
+        Line::from("    F            Last.fm login (press twice to confirm)"),
+        Line::from("    P            Spotify browser login (OAuth PKCE)"),
+        Line::from("    @            Spotify play/pause toggle"),
+    ];
+
+    let p = Paragraph::new(Text::from(lines))
+        .style(Style::default().fg(parse_color(&theme.colors.foreground)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.border(true))
+                .title(Span::styled(
+                    " Help  ↑↓ scroll · any other key closes ",
+                    theme.accent(),
+                )),
+        )
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false });
+    f.render_widget(p, popup);
+}
