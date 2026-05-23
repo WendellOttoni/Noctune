@@ -250,7 +250,12 @@ fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let spinner_char = SPINNER[(app.tick_count as usize / 3) % SPINNER.len()];
     let status_text = if app.is_loading() {
-        format!(" {} {}", spinner_char, app.status)
+        format!(
+            " {} {}{}",
+            spinner_char,
+            app.status,
+            scan_progress_suffix(app)
+        )
     } else {
         format!(" {}", app.status)
     };
@@ -258,6 +263,14 @@ fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
         Paragraph::new(Span::styled(status_text, status_style(app))),
         rows[4],
     );
+}
+
+/// `" [done/total]"` if a scan is reporting progress, else empty (#104).
+fn scan_progress_suffix(app: &App) -> String {
+    match app.scan_progress {
+        Some((d, t)) if t > 0 => format!(" [{d}/{t}]"),
+        _ => String::new(),
+    }
 }
 
 /// Pick the status-bar foreground color from the current `StatusKind` (#102).
@@ -2252,7 +2265,12 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
     } else if app.search_active() {
         format!(" /{}", app.search_query())
     } else if app.is_loading() {
-        format!(" {} {}", spinner_char, app.status)
+        format!(
+            " {} {}{}",
+            spinner_char,
+            app.status,
+            scan_progress_suffix(app)
+        )
     } else {
         format!(" {}", app.status)
     };
