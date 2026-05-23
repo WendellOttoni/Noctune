@@ -303,7 +303,10 @@ pub struct LayoutRects {
 pub enum LibraryRow {
     Header(String),
     SmartHeader { label: String, count: usize, expanded: bool },
-    Track(Track),
+    /// #92: tracks are reference-counted so the cached `Vec<LibraryRow>` can
+    /// be cheaply cloned per frame (refcount bump instead of deep-cloning the
+    /// `Track`'s owned strings).
+    Track(std::sync::Arc<Track>),
     Dir(std::path::PathBuf),
 }
 
@@ -665,7 +668,7 @@ impl App {
         {
             return visible
                 .into_iter()
-                .map(|t| LibraryRow::Track(t.clone()))
+                .map(|t| LibraryRow::Track(std::sync::Arc::new(t.clone())))
                 .collect();
         }
         let mut out = Vec::with_capacity(visible.len() + 16);
@@ -676,7 +679,7 @@ impl App {
                 out.push(LibraryRow::Header(album.clone()));
                 last_album = Some(album);
             }
-            out.push(LibraryRow::Track(t.clone()));
+            out.push(LibraryRow::Track(std::sync::Arc::new(t.clone())));
         }
         out
     }
@@ -773,7 +776,7 @@ impl App {
             });
             if expanded {
                 for t in tracks.iter() {
-                    out.push(LibraryRow::Track(t.clone()));
+                    out.push(LibraryRow::Track(std::sync::Arc::new(t.clone())));
                 }
             }
         }
@@ -811,7 +814,7 @@ impl App {
             out.push(LibraryRow::Dir(d));
         }
         for f in files {
-            out.push(LibraryRow::Track(f));
+            out.push(LibraryRow::Track(std::sync::Arc::new(f)));
         }
         out
     }
@@ -835,8 +838,8 @@ impl App {
                 self.browser_path = Some(p.clone());
                 self.library_state.select(Some(0));
             }
-            Some(LibraryRow::Track(t)) => {
-                let t = t.clone();
+            Some(LibraryRow::Track(arc)) => {
+                let t = (**arc).clone();
                 self.queue.push(t);
                 let idx = self.queue.len() - 1;
                 self.queue_index = Some(idx);
@@ -871,7 +874,7 @@ impl App {
         let rows = self.library_rows();
         let idx = self.library_state.selected()?;
         match rows.get(idx)? {
-            LibraryRow::Track(t) => Some(t.clone()),
+            LibraryRow::Track(arc) => Some((**arc).clone()),
             LibraryRow::Header(_) | LibraryRow::SmartHeader { .. } | LibraryRow::Dir(_) => None,
         }
     }
