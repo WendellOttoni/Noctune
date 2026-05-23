@@ -358,12 +358,8 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
 }
 
 fn yt_info_to_track(info: YtInfo) -> Option<Track> {
-    // webpage_url preferred; flat-playlist entries use "url"; fallback: construct from id
-    let watch_url = info
-        .webpage_url
-        .or(info.url)
-        .or_else(|| info.id.as_ref().map(|id| format!("https://www.youtube.com/watch?v={id}")))?;
-
+    // Resolve thumbnail before moving fields out of `info` — `pick_thumbnail`
+    // borrows `&info`, so this has to happen before the `.or(info.url)` move.
     // Flat-playlist entries (`--flat-playlist`) usually omit thumbnails; fall
     // back to the canonical i.ytimg.com URL derived from the video id.
     let cover_url = pick_thumbnail(&info).or_else(|| {
@@ -371,6 +367,13 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
             .as_ref()
             .map(|id| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"))
     });
+
+    // webpage_url preferred; flat-playlist entries use "url"; fallback: construct from id
+    let watch_url = info
+        .webpage_url
+        .or(info.url)
+        .or_else(|| info.id.as_ref().map(|id| format!("https://www.youtube.com/watch?v={id}")))?;
+
     let title = info.title.unwrap_or_else(|| "Unknown".to_string());
     let artist = info.uploader.or(info.channel);
     let duration = info.duration.map(Duration::from_secs_f64);
