@@ -269,7 +269,24 @@ impl Config {
                 eprintln!("config: failed to create dir {}: {e}", parent.display());
             }
         }
-        fs::write(&path, toml::to_string_pretty(self)?)?;
+        // Always preserve credentials from disk — these are set manually by the user
+        // and must never be overwritten by the runtime state saved on exit.
+        let mut merged = self.clone();
+        if let Ok(text) = fs::read_to_string(&path) {
+            if let Ok(on_disk) = toml::from_str::<Config>(&text) {
+                if !on_disk.spotify.client_id.is_empty() {
+                    merged.spotify.client_id = on_disk.spotify.client_id;
+                }
+                if !on_disk.lastfm.api_key.is_empty() {
+                    merged.lastfm.api_key = on_disk.lastfm.api_key;
+                    merged.lastfm.api_secret = on_disk.lastfm.api_secret;
+                }
+                if !on_disk.discord.client_id.is_empty() {
+                    merged.discord.client_id = on_disk.discord.client_id;
+                }
+            }
+        }
+        fs::write(&path, toml::to_string_pretty(&merged)?)?;
         Ok(())
     }
 
