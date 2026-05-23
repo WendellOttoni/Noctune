@@ -54,15 +54,52 @@ impl Theme {
         let dir = config::themes_dir()?;
         fs::create_dir_all(&dir).ok();
         let path = dir.join(format!("{name}.toml"));
-        if path.exists() {
+        let theme: Self = if path.exists() {
             let text = fs::read_to_string(&path)
                 .with_context(|| format!("reading theme {}", path.display()))?;
-            Ok(toml::from_str(&text)?)
+            toml::from_str(&text)?
         } else {
             let theme = Theme::default();
             fs::write(&path, toml::to_string_pretty(&theme)?).ok();
-            Ok(theme)
+            theme
+        };
+        // #103: validate color fields once on load and emit aggregated warnings to
+        // stderr (full logging via tracing comes with #96). Invalid colors still
+        // fall back to Color::Reset at render time — same behaviour as before, just
+        // no longer silent.
+        let issues = theme.validate_colors();
+        if !issues.is_empty() {
+            eprintln!(
+                "theme '{}': {} invalid color(s) — using defaults",
+                theme.name,
+                issues.len()
+            );
+            for (field, err) in &issues {
+                eprintln!("  {field}: {err}");
+            }
         }
+        Ok(theme)
+    }
+
+    /// Returns a list of `(field_name, error)` for every color field that fails
+    /// to parse. Empty vec means the theme is fully valid.
+    pub fn validate_colors(&self) -> Vec<(&'static str, ColorParseError)> {
+        let fields: [(&'static str, &str); 10] = [
+            ("background", &self.colors.background),
+            ("foreground", &self.colors.foreground),
+            ("primary", &self.colors.primary),
+            ("secondary", &self.colors.secondary),
+            ("accent", &self.colors.accent),
+            ("muted", &self.colors.muted),
+            ("border", &self.colors.border),
+            ("border_focused", &self.colors.border_focused),
+            ("progress_filled", &self.colors.progress_filled),
+            ("progress_empty", &self.colors.progress_empty),
+        ];
+        fields
+            .into_iter()
+            .filter_map(|(name, value)| try_parse_color(value).err().map(|e| (name, e)))
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -124,8 +161,35 @@ impl Default for Theme {
     }
 }
 
-pub fn parse_color(s: &str) -> Color {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColorParseError {
+    /// Starts with `#` but is not a valid 6-digit hex code.
+    InvalidHex(String),
+    /// Bare name that does not match any known palette entry.
+    UnknownName(String),
+    /// Empty / whitespace-only value.
+    Empty,
+}
+
+impl std::fmt::Display for ColorParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidHex(s) => write!(f, "invalid hex color '{s}' (expected #RRGGBB)"),
+            Self::UnknownName(s) => write!(f, "unknown color name '{s}'"),
+            Self::Empty => write!(f, "empty color value"),
+        }
+    }
+}
+
+impl std::error::Error for ColorParseError {}
+
+/// Strict color parser. Returns an error describing why the input is not a
+/// recognised color, so callers (e.g. `Theme::validate_colors`) can surface it.
+pub fn try_parse_color(s: &str) -> Result<Color, ColorParseError> {
     let s = s.trim();
+    if s.is_empty() {
+        return Err(ColorParseError::Empty);
+    }
     if let Some(hex) = s.strip_prefix('#') {
         if hex.len() == 6 {
             if let (Ok(r), Ok(g), Ok(b)) = (
@@ -133,22 +197,30 @@ pub fn parse_color(s: &str) -> Color {
                 u8::from_str_radix(&hex[2..4], 16),
                 u8::from_str_radix(&hex[4..6], 16),
             ) {
-                return Color::Rgb(r, g, b);
+                return Ok(Color::Rgb(r, g, b));
             }
         }
+        return Err(ColorParseError::InvalidHex(s.to_string()));
     }
     match s.to_lowercase().as_str() {
-        "black" => Color::Black,
-        "red" => Color::Red,
-        "green" => Color::Green,
-        "yellow" => Color::Yellow,
-        "blue" => Color::Blue,
-        "magenta" => Color::Magenta,
-        "cyan" => Color::Cyan,
-        "gray" | "grey" => Color::Gray,
-        "white" => Color::White,
-        _ => Color::Reset,
+        "black" => Ok(Color::Black),
+        "red" => Ok(Color::Red),
+        "green" => Ok(Color::Green),
+        "yellow" => Ok(Color::Yellow),
+        "blue" => Ok(Color::Blue),
+        "magenta" => Ok(Color::Magenta),
+        "cyan" => Ok(Color::Cyan),
+        "gray" | "grey" => Ok(Color::Gray),
+        "white" => Ok(Color::White),
+        _ => Err(ColorParseError::UnknownName(s.to_string())),
     }
+}
+
+/// Lenient parser used on the render hot path: falls back to `Color::Reset` on
+/// any parse error. Validation/warnings happen once in `Theme::load`, so render
+/// frames stay allocation-free.
+pub fn parse_color(s: &str) -> Color {
+    try_parse_color(s).unwrap_or(Color::Reset)
 }
 
 const DEFAULT_LOGO: &str = r#"
