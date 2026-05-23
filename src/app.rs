@@ -24,6 +24,17 @@ use crate::{
 const MAX_UNDO_SNAPSHOTS: usize = 10;
 const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "ogg", "opus", "m4a", "aac"];
 
+/// Severity tag for status-bar messages (#102). Drives both the foreground
+/// color in the status bar and how aggressively the message hangs around.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusKind {
+    #[default]
+    Info,
+    #[allow(dead_code)] // reserved for future amber warnings; not yet used
+    Warning,
+    Error,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
     Library,
@@ -157,6 +168,7 @@ pub struct App {
     pub focus: Pane,
     pub queue_index: Option<usize>,
     pub status: String,
+    pub status_kind: StatusKind,
     pub should_quit: bool,
     pub search: String,
     pub search_editing: bool,
@@ -376,6 +388,24 @@ impl ViewMode {
 }
 
 impl App {
+    /// Replace the status bar text and update its severity (#102). Always
+    /// prefer this over poking `self.status` directly so the color in the
+    /// status bar stays in sync with the message intent.
+    pub fn set_status<S: Into<String>>(&mut self, kind: StatusKind, msg: S) {
+        self.set_info(msg);
+        self.status_kind = kind;
+    }
+
+    /// Convenience for the common Info case.
+    pub fn set_info<S: Into<String>>(&mut self, msg: S) {
+        self.set_status(StatusKind::Info, msg);
+    }
+
+    /// Convenience for the common Error case.
+    pub fn set_error<S: Into<String>>(&mut self, msg: S) {
+        self.set_status(StatusKind::Error, msg);
+    }
+
     pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
         crate::ytdlp::configure_retries(config.ytdlp.clone());
         let history_cfg = config.history.clone();
@@ -473,6 +503,7 @@ impl App {
             focus: Pane::Library,
             queue_index: None,
             status: "Scanning library…".into(),
+            status_kind: StatusKind::Info,
             should_quit: false,
             search: String::new(),
             search_editing: false,
@@ -984,18 +1015,20 @@ impl App {
                     } else {
                         Some(0)
                     });
-                    self.status = match (n as i64 - prev_n as i64, removed_from_queue) {
+                    self.set_info(match (n as i64 - prev_n as i64, removed_from_queue) {
                         (0, 0) if prev_n > 0 => format!("Library: {n} tracks (unchanged)."),
                         (d, 0) if d > 0 => format!("Library: +{d} → {n} tracks."),
                         (d, 0) if d < 0 => format!("Library: {d} → {n} tracks."),
                         (_, r) if r > 0 => format!("Library: {n} tracks ({r} dropped from queue)."),
                         _ => format!("Library: {n} tracks."),
-                    };
+                    });
                     self.scan_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.status = "Library scan failed.".into();
+                    self.set_error(
+                        "Library: scan failed — check permissions on music_dirs in config.toml",
+                    );
                     self.scan_rx = None;
                 }
             }
@@ -1043,7 +1076,7 @@ impl App {
                 let name = self.theme.name.clone();
                 if let Ok(t) = crate::theme::Theme::load(&name) {
                     self.theme = t;
-                    self.status = format!("Theme reloaded: {name}");
+                    self.set_info(format!("Theme reloaded: {name}"));
                 }
             }
         }
@@ -1053,7 +1086,7 @@ impl App {
             if std::time::Instant::now() >= until && self.scan_rx.is_none() {
                 self.rescan_debounce_until = None;
                 self.start_async_scan();
-                self.status = "Library changed — rescanning…".into();
+                self.set_info("Library changed — rescanning…");
             }
         }
 
@@ -1063,11 +1096,11 @@ impl App {
                     let n = tracks.len();
                     self.spotify_browser_results = tracks;
                     self.spotify_browser_row = 0;
-                    self.status = format!("Spotify: {n} results.");
+                    self.set_info(format!("Spotify: {n} results."));
                     self.spotify_search_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.status = format!("Spotify search error: {e}");
+                    self.set_error(format!("Spotify: search failed — {e}"));
                     self.spotify_search_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -1086,16 +1119,18 @@ impl App {
                     if was_empty {
                         self.queue_state.select(Some(0));
                     }
-                    self.status = format!("Added {n} track(s) to queue.");
+                    self.set_info(format!("Added {n} track(s) to queue."));
                     self.url_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.status = format!("Load error: {e}");
+                    self.set_error(format!("Playlist: load failed — {e}"));
                     self.url_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.status = "URL load failed (worker disconnected).".into();
+                    self.set_error(
+                        "yt-dlp: worker disconnected — check yt-dlp install (see README)",
+                    );
                     self.url_rx = None;
                 }
             }
@@ -1112,17 +1147,17 @@ impl App {
                         match self.player.play_prepared(source, &t, offset) {
                             Ok(_) => {
                                 if seek_offset.is_some() {
-                                    self.status = format!("Playing: {}", t.display());
+                                    self.set_info(format!("Playing: {}", t.display()));
                                 } else {
                                     self.on_track_started(t);
                                 }
                             }
-                            Err(e) => self.status = format!("Error: {e}"),
+                            Err(e) => self.set_error(format!("Playback: {e}")),
                         }
                     }
                 }
                 Ok(Err(e)) => {
-                    self.status = format!("Load error: {e}");
+                    self.set_error(format!("Playlist: load failed — {e}"));
                     self.load_rx = None;
                     self.loading_track = None;
                     self.pending_seek_offset = None;
@@ -1137,7 +1172,7 @@ impl App {
         }
 
         if let Some(err) = self.player.take_stream_error() {
-            self.status = err;
+            self.set_info(err);
         }
 
         // OS media-session events (#54) — play/pause/next/prev pressed on the SMTC,
@@ -1176,7 +1211,7 @@ impl App {
                     self.lastfm_panel_recent = recent;
                     self.lastfm_panel_top_artists = top;
                     self.lastfm_panel_rx = None;
-                    self.status = "Last.fm: ready.".into();
+                    self.set_info("Last.fm: ready.");
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -1241,7 +1276,7 @@ impl App {
             if std::time::Instant::now() >= when {
                 self.player.stop();
                 self.sleep_until = None;
-                self.status = "Sleep timer reached — playback stopped.".into();
+                self.set_info("Sleep timer reached — playback stopped.");
                 return Ok(());
             }
         }
@@ -1254,7 +1289,7 @@ impl App {
                     self.queue_state.select(Some(idx));
                     if let Some(t) = self.player.current().cloned() {
                         self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
-                        self.status = format!("Playing: {}", t.display());
+                        self.set_info(format!("Playing: {}", t.display()));
                         self.push_history(t);
                     }
                 }
@@ -1287,7 +1322,7 @@ impl App {
                     self.queue_state.select(Some(idx));
                 }
                 self.lyrics = crate::lyrics::Lyrics::for_track(&next_track.path);
-                self.status = format!("Playing: {}", next_track.display());
+                self.set_info(format!("Playing: {}", next_track.display()));
                 self.current_play_recorded = false;
                 let artist = next_track.artist.clone().unwrap_or_default();
                 let title = next_track.title.clone();
@@ -1358,12 +1393,12 @@ impl App {
                 Ok(Ok(mut tracks)) => {
                     let n = tracks.len();
                     self.queue.append(&mut tracks);
-                    self.status = format!("Radio: +{n} tracks.");
+                    self.set_info(format!("Radio: +{n} tracks."));
                     self.radio_mode.is_fetching = false;
                     self.radio_fetch_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.status = format!("Radio fetch error: {e}");
+                    self.set_error(format!("Radio: fetch failed — {e}"));
                     self.radio_mode.is_fetching = false;
                     self.radio_fetch_rx = None;
                 }
@@ -1413,11 +1448,11 @@ impl App {
     fn toggle_sleep_timer(&mut self) {
         if self.sleep_until.is_some() {
             self.sleep_until = None;
-            self.status = "Sleep timer cancelled.".into();
+            self.set_info("Sleep timer cancelled.");
         } else {
             let when = std::time::Instant::now() + Duration::from_secs(30 * 60);
             self.sleep_until = Some(when);
-            self.status = "Sleep timer: 30 min.".into();
+            self.set_info("Sleep timer: 30 min.");
         }
     }
 
@@ -1544,18 +1579,18 @@ impl App {
                 KeyCode::Esc => {
                     self.radio_seed_input.clear();
                     self.radio_seed_editing = false;
-                    self.status = "Radio cancelled.".into();
+                    self.set_info("Radio cancelled.");
                 }
                 KeyCode::Enter => {
                     let seed = self.radio_seed_input.trim().to_string();
                     self.radio_seed_editing = false;
                     self.radio_seed_input.clear();
                     if seed.is_empty() {
-                        self.status = "Radio: empty seed.".into();
+                        self.set_info("Radio: empty seed.");
                     } else {
                         self.radio_mode.seed = seed.clone();
                         self.radio_mode.active = true;
-                        self.status = format!("Radio: '{seed}' — fetching first batch…");
+                        self.set_info(format!("Radio: '{seed}' — fetching first batch…"));
                     }
                 }
                 KeyCode::Backspace => {
@@ -1690,11 +1725,14 @@ impl App {
             }
             Action::Shuffle => {
                 self.shuffle = !self.shuffle;
-                self.status = format!("Shuffle: {}", if self.shuffle { "on" } else { "off" });
+                self.set_info(format!(
+                    "Shuffle: {}",
+                    if self.shuffle { "on" } else { "off" }
+                ));
             }
             Action::Repeat => {
                 self.repeat = self.repeat.cycle();
-                self.status = format!("Repeat: {}", self.repeat.label());
+                self.set_info(format!("Repeat: {}", self.repeat.label()));
             }
             Action::Sort => {
                 self.sort = self.sort.cycle();
@@ -1704,13 +1742,13 @@ impl App {
                 } else {
                     Some(0)
                 });
-                self.status = format!("Sort: {}", self.sort.label());
+                self.set_info(format!("Sort: {}", self.sort.label()));
             }
             Action::SleepTimer => self.toggle_sleep_timer(),
             Action::SavePlaylist => {
                 self.playlist_name_editing = true;
                 self.playlist_name_input.clear();
-                self.status = "Playlist name (Enter to save, Esc to cancel):".into();
+                self.set_info("Playlist name (Enter to save, Esc to cancel):");
             }
             Action::LoadPlaylist => {
                 self.open_playlist_browser();
@@ -1733,9 +1771,9 @@ impl App {
                             let _ = tx.send((recent, top));
                         });
                         self.show_lastfm_panel = true;
-                        self.status = "Last.fm: loading…".into();
+                        self.set_info("Last.fm: loading…");
                     } else {
-                        self.status = "Not logged in to Last.fm.".into();
+                        self.set_error("Last.fm: not logged in — press Shift+F to authenticate");
                     }
                 } else {
                     self.show_lastfm_panel = false;
@@ -1744,16 +1782,16 @@ impl App {
             Action::RadioMode => {
                 if self.radio_mode.active {
                     self.radio_mode.active = false;
-                    self.status = "Radio Mode off.".into();
+                    self.set_info("Radio Mode off.");
                 } else {
                     self.radio_seed_editing = true;
                     self.radio_seed_input = self.radio_mode.seed.clone();
-                    self.status = "Radio seed (Enter=confirm, Esc=cancel):".into();
+                    self.set_info("Radio seed (Enter=confirm, Esc=cancel):");
                 }
             }
             Action::SpotifyBrowser => {
                 if self.spotify.is_none() {
-                    self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+                    self.set_error("Spotify: not authorized — press Shift+P to login");
                 } else {
                     self.show_spotify_browser = true;
                     self.spotify_browser_tab = SpotifyTab::Search;
@@ -1794,31 +1832,31 @@ impl App {
                     self.browser_music_root_idx = 0;
                 }
                 self.library_state.select(Some(0));
-                self.status = format!("View: {}", self.view_mode.label());
+                self.set_info(format!("View: {}", self.view_mode.label()));
             }
             Action::EqLowUp => {
                 self.player.eq().adjust_low(1.0);
-                self.status = "EQ low +1 dB".into();
+                self.set_info("EQ low +1 dB");
             }
             Action::EqLowDown => {
                 self.player.eq().adjust_low(-1.0);
-                self.status = "EQ low -1 dB".into();
+                self.set_info("EQ low -1 dB");
             }
             Action::EqMidUp => {
                 self.player.eq().adjust_mid(1.0);
-                self.status = "EQ mid +1 dB".into();
+                self.set_info("EQ mid +1 dB");
             }
             Action::EqMidDown => {
                 self.player.eq().adjust_mid(-1.0);
-                self.status = "EQ mid -1 dB".into();
+                self.set_info("EQ mid -1 dB");
             }
             Action::EqHighUp => {
                 self.player.eq().adjust_high(1.0);
-                self.status = "EQ high +1 dB".into();
+                self.set_info("EQ high +1 dB");
             }
             Action::EqHighDown => {
                 self.player.eq().adjust_high(-1.0);
-                self.status = "EQ high -1 dB".into();
+                self.set_info("EQ high -1 dB");
             }
             Action::OpenUrl => {
                 self.url_editing = true;
@@ -1831,7 +1869,7 @@ impl App {
                 self.eq_preset_idx = (self.eq_preset_idx + 1) % presets.len();
                 let (name, state) = presets[self.eq_preset_idx];
                 self.player.eq().set(state);
-                self.status = format!("EQ preset: {name}");
+                self.set_info(format!("EQ preset: {name}"));
             }
             Action::Rescan => self.start_async_scan(),
             Action::TrackInfo => self.show_info = true,
@@ -1842,10 +1880,10 @@ impl App {
             Action::RecentlyPlayed => {
                 if self.view_mode == ViewMode::RecentlyPlayed {
                     self.view_mode = ViewMode::Flat;
-                    self.status = "View: library".into();
+                    self.set_info("View: library");
                 } else {
                     self.view_mode = ViewMode::RecentlyPlayed;
-                    self.status = format!("Recently played ({} tracks)", self.history.len());
+                    self.set_info(format!("Recently played ({} tracks)", self.history.len()));
                 }
                 self.library_state
                     .select(if self.visible_library().is_empty() {
@@ -1860,11 +1898,11 @@ impl App {
             }
             Action::ReplayGain => {
                 self.replaygain_mode = self.replaygain_mode.cycle();
-                self.status = format!("ReplayGain: {}", self.replaygain_mode.label());
+                self.set_info(format!("ReplayGain: {}", self.replaygain_mode.label()));
             }
             Action::CycleVizMode => {
                 self.viz_mode = self.viz_mode.cycle();
-                self.status = format!("Visualizer: {}", self.viz_mode.label());
+                self.set_info(format!("Visualizer: {}", self.viz_mode.label()));
             }
             Action::ToggleMini => {
                 self.mini_mode = !self.mini_mode;
@@ -1886,11 +1924,11 @@ impl App {
                 };
                 if let Some(p) = path {
                     let fav = self.ratings.toggle_favorite(&p);
-                    self.status = if fav {
-                        "Added to favorites ♥".into()
+                    self.set_info(if fav {
+                        "Added to favorites ♥"
                     } else {
-                        "Removed from favorites".into()
-                    };
+                        "Removed from favorites"
+                    });
                 }
             }
         }
@@ -1899,9 +1937,9 @@ impl App {
     fn adjust_viz_sensitivity(&mut self, delta: f32) {
         let new_val = self.tap.adjust_sensitivity(delta);
         self.config.visualizer.sensitivity = new_val;
-        self.status = format!("Visualizer sensitivity: ×{:.1}", new_val);
+        self.set_info(format!("Visualizer sensitivity: ×{:.1}", new_val));
         if let Err(e) = self.config.save() {
-            self.status = format!("sensitivity saved in memory only ({e})");
+            self.set_info(format!("sensitivity saved in memory only ({e})"));
         }
     }
 
@@ -1931,17 +1969,17 @@ impl App {
             0 => {
                 self.player.eq().adjust_low(dir as f32);
                 let db = self.player.eq().snapshot().low_db;
-                self.status = format!("EQ Low: {:+.0} dB", db);
+                self.set_info(format!("EQ Low: {:+.0} dB", db));
             }
             1 => {
                 self.player.eq().adjust_mid(dir as f32);
                 let db = self.player.eq().snapshot().mid_db;
-                self.status = format!("EQ Mid: {:+.0} dB", db);
+                self.set_info(format!("EQ Mid: {:+.0} dB", db));
             }
             2 => {
                 self.player.eq().adjust_high(dir as f32);
                 let db = self.player.eq().snapshot().high_db;
-                self.status = format!("EQ High: {:+.0} dB", db);
+                self.set_info(format!("EQ High: {:+.0} dB", db));
             }
             3 => {
                 let presets = crate::eq::PRESETS;
@@ -1952,18 +1990,18 @@ impl App {
                 };
                 let (name, state) = presets[self.eq_preset_idx];
                 self.player.eq().set(state);
-                self.status = format!("EQ preset: {name}");
+                self.set_info(format!("EQ preset: {name}"));
             }
             4 => {
                 let v = (self.player.volume() + dir as f32 * 0.05).clamp(0.0, 1.5);
                 self.player.set_volume(v);
                 self.config.playback.default_volume = v;
-                self.status = format!("Volume: {}%", (v * 100.0) as u32);
+                self.set_info(format!("Volume: {}%", (v * 100.0) as u32));
             }
             5 => {
                 let xf = (self.player.crossfade_secs + dir as f32 * 0.5).clamp(0.0, 10.0);
                 self.player.crossfade_secs = xf;
-                self.status = format!("Crossfade: {:.1}s", xf);
+                self.set_info(format!("Crossfade: {:.1}s", xf));
             }
             6 => {
                 self.adjust_viz_sensitivity(dir as f32 * crate::visualizer::SENS_STEP);
@@ -1977,7 +2015,7 @@ impl App {
             let dir = match crate::config::themes_dir() {
                 Ok(d) => d,
                 Err(e) => {
-                    self.status = format!("themes dir: {e}");
+                    self.set_info(format!("themes dir: {e}"));
                     return;
                 }
             };
@@ -2020,13 +2058,13 @@ impl App {
                 // is fire-and-forget; errors land in the status bar but do not interrupt
                 // the cycle.
                 if let Err(e) = self.config.save() {
-                    self.status = format!("Theme: {name} (config save failed: {e})");
+                    self.set_info(format!("Theme: {name} (config save failed: {e})"));
                 } else {
-                    self.status = format!("Theme: {name} (saved)");
+                    self.set_info(format!("Theme: {name} (saved)"));
                 }
                 self.rearm_theme_watcher();
             }
-            Err(e) => self.status = format!("Theme load error: {e}"),
+            Err(e) => self.set_info(format!("Theme load error: {e}")),
         }
     }
 
@@ -2051,13 +2089,13 @@ impl App {
 
     fn start_async_scan(&mut self) {
         if self.scan_rx.is_some() {
-            self.status = "Scan already in progress…".into();
+            self.set_info("Scan already in progress…");
             return;
         }
         let dirs = self.config.music_dirs.clone();
         let (tx, rx) = std::sync::mpsc::channel::<Vec<Track>>();
         self.scan_rx = Some(rx);
-        self.status = "Scanning library…".into();
+        self.set_info("Scanning library…");
         std::thread::spawn(move || {
             let cache_file = cache_path();
             let mut cache = cache_file
@@ -2074,7 +2112,7 @@ impl App {
 
     fn start_url_load(&mut self, url: String) {
         if self.url_rx.is_some() {
-            self.status = "Already loading, please wait…".into();
+            self.set_info("Already loading, please wait…");
             return;
         }
 
@@ -2087,7 +2125,7 @@ impl App {
                 && !crate::ytdlp::is_youtube_url(&url);
 
         if is_playlist_file {
-            self.status = "Loading radio playlist…".into();
+            self.set_info("Loading radio playlist…");
             match crate::radio::fetch_playlist(&url) {
                 Ok(tracks) if !tracks.is_empty() => {
                     let n = tracks.len();
@@ -2096,10 +2134,10 @@ impl App {
                     if was_empty {
                         self.queue_state.select(Some(0));
                     }
-                    self.status = format!("Added {n} stream(s) from playlist.");
+                    self.set_info(format!("Added {n} stream(s) from playlist."));
                 }
-                Ok(_) => self.status = "Playlist contained no playable streams.".into(),
-                Err(e) => self.status = format!("Playlist error: {e}"),
+                Ok(_) => self.set_info("Playlist contained no playable streams."),
+                Err(e) => self.set_info(format!("Playlist error: {e}")),
             }
             return;
         }
@@ -2115,7 +2153,7 @@ impl App {
                 self.queue_state
                     .select(Some(self.queue.len().saturating_sub(1)));
             }
-            self.status = "Added stream URL to queue.".into();
+            self.set_info("Added stream URL to queue.");
             return;
         }
 
@@ -2124,7 +2162,7 @@ impl App {
             && !url.starts_with("spotify:")
             && !crate::ytdlp::is_youtube_url(&url)
         {
-            self.status = format!("Unrecognised URL scheme: {url}");
+            self.set_info(format!("Unrecognised URL scheme: {url}"));
             return;
         }
 
@@ -2134,12 +2172,12 @@ impl App {
         // Spotify
         if url.contains("spotify.com") || url.starts_with("spotify:") {
             let Some(api) = self.spotify.clone() else {
-                self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+                self.set_error("Spotify: not authorized — press Shift+P to login");
                 self.url_rx = None;
                 return;
             };
             let (kind, id) = parse_spotify_url(&url);
-            self.status = format!("Loading Spotify {kind}…");
+            self.set_info(format!("Loading Spotify {kind}…"));
             std::thread::spawn(move || {
                 let mut api = api;
                 let result = match kind.as_str() {
@@ -2154,7 +2192,7 @@ impl App {
         }
 
         // YouTube / YT Music
-        self.status = format!("Loading {url}…");
+        self.set_info(format!("Loading {url}…"));
         std::thread::spawn(move || {
             let result = crate::ytdlp::fetch_tracks(&url)
                 .map_err(|e| e.to_string())
@@ -2171,12 +2209,12 @@ impl App {
 
     fn spotify_login(&mut self) {
         if self.spotify_client_id.is_empty() {
-            self.status = "Set [spotify].client_id in config.toml first.".into();
+            self.set_info("Set [spotify].client_id in config.toml first.");
             return;
         }
         match crate::spotify::authorize(&self.spotify_client_id, &self.spotify_redirect_uri) {
             Ok((url, session)) => {
-                self.status = "Opening browser for Spotify login...".into();
+                self.set_info("Opening browser for Spotify login...");
                 let _ = webbrowser::open(&url);
                 let port = self
                     .spotify_redirect_uri
@@ -2195,17 +2233,17 @@ impl App {
                             ) {
                                 Ok(api) => {
                                     self.spotify = Some(api);
-                                    self.status = "Spotify login complete.".into();
+                                    self.set_info("Spotify login complete.");
                                 }
-                                Err(e) => self.status = format!("Spotify init error: {e}"),
+                                Err(e) => self.set_info(format!("Spotify init error: {e}")),
                             }
                         }
-                        Err(e) => self.status = format!("Token exchange failed: {e}"),
+                        Err(e) => self.set_info(format!("Token exchange failed: {e}")),
                     },
-                    Err(e) => self.status = format!("Redirect listener error: {e}"),
+                    Err(e) => self.set_info(format!("Redirect listener error: {e}")),
                 }
             }
-            Err(e) => self.status = format!("Spotify authorize error: {e}"),
+            Err(e) => self.set_info(format!("Spotify authorize error: {e}")),
         }
     }
 
@@ -2237,8 +2275,8 @@ impl App {
                 self.show_device_selector = false;
                 if let Some(name) = self.device_list.get(self.device_selector_row).cloned() {
                     match self.player.switch_device(&name) {
-                        Ok(_) => self.status = format!("Output device: {name}"),
-                        Err(e) => self.status = format!("Device error: {e}"),
+                        Ok(_) => self.set_info(format!("Output device: {name}")),
+                        Err(e) => self.set_info(format!("Device error: {e}")),
                     }
                 }
             }
@@ -2303,7 +2341,7 @@ impl App {
                     .map(|i| (i + 1) % all.len())
                     .unwrap_or(0);
                 eq.set(all[next].1);
-                self.status = format!("EQ Preset: {}", all[next].0);
+                self.set_info(format!("EQ Preset: {}", all[next].0));
             }
             _ => {}
         }
@@ -2312,7 +2350,7 @@ impl App {
     fn lastfm_login(&mut self) {
         let cfg = &self.config.lastfm;
         if !cfg.is_configured() {
-            self.status = "Set [lastfm] api_key and api_secret in config.toml first.".into();
+            self.set_info("Set [lastfm] api_key and api_secret in config.toml first.");
             return;
         }
 
@@ -2327,13 +2365,13 @@ impl App {
                     match crate::lastfm::LastfmClient::new(api_key, api_secret, session) {
                         Ok(client) => {
                             self.lastfm = Some(client);
-                            self.status = format!("Last.fm connected as {username}.");
+                            self.set_info(format!("Last.fm connected as {username}."));
                         }
-                        Err(e) => self.status = format!("Last.fm client error: {e}"),
+                        Err(e) => self.set_info(format!("Last.fm client error: {e}")),
                     }
                 }
                 Err(e) => {
-                    self.status = format!("Last.fm auth error: {e}");
+                    self.set_info(format!("Last.fm auth error: {e}"));
                 }
             }
             return;
@@ -2350,27 +2388,27 @@ impl App {
                 );
                 let _ = webbrowser::open(&url);
                 self.lastfm_pending_token = Some(token);
-                self.status = "Last.fm: authorize in browser, then press F again.".into();
+                self.set_info("Last.fm: authorize in browser, then press F again.");
             }
-            Err(e) => self.status = format!("Last.fm token error: {e}"),
+            Err(e) => self.set_info(format!("Last.fm token error: {e}")),
         }
     }
 
     fn spotify_toggle(&mut self) {
         let Some(api) = self.spotify.as_mut() else {
-            self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+            self.set_error("Spotify: not authorized — press Shift+P to login");
             return;
         };
         match api.currently_playing() {
             Ok(Some(cp)) if cp.is_playing => match api.pause() {
-                Ok(_) => self.status = "Spotify paused.".into(),
-                Err(e) => self.status = format!("Spotify pause error: {e}"),
+                Ok(_) => self.set_info("Spotify paused."),
+                Err(e) => self.set_info(format!("Spotify pause error: {e}")),
             },
             Ok(_) => match api.play() {
-                Ok(_) => self.status = "Spotify resumed.".into(),
-                Err(e) => self.status = format!("Spotify play error: {e}"),
+                Ok(_) => self.set_info("Spotify resumed."),
+                Err(e) => self.set_info(format!("Spotify play error: {e}")),
             },
-            Err(e) => self.status = format!("Spotify error: {e}"),
+            Err(e) => self.set_info(format!("Spotify error: {e}")),
         }
     }
 
@@ -2413,7 +2451,7 @@ impl App {
         }
         let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
         if let Err(e) = self.seek_fraction_async(frac) {
-            self.status = format!("Seek error: {e}");
+            self.set_info(format!("Seek error: {e}"));
         }
         self.last_drag_seek = Some(now);
     }
@@ -2448,7 +2486,7 @@ impl App {
         if rect_contains(prog, x, y) && prog.width > 0 {
             let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
             if let Err(e) = self.seek_fraction_async(frac) {
-                self.status = format!("Seek error: {e}");
+                self.set_info(format!("Seek error: {e}"));
             }
         }
     }
@@ -2522,7 +2560,7 @@ impl App {
     fn enqueue_selection(&mut self) {
         if self.focus == Pane::Library {
             if let Some(t) = self.selected_library_track() {
-                self.status = format!("Queued: {}", t.display());
+                self.set_info(format!("Queued: {}", t.display()));
                 self.queue.push(t);
                 if self.queue_state.selected().is_none() {
                     self.queue_state.select(Some(0));
@@ -2564,10 +2602,10 @@ impl App {
             .unwrap_or(false);
         if !confirmed {
             self.clear_confirm_until = Some(now + Duration::from_secs(3));
-            self.status = format!(
+            self.set_info(format!(
                 "Press c again within 3s to clear {} tracks",
                 self.queue.len()
-            );
+            ));
             return;
         }
         self.clear_confirm_until = None;
@@ -2580,7 +2618,7 @@ impl App {
         self.album_art = None;
         self.art_generation = self.art_generation.wrapping_add(1);
         self.art_picker.invalidate();
-        self.status = format!("Queue cleared ({n} tracks). Press u to undo.");
+        self.set_info(format!("Queue cleared ({n} tracks). Press u to undo."));
     }
 
     fn push_undo_snapshot(&mut self, label: String) {
@@ -2596,7 +2634,7 @@ impl App {
 
     fn undo_queue_action(&mut self) {
         let Some(snapshot) = self.undo_stack.pop_back() else {
-            self.status = "Nothing to undo.".into();
+            self.set_info("Nothing to undo.");
             return;
         };
         self.queue = snapshot.queue;
@@ -2606,7 +2644,7 @@ impl App {
         } else {
             Some(self.queue_index.unwrap_or(0).min(self.queue.len() - 1))
         });
-        self.status = format!("Undo: {}", snapshot.label);
+        self.set_info(format!("Undo: {}", snapshot.label));
     }
 
     fn play_current(&mut self) {
@@ -2626,13 +2664,13 @@ impl App {
             if let Some(api) = self.spotify.as_mut() {
                 match api.play_uri(&uri) {
                     Ok(_) => {
-                        self.status = format!("Spotify ▶ {}", t.display());
+                        self.set_info(format!("Spotify ▶ {}", t.display()));
                         self.push_history(t);
                     }
-                    Err(e) => self.status = format!("Spotify play error: {e}"),
+                    Err(e) => self.set_info(format!("Spotify play error: {e}")),
                 }
             } else {
-                self.status = "Not logged in to Spotify. Press Shift+P first.".into();
+                self.set_error("Spotify: not authorized — press Shift+P to login");
             }
             return;
         }
@@ -2653,7 +2691,7 @@ impl App {
         });
         self.load_rx = Some(rx);
         self.loading_track = Some(t.clone());
-        self.status = format!("Loading: {}…", t.display());
+        self.set_info(format!("Loading: {}…", t.display()));
     }
 
     /// Returns true if the given track is an HTTP/YouTube stream — for streams we
@@ -2670,7 +2708,7 @@ impl App {
         };
         if !Self::track_is_stream(&track) {
             if let Err(e) = self.player.seek_relative(delta_secs) {
-                self.status = format!("Seek error: {e}");
+                self.set_info(format!("Seek error: {e}"));
             }
             return;
         }
@@ -2715,7 +2753,7 @@ impl App {
         self.load_rx = Some(rx);
         self.loading_track = Some(track);
         self.pending_seek_offset = Some(offset);
-        self.status = "Seeking…".into();
+        self.set_info("Seeking…");
     }
 
     fn handle_media_event(&mut self, ev: souvlaki::MediaControlEvent) {
@@ -2774,7 +2812,7 @@ impl App {
         } else {
             self.art_rx = None;
         }
-        self.status = format!("Playing: {}", t.display());
+        self.set_info(format!("Playing: {}", t.display()));
         if let Some(s) = &mut self.media_session {
             s.update_metadata(
                 &t.title,
@@ -2873,12 +2911,12 @@ impl App {
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
-                self.status = format!("Playlist dir error: {e}");
+                self.set_info(format!("Playlist dir error: {e}"));
                 return;
             }
         };
         if std::fs::create_dir_all(&dir).is_err() {
-            self.status = format!("Could not create {}", dir.display());
+            self.set_info(format!("Could not create {}", dir.display()));
             return;
         }
         let safe_name = if name.is_empty() {
@@ -2907,9 +2945,9 @@ impl App {
         match std::fs::write(&path, text) {
             Ok(_) => {
                 self.active_playlist_name = Some(safe_name.clone());
-                self.status = format!("Saved: {safe_name}.m3u");
+                self.set_info(format!("Saved: {safe_name}.m3u"));
             }
-            Err(e) => self.status = format!("Save error: {e}"),
+            Err(e) => self.set_info(format!("Save error: {e}")),
         }
     }
 
@@ -2917,7 +2955,7 @@ impl App {
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
-                self.status = format!("Playlist dir error: {e}");
+                self.set_info(format!("Playlist dir error: {e}"));
                 return;
             }
         };
@@ -2944,7 +2982,7 @@ impl App {
             .collect();
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         if entries.is_empty() {
-            self.status = "No playlists saved yet.".into();
+            self.set_info("No playlists saved yet.");
             return;
         }
         self.playlist_browser_entries = entries;
@@ -2984,7 +3022,7 @@ impl App {
                             self.playlist_browser_entries.remove(row);
                             self.playlist_browser_row =
                                 row.min(self.playlist_browser_entries.len().saturating_sub(1));
-                            self.status = format!("Deleted: {}", entry.name);
+                            self.set_info(format!("Deleted: {}", entry.name));
                             if self.active_playlist_name.as_deref() == Some(&entry.name) {
                                 self.active_playlist_name = None;
                             }
@@ -2996,7 +3034,7 @@ impl App {
                     }
                 } else {
                     self.playlist_browser_delete_confirm = Some(row);
-                    self.status = "Press Shift+D again to confirm deletion.".into();
+                    self.set_info("Press Shift+D again to confirm deletion.");
                 }
             }
             _ => {}
@@ -3012,7 +3050,7 @@ impl App {
             return;
         };
         let Ok(text) = std::fs::read_to_string(&entry.path) else {
-            self.status = format!("Could not read {}", entry.path.display());
+            self.set_info(format!("Could not read {}", entry.path.display()));
             return;
         };
         // Snapshot before any mutation so undo restores the exact pre-load state
@@ -3053,11 +3091,11 @@ impl App {
             self.active_playlist_name = Some(entry.name.clone());
         }
         self.show_playlist_browser = false;
-        self.status = if append {
+        self.set_info(if append {
             format!("Appended {} tracks from '{}'", loaded, entry.name)
         } else {
             format!("Loaded {} tracks from '{}'", loaded, entry.name)
-        };
+        });
     }
 
     fn save_eq_preset(&mut self, name: String) {
@@ -3081,8 +3119,8 @@ impl App {
             presets: self.custom_eq_presets.clone(),
         };
         match store.save() {
-            Ok(_) => self.status = format!("EQ preset '{name}' saved."),
-            Err(e) => self.status = format!("EQ preset save error: {e}"),
+            Ok(_) => self.set_info(format!("EQ preset '{name}' saved.")),
+            Err(e) => self.set_info(format!("EQ preset save error: {e}")),
         }
     }
 
@@ -3110,8 +3148,8 @@ impl App {
             profiles: self.profiles.clone(),
         };
         match store.save() {
-            Ok(_) => self.status = format!("Profile '{name}' saved."),
-            Err(e) => self.status = format!("Profile save error: {e}"),
+            Ok(_) => self.set_info(format!("Profile '{name}' saved.")),
+            Err(e) => self.set_info(format!("Profile save error: {e}")),
         }
     }
 
@@ -3123,7 +3161,7 @@ impl App {
         let Some(api) = self.spotify.clone() else {
             return;
         };
-        self.status = format!("Searching Spotify: \"{query}\"…");
+        self.set_info(format!("Searching Spotify: \"{query}\"…"));
         self.spotify_browser_results.clear();
         let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
         self.spotify_search_rx = Some(rx);
@@ -3145,7 +3183,7 @@ impl App {
                     self.spotify_playlist_row = 0;
                 }
             }
-            Err(e) => self.status = format!("Spotify playlists error: {e}"),
+            Err(e) => self.set_info(format!("Spotify playlists error: {e}")),
         }
     }
 
@@ -3153,7 +3191,7 @@ impl App {
         let Some(api) = self.spotify.clone() else {
             return;
         };
-        self.status = "Loading liked songs…".into();
+        self.set_info("Loading liked songs…");
         let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
         self.url_rx = Some(rx);
         std::thread::spawn(move || {
@@ -3167,7 +3205,7 @@ impl App {
         let Some(api) = self.spotify.clone() else {
             return;
         };
-        self.status = format!("Loading playlist \"{name}\"…");
+        self.set_info(format!("Loading playlist \"{name}\"…"));
         let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<Track>, String>>();
         self.url_rx = Some(rx);
         std::thread::spawn(move || {
@@ -3299,7 +3337,7 @@ impl App {
                         .cloned()
                     {
                         self.queue.push(t);
-                        self.status = "Added to queue.".into();
+                        self.set_info("Added to queue.");
                     }
                 }
             },
@@ -3331,7 +3369,7 @@ impl App {
             }
         }
         let _ = self.config.save();
-        self.status = format!("Profile '{}' loaded.", p.name);
+        self.set_info(format!("Profile '{}' loaded.", p.name));
     }
 
     fn handle_profile_browser_key(&mut self, key: KeyEvent) {
@@ -3356,7 +3394,7 @@ impl App {
                 self.show_profile_browser = false;
                 self.profile_name_editing = true;
                 self.profile_name_input.clear();
-                self.status = "Profile name (Enter to save, Esc to cancel):".into();
+                self.set_info("Profile name (Enter to save, Esc to cancel):");
             }
             KeyCode::Char('D') if self.profile_browser_row < self.profiles.len() => {
                 let removed = self.profiles.remove(self.profile_browser_row);
@@ -3367,7 +3405,7 @@ impl App {
                     profiles: self.profiles.clone(),
                 };
                 let _ = store.save();
-                self.status = format!("Profile '{}' deleted.", removed.name);
+                self.set_info(format!("Profile '{}' deleted.", removed.name));
             }
             _ => {}
         }
