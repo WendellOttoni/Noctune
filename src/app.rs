@@ -193,6 +193,10 @@ pub struct App {
     pub theme_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _theme_watcher: Option<notify::RecommendedWatcher>,
     pub lyrics_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<crate::lyrics::Lyrics>)>>,
+    /// #105: async receiver for remote album-art bytes (e.g. YouTube
+    /// thumbnails). Sender is spawned from `on_track_started`; result is
+    /// applied in `tick` only if the player is still on the same track.
+    pub art_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<Vec<u8>>)>>,
     pub radio_mode: crate::radio_mode::RadioMode,
     pub radio_fetch_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub radio_seed_editing: bool,
@@ -448,6 +452,7 @@ impl App {
             theme_watcher_rx: None,
             _theme_watcher: None,
             lyrics_rx: None,
+            art_rx: None,
             radio_mode: crate::radio_mode::RadioMode::default(),
             radio_fetch_rx: None,
             radio_seed_editing: false,
@@ -1037,6 +1042,25 @@ impl App {
                 Ok((_, None)) => { self.lyrics_rx = None; }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => { self.lyrics_rx = None; }
+            }
+        }
+
+        // #105: remote album-art async result.
+        if let Some(rx) = &self.art_rx {
+            match rx.try_recv() {
+                Ok((track_path, Some(bytes))) => {
+                    if self.player.current().map(|c| c.path == track_path).unwrap_or(false) {
+                        if let Some(img) = self.art_picker.load(&bytes) {
+                            self.album_art = Some(img);
+                            self.art_generation = self.art_generation.wrapping_add(1);
+                            self.art_picker.invalidate();
+                        }
+                    }
+                    self.art_rx = None;
+                }
+                Ok((_, None)) => { self.art_rx = None; }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => { self.art_rx = None; }
             }
         }
         if let Some(when) = self.sleep_until {
@@ -2500,6 +2524,24 @@ impl App {
         self.album_art = new_art;
         self.art_generation = self.art_generation.wrapping_add(1);
         self.art_picker.invalidate();
+        // #105: if no embedded art and the track carries a remote cover URL
+        // (typical for YouTube streams), fetch it off the UI thread. Result is
+        // drained in `tick` and applied only if we are still on this track.
+        if self.album_art.is_none() {
+            if let Some(url) = t.cover_url.clone() {
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.art_rx = Some(rx);
+                let path = t.path.clone();
+                std::thread::spawn(move || {
+                    let bytes = crate::metadata::fetch_remote_picture(&url);
+                    let _ = tx.send((path, bytes));
+                });
+            } else {
+                self.art_rx = None;
+            }
+        } else {
+            self.art_rx = None;
+        }
         self.status = format!("Playing: {}", t.display());
         if let Some(s) = &mut self.media_session {
             s.update_metadata(

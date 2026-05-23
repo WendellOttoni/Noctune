@@ -263,6 +263,11 @@ pub struct Track {
     pub duration: Option<Duration>,
     pub replaygain_track_db: Option<f32>,
     pub replaygain_album_db: Option<f32>,
+    /// HTTP(S) URL of an album-art thumbnail (#105). Populated for streaming
+    /// tracks (e.g. YouTube) where the audio file does not carry embedded art.
+    /// Resolved asynchronously by `App` after the track starts; `None` for
+    /// local files (cover comes from in-file tags via `metadata::probe_picture`).
+    pub cover_url: Option<String>,
 }
 
 impl Track {
@@ -282,6 +287,7 @@ impl Track {
             duration: None,
             replaygain_track_db: None,
             replaygain_album_db: None,
+            cover_url: None,
         }
     }
 
@@ -729,6 +735,7 @@ impl Track {
             duration: None,
             replaygain_track_db: None,
             replaygain_album_db: None,
+            cover_url: None,
         }
     }
 }

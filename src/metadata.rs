@@ -137,6 +137,29 @@ pub fn probe_picture(path: &Path) -> Option<Vec<u8>> {
     None
 }
 
+/// Fetch a remote image (e.g. YouTube thumbnail) over HTTP. Used by `App`
+/// when `Track::cover_url` is set and no embedded art was found. Returns the
+/// raw image bytes ready for `ArtPicker::load`. Intended to run off the UI
+/// thread — uses reqwest's blocking client with a tight timeout so a slow
+/// thumbnail server cannot wedge the spawned worker forever (#105).
+pub fn fetch_remote_picture(url: &str) -> Option<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let resp = client.get(url).send().ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    // Cap at ~5MB to defend against pathological responses.
+    const MAX: usize = 5 * 1024 * 1024;
+    let bytes = resp.bytes().ok()?;
+    if bytes.len() > MAX {
+        return None;
+    }
+    Some(bytes.to_vec())
+}
+
 pub fn probe(path: &Path) -> TrackMeta {
     let Ok(file) = File::open(path) else {
         return TrackMeta::default();

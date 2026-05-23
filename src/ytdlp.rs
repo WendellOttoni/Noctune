@@ -279,6 +279,45 @@ struct YtInfo {
     #[serde(rename = "_type")]
     #[allow(dead_code)]
     entry_type: Option<String>,
+    // #105: album-art source. `thumbnail` is the single "best" URL yt-dlp
+    // picked; `thumbnails` is the full list with dimensions. Prefer the list
+    // (lets us cap resolution), fall back to the scalar.
+    thumbnail: Option<String>,
+    thumbnails: Option<Vec<YtThumbnail>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct YtThumbnail {
+    url: String,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+/// Pick a reasonably-sized thumbnail: largest with both dimensions ≤ 640px,
+/// or the largest available if none fit the cap. Falls back to `thumbnail`.
+fn pick_thumbnail(info: &YtInfo) -> Option<String> {
+    if let Some(list) = info.thumbnails.as_ref().filter(|l| !l.is_empty()) {
+        const CAP: u32 = 640;
+        let mut under_cap: Vec<&YtThumbnail> = list
+            .iter()
+            .filter(|t| matches!((t.width, t.height), (Some(w), Some(h)) if w <= CAP && h <= CAP))
+            .collect();
+        if !under_cap.is_empty() {
+            under_cap.sort_by_key(|t| t.width.unwrap_or(0) * t.height.unwrap_or(0));
+            return under_cap.last().map(|t| t.url.clone());
+        }
+        // No sized entries fit the cap — pick the largest sized one, else first.
+        let mut sized: Vec<&YtThumbnail> = list
+            .iter()
+            .filter(|t| t.width.is_some() && t.height.is_some())
+            .collect();
+        if !sized.is_empty() {
+            sized.sort_by_key(|t| t.width.unwrap_or(0) * t.height.unwrap_or(0));
+            return sized.first().map(|t| t.url.clone());
+        }
+        return list.first().map(|t| t.url.clone());
+    }
+    info.thumbnail.clone()
 }
 
 /// Fetch track metadata for a URL (single video, playlist, or search query).
@@ -325,6 +364,13 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
         .or(info.url)
         .or_else(|| info.id.as_ref().map(|id| format!("https://www.youtube.com/watch?v={id}")))?;
 
+    // Flat-playlist entries (`--flat-playlist`) usually omit thumbnails; fall
+    // back to the canonical i.ytimg.com URL derived from the video id.
+    let cover_url = pick_thumbnail(&info).or_else(|| {
+        info.id
+            .as_ref()
+            .map(|id| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"))
+    });
     let title = info.title.unwrap_or_else(|| "Unknown".to_string());
     let artist = info.uploader.or(info.channel);
     let duration = info.duration.map(Duration::from_secs_f64);
@@ -339,5 +385,6 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
         duration,
         replaygain_track_db: None,
         replaygain_album_db: None,
+        cover_url,
     })
 }

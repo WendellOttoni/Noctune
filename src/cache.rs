@@ -145,6 +145,7 @@ fn track_from_cache(path: &Path, entry: &CacheEntry) -> Track {
         duration: entry.duration_ms.map(Duration::from_millis),
         replaygain_track_db: entry.replaygain_track_db,
         replaygain_album_db: entry.replaygain_album_db,
+        cover_url: None,
     }
 }
 

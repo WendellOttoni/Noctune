@@ -181,6 +181,7 @@ impl SpotifyApi {
             duration: Some(Duration::from_millis(t.duration_ms)),
             replaygain_track_db: None,
             replaygain_album_db: None,
+            cover_url: None,
         })
     }
 
@@ -232,6 +233,7 @@ impl SpotifyApi {
                     duration: Some(Duration::from_millis(t.duration_ms)),
                     replaygain_track_db: None,
                     replaygain_album_db: None,
+                    cover_url: None,
                 });
             }
         }
@@ -277,6 +279,7 @@ impl SpotifyApi {
                     duration: Some(Duration::from_millis(t.duration_ms)),
                     replaygain_track_db: None,
                     replaygain_album_db: None,
+                    cover_url: None,
                 });
             }
         }
@@ -341,6 +344,7 @@ impl SpotifyApi {
             duration: Some(Duration::from_millis(t.duration_ms)),
             replaygain_track_db: None,
             replaygain_album_db: None,
+            cover_url: None,
         }).collect())
     }
 
@@ -382,6 +386,7 @@ impl SpotifyApi {
                     genre: None, year: None,
                     duration: Some(Duration::from_millis(t.duration_ms)),
                     replaygain_track_db: None, replaygain_album_db: None,
+                    cover_url: None,
                 });
             }
         }
