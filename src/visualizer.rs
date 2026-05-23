@@ -237,7 +237,11 @@ impl VizTap {
         for i in 0..n {
             let a = state.wave_smooth[i].abs();
             let p = &mut state.wave_peaks[i];
-            if a > *p { *p = a; } else { *p *= PEAK_DECAY; }
+            if a > *p {
+                *p = a;
+            } else {
+                *p *= PEAK_DECAY;
+            }
         }
 
         (state.wave_smooth.clone(), state.wave_peaks.clone())

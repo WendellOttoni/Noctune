@@ -98,7 +98,8 @@ impl MetadataCache {
     pub fn prune(&mut self, expire_days: u64, max_size_mb: u64) {
         if expire_days > 0 {
             let cutoff = now_unix().saturating_sub(expire_days * 86_400);
-            self.entries.retain(|_, e| e.last_accessed == 0 || e.last_accessed >= cutoff);
+            self.entries
+                .retain(|_, e| e.last_accessed == 0 || e.last_accessed >= cutoff);
         }
         if max_size_mb > 0 {
             let budget = max_size_mb.saturating_mul(1024 * 1024) as usize;

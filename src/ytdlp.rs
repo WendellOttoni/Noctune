@@ -1,6 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::{path::PathBuf, process::{Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use crate::audio::{SymphoniaSource, Track};
 
@@ -148,7 +153,10 @@ fn ffmpeg_available() -> bool {
 /// On Unix: spawns yt-dlp with `-o -` and pipes stdout directly — no temp file.
 /// On Windows: pipes are unreliable for binary audio output (EINVAL), so yt-dlp
 /// writes to a temp file which is read and deleted immediately after.
-pub fn spawn_yt_dlp(youtube_url: &str, stream_err: Arc<Mutex<Option<String>>>) -> Result<SymphoniaSource> {
+pub fn spawn_yt_dlp(
+    youtube_url: &str,
+    stream_err: Arc<Mutex<Option<String>>>,
+) -> Result<SymphoniaSource> {
     spawn_yt_dlp_at(youtube_url, Duration::ZERO, stream_err)
 }
 
@@ -166,9 +174,17 @@ pub fn spawn_yt_dlp_at(
     // playback. Permanent errors (video removed, private) short-circuit immediately.
     with_retry(|| {
         if cfg!(target_os = "windows") {
-            download_via_tempfile(youtube_url, want_offset.then_some(offset_secs), stream_err.clone())
+            download_via_tempfile(
+                youtube_url,
+                want_offset.then_some(offset_secs),
+                stream_err.clone(),
+            )
         } else {
-            pipe_from_yt_dlp(youtube_url, want_offset.then_some(offset_secs), stream_err.clone())
+            pipe_from_yt_dlp(
+                youtube_url,
+                want_offset.then_some(offset_secs),
+                stream_err.clone(),
+            )
         }
     })
 }
@@ -185,9 +201,12 @@ fn pipe_from_yt_dlp(
     };
 
     let mut args: Vec<String> = vec![
-        "-f".into(), format_selector.into(),
-        "--no-playlist".into(), "--no-warnings".into(),
-        "-o".into(), "-".into(),
+        "-f".into(),
+        format_selector.into(),
+        "--no-playlist".into(),
+        "--no-warnings".into(),
+        "-o".into(),
+        "-".into(),
     ];
     if let Some(secs) = start_secs {
         // --download-sections asks yt-dlp to pipe via ffmpeg with `-ss`, so the stream
@@ -218,20 +237,25 @@ fn download_via_tempfile(
     // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
     // DASH WebM/Opus has higher bitrate but triggers "unsupported feature: core" in
     // symphonia's Matroska reader when YouTube serves it as fragmented DASH segments.
-    let format_selector =
-        "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/18/bestaudio";
+    let format_selector = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/18/bestaudio";
 
     let tmp_dir = std::env::temp_dir();
     let hash: u64 = youtube_url
         .bytes()
         .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    let tmp_pattern = tmp_dir.join(format!("noctune_{hash}.%(ext)s")).to_string_lossy().to_string();
+    let tmp_pattern = tmp_dir
+        .join(format!("noctune_{hash}.%(ext)s"))
+        .to_string_lossy()
+        .to_string();
     let tmp_base = tmp_dir.join(format!("noctune_{hash}"));
 
     let mut args: Vec<String> = vec![
-        "-f".into(), format_selector.into(),
-        "--no-playlist".into(), "--no-warnings".into(),
-        "-o".into(), tmp_pattern.clone(),
+        "-f".into(),
+        format_selector.into(),
+        "--no-playlist".into(),
+        "--no-warnings".into(),
+        "-o".into(),
+        tmp_pattern.clone(),
     ];
     if let Some(secs) = start_secs {
         args.push("--download-sections".into());
@@ -253,12 +277,11 @@ fn download_via_tempfile(
     for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
         let path = tmp_base.with_extension(ext);
         if path.exists() {
-            let bytes = std::fs::read(&path)
-                .with_context(|| format!("reading {}", path.display()))?;
+            let bytes =
+                std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
             let _ = std::fs::remove_file(&path);
             let hint = symphonia::core::probe::Hint::new();
-            return SymphoniaSource::from_bytes(bytes, hint)
-                .map_err(|e| anyhow!("decode: {e}"));
+            return SymphoniaSource::from_bytes(bytes, hint).map_err(|e| anyhow!("decode: {e}"));
         }
     }
 
@@ -324,11 +347,12 @@ fn pick_thumbnail(info: &YtInfo) -> Option<String> {
 /// Stores the watch-page URL in `path`; stream URL is resolved at play time.
 pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
     // Expand bare ytsearch: to top 5 results
-    let resolved = if url.starts_with("ytsearch:") && !url[9..].starts_with(|c: char| c.is_ascii_digit()) {
-        format!("ytsearch5:{}", &url[9..])
-    } else {
-        url.to_string()
-    };
+    let resolved =
+        if url.starts_with("ytsearch:") && !url[9..].starts_with(|c: char| c.is_ascii_digit()) {
+            format!("ytsearch5:{}", &url[9..])
+        } else {
+            url.to_string()
+        };
 
     // #69: retry transient failures (network blip, temporary 5xx) before giving up.
     let json_str = with_retry(|| {
@@ -344,8 +368,8 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     })?;
 
-    let info: YtInfo = serde_json::from_str(&json_str)
-        .map_err(|e| anyhow!("yt-dlp JSON parse error: {e}"))?;
+    let info: YtInfo =
+        serde_json::from_str(&json_str).map_err(|e| anyhow!("yt-dlp JSON parse error: {e}"))?;
 
     if let Some(entries) = info.entries {
         // Playlist / channel
@@ -369,10 +393,11 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
     });
 
     // webpage_url preferred; flat-playlist entries use "url"; fallback: construct from id
-    let watch_url = info
-        .webpage_url
-        .or(info.url)
-        .or_else(|| info.id.as_ref().map(|id| format!("https://www.youtube.com/watch?v={id}")))?;
+    let watch_url = info.webpage_url.or(info.url).or_else(|| {
+        info.id
+            .as_ref()
+            .map(|id| format!("https://www.youtube.com/watch?v={id}"))
+    })?;
 
     let title = info.title.unwrap_or_else(|| "Unknown".to_string());
     let artist = info.uploader.or(info.channel);

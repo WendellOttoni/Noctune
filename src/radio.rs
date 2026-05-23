@@ -44,8 +44,8 @@ fn parse_m3u(content: &str) -> Vec<(Option<String>, String)> {
         if let Some(rest) = line.strip_prefix("#EXTINF:") {
             // #EXTINF:duration,Title
             pending_title = rest
-                .splitn(2, ',')
-                .nth(1)
+                .split_once(',')
+                .map(|x| x.1)
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
         } else if line.starts_with("http://") || line.starts_with("https://") {

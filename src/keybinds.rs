@@ -220,7 +220,10 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('[')), Action::VizSensDown),
             (KeyChord::new(KeyCode::Char(']')), Action::VizSensUp),
             (KeyChord::new(KeyCode::Char('u')), Action::UndoQueue),
-            (KeyChord::with_mods(KeyCode::Char('z'), KeyModifiers::CONTROL), Action::UndoQueue),
+            (
+                KeyChord::with_mods(KeyCode::Char('z'), KeyModifiers::CONTROL),
+                Action::UndoQueue,
+            ),
             (KeyChord::new(KeyCode::Char('H')), Action::RecentlyPlayed),
             (KeyChord::new(KeyCode::Char('e')), Action::ShowAudioPanel),
             (KeyChord::new(KeyCode::Char('G')), Action::ReplayGain),
@@ -232,9 +235,18 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('E')), Action::EqTuner),
             (KeyChord::new(KeyCode::Char('O')), Action::Profiles),
             (KeyChord::new(KeyCode::Char('B')), Action::SpotifyBrowser),
-            (KeyChord::with_mods(KeyCode::Char('r'), KeyModifiers::CONTROL), Action::RadioMode),
-            (KeyChord::with_mods(KeyCode::Char('s'), KeyModifiers::CONTROL), Action::ShowStats),
-            (KeyChord::with_mods(KeyCode::Char('l'), KeyModifiers::CONTROL), Action::LastfmPanel),
+            (
+                KeyChord::with_mods(KeyCode::Char('r'), KeyModifiers::CONTROL),
+                Action::RadioMode,
+            ),
+            (
+                KeyChord::with_mods(KeyCode::Char('s'), KeyModifiers::CONTROL),
+                Action::ShowStats,
+            ),
+            (
+                KeyChord::with_mods(KeyCode::Char('l'), KeyModifiers::CONTROL),
+                Action::LastfmPanel,
+            ),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

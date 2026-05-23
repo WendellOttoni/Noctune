@@ -47,7 +47,9 @@ impl RadioMode {
     /// True if the queue has reached the refill threshold and a fetch is not already
     /// running. `upcoming_count` is the number of unplayed tracks after `queue_index`.
     pub fn should_fetch(&self, upcoming_count: usize) -> bool {
-        self.active && !self.is_fetching && upcoming_count <= self.fetch_threshold
+        self.active
+            && !self.is_fetching
+            && upcoming_count <= self.fetch_threshold
             && (!self.seed.is_empty() || self.smart_seed)
     }
 }

@@ -55,7 +55,10 @@ unsafe impl Send for SymphoniaSource {}
 
 impl SymphoniaSource {
     fn from_mss(mss: MediaSourceStream, hint: Hint, child: Option<Child>) -> Result<Self> {
-        let fmt_opts = FormatOptions { enable_gapless: true, ..Default::default() };
+        let fmt_opts = FormatOptions {
+            enable_gapless: true,
+            ..Default::default()
+        };
         let probed = symphonia::default::get_probe()
             .format(&hint, mss, &fmt_opts, &MetadataOptions::default())
             .map_err(|e| anyhow!("audio probe failed: {e}"))?;
@@ -69,7 +72,11 @@ impl SymphoniaSource {
 
         let track_id = track.id;
         let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
-        let channels = track.codec_params.channels.map(|c| c.count() as u16).unwrap_or(2);
+        let channels = track
+            .codec_params
+            .channels
+            .map(|c| c.count() as u16)
+            .unwrap_or(2);
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(|e| anyhow!("codec init: {e}"))?;
@@ -99,7 +106,10 @@ impl SymphoniaSource {
     }
 
     pub fn from_reader<R: Read + Send + 'static>(reader: R, hint: Hint) -> Result<Self> {
-        let mss = MediaSourceStream::new(Box::new(ReadOnlySource::new(SyncWrap(reader))), Default::default());
+        let mss = MediaSourceStream::new(
+            Box::new(ReadOnlySource::new(SyncWrap(reader))),
+            Default::default(),
+        );
         Self::from_mss(mss, hint, None)
     }
 
@@ -108,7 +118,10 @@ impl SymphoniaSource {
         hint: Hint,
         stream_err: Arc<Mutex<Option<String>>>,
     ) -> Result<Self> {
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("yt-dlp stdout not piped"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("yt-dlp stdout not piped"))?;
         // Drain stderr in a background thread; write the last non-empty line to the error slot
         // so the app can surface it in the status bar.
         if let Some(stderr) = child.stderr.take() {
@@ -143,10 +156,16 @@ impl SymphoniaSource {
         self.format
             .seek(
                 SeekMode::Coarse,
-                SeekTo::Time { time: Time { seconds: secs, frac }, track_id: Some(self.track_id) },
+                SeekTo::Time {
+                    time: Time {
+                        seconds: secs,
+                        frac,
+                    },
+                    track_id: Some(self.track_id),
+                },
             )
             .map_err(|e| anyhow!("seek: {e}"))?;
-        let _ = self.decoder.reset();
+        self.decoder.reset();
         self.buf.clear();
         self.buf_pos = 0;
         Ok(())
@@ -162,7 +181,7 @@ impl SymphoniaSource {
                     return false;
                 }
                 Err(SymphoniaError::ResetRequired) => {
-                    let _ = self.decoder.reset();
+                    self.decoder.reset();
                     continue;
                 }
                 Err(_) => return false,
@@ -189,10 +208,8 @@ impl SymphoniaSource {
 impl Iterator for SymphoniaSource {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
-        if self.buf_pos >= self.buf.len() {
-            if !self.fill_buf() {
-                return None;
-            }
+        if self.buf_pos >= self.buf.len() && !self.fill_buf() {
+            return None;
         }
         let s = self.buf[self.buf_pos];
         self.buf_pos += 1;
@@ -203,11 +220,21 @@ impl Iterator for SymphoniaSource {
 impl Source for SymphoniaSource {
     fn current_frame_len(&self) -> Option<usize> {
         let rem = self.buf.len().saturating_sub(self.buf_pos);
-        if rem > 0 { Some(rem) } else { None }
+        if rem > 0 {
+            Some(rem)
+        } else {
+            None
+        }
     }
-    fn channels(&self) -> u16 { self.channels }
-    fn sample_rate(&self) -> u32 { self.sample_rate }
-    fn total_duration(&self) -> Option<Duration> { None }
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
 }
 
 fn hint_from_path(path: &Path) -> Hint {
@@ -323,8 +350,8 @@ impl Track {
 
 impl Player {
     pub fn new(volume: f32, viz_sensitivity: f32) -> Result<Self> {
-        let (stream, handle) = OutputStream::try_default()
-            .context("could not open default audio output")?;
+        let (stream, handle) =
+            OutputStream::try_default().context("could not open default audio output")?;
         let sink = Sink::try_new(&handle)?;
         sink.set_volume(volume);
         Ok(Self {
@@ -392,8 +419,8 @@ impl Player {
         if path_str.starts_with("http://") || path_str.starts_with("https://") {
             return Ok(());
         }
-        let file = File::open(&track.path)
-            .with_context(|| format!("opening {}", track.path.display()))?;
+        let file =
+            File::open(&track.path).with_context(|| format!("opening {}", track.path.display()))?;
         let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
         let viz = VizSource::new(source, self.tap.clone());
@@ -422,7 +449,12 @@ impl Player {
     /// All blocking work (file open, symphonia probe, yt-dlp spawn) must have already
     /// happened in `build_source` — this method only does the cheap sink swap, so it is
     /// safe to call from the UI thread when a background loader finishes (issue #58).
-    pub fn play_prepared(&mut self, source: SymphoniaSource, track: &Track, offset: Duration) -> Result<()> {
+    pub fn play_prepared(
+        &mut self,
+        source: SymphoniaSource,
+        track: &Track,
+        offset: Duration,
+    ) -> Result<()> {
         self.cancel_crossfade();
         self.gapless_queued = None;
         let viz = VizSource::new(source, self.tap.clone());
@@ -439,11 +471,10 @@ impl Player {
     }
 
     pub fn seek_absolute_fraction(&mut self, fraction: f32) -> Result<()> {
-        let Some(track) = self.current.clone() else { return Ok(()); };
-        let total = track
-            .duration
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        let Some(track) = self.current.clone() else {
+            return Ok(());
+        };
+        let total = track.duration.map(|d| d.as_millis() as i64).unwrap_or(0);
         if total <= 0 {
             return Ok(());
         }
@@ -452,7 +483,9 @@ impl Player {
     }
 
     pub fn seek_relative(&mut self, delta: i64) -> Result<()> {
-        let Some(track) = self.current.clone() else { return Ok(()); };
+        let Some(track) = self.current.clone() else {
+            return Ok(());
+        };
         let cur_ms = self.elapsed().as_millis() as i64;
         let mut new_ms = cur_ms + delta * 1000;
         if new_ms < 0 {
@@ -517,8 +550,8 @@ impl Player {
             return Ok(());
         }
 
-        let file = File::open(&track.path)
-            .with_context(|| format!("opening {}", track.path.display()))?;
+        let file =
+            File::open(&track.path).with_context(|| format!("opening {}", track.path.display()))?;
         let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
         self.attach_fade_source(source, track.clone())
@@ -571,7 +604,8 @@ impl Player {
         };
         let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs).clamp(0.0, 1.0);
 
-        self.sink.set_volume(self.volume * self.rg_scale * (1.0 - progress));
+        self.sink
+            .set_volume(self.volume * self.rg_scale * (1.0 - progress));
         if let Some(sink) = &self.fade_sink {
             sink.set_volume(self.volume * self.rg_scale * progress);
         }
@@ -581,7 +615,10 @@ impl Player {
                 (self.fade_sink.take(), self.fade_current.take())
             {
                 new_sink.set_volume(self.volume * self.rg_scale);
-                let played = self.fade_started_at.map(|t| t.elapsed()).unwrap_or_default();
+                let played = self
+                    .fade_started_at
+                    .map(|t| t.elapsed())
+                    .unwrap_or_default();
                 self.sink = new_sink;
                 self.current = Some(new_track);
                 self.paused_offset = played;
@@ -686,8 +723,8 @@ pub fn build_source(
             SymphoniaSource::from_reader(reader, Hint::new())?
         }
     } else {
-        let file = File::open(&track.path)
-            .with_context(|| format!("opening {}", track.path.display()))?;
+        let file =
+            File::open(&track.path).with_context(|| format!("opening {}", track.path.display()))?;
         SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?
     };

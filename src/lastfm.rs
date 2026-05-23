@@ -41,7 +41,12 @@ impl LastfmClient {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
-        Ok(Self { api_key, api_secret, session, client })
+        Ok(Self {
+            api_key,
+            api_secret,
+            session,
+            client,
+        })
     }
 
     fn sign(&self, params: &BTreeMap<&str, String>) -> String {
@@ -68,7 +73,11 @@ impl LastfmClient {
             .context("Last.fm POST")?;
         let v: serde_json::Value = resp.json().context("Last.fm JSON")?;
         if let Some(e) = v.get("error") {
-            return Err(anyhow!("Last.fm error {}: {}", e, v.get("message").unwrap_or(&serde_json::Value::Null)));
+            return Err(anyhow!(
+                "Last.fm error {}: {}",
+                e,
+                v.get("message").unwrap_or(&serde_json::Value::Null)
+            ));
         }
         Ok(v)
     }
@@ -104,14 +113,22 @@ impl LastfmClient {
                 .and_then(|s| s.as_str())
                 .unwrap_or("")
                 .to_string();
-            let name = e.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let name = e
+                .get("name")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
             let ts = e
                 .get("date")
                 .and_then(|d| d.get("uts"))
                 .and_then(|u| u.as_str())
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(0);
-            out.push(RecentTrack { artist, title: name, timestamp: ts });
+            out.push(RecentTrack {
+                artist,
+                title: name,
+                timestamp: ts,
+            });
         }
         Ok(out)
     }
@@ -138,7 +155,10 @@ impl LastfmClient {
                     .and_then(|s| s.as_str())
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(0);
-                Some(TopArtist { name, playcount: plays })
+                Some(TopArtist {
+                    name,
+                    playcount: plays,
+                })
             })
             .collect())
     }
@@ -166,7 +186,10 @@ pub fn get_token(api_key: &str, api_secret: &str) -> Result<String> {
     params.insert("api_key", api_key.to_string());
     let sig = {
         let mut s = String::new();
-        for (k, v) in &params { s.push_str(k); s.push_str(v); }
+        for (k, v) in &params {
+            s.push_str(k);
+            s.push_str(v);
+        }
         s.push_str(api_secret);
         md5_hex(s.as_bytes())
     };
@@ -191,7 +214,10 @@ pub fn get_session(api_key: &str, api_secret: &str, token: &str) -> Result<Lastf
     params.insert("token", token.to_string());
     let sig = {
         let mut s = String::new();
-        for (k, v) in &params { s.push_str(k); s.push_str(v); }
+        for (k, v) in &params {
+            s.push_str(k);
+            s.push_str(v);
+        }
         s.push_str(api_secret);
         md5_hex(s.as_bytes())
     };
@@ -201,12 +227,29 @@ pub fn get_session(api_key: &str, api_secret: &str, token: &str) -> Result<Lastf
     let resp = client.post(API_BASE).form(&form).send()?;
     let v: serde_json::Value = resp.json()?;
     if let Some(e) = v.get("error") {
-        return Err(anyhow!("Last.fm auth error {}: {}", e, v.get("message").unwrap_or(&serde_json::Value::Null)));
+        return Err(anyhow!(
+            "Last.fm auth error {}: {}",
+            e,
+            v.get("message").unwrap_or(&serde_json::Value::Null)
+        ));
     }
-    let sess = v.get("session").ok_or_else(|| anyhow!("no session field"))?;
-    let key = sess.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();
-    let name = sess.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-    Ok(LastfmSession { session_key: key, username: name })
+    let sess = v
+        .get("session")
+        .ok_or_else(|| anyhow!("no session field"))?;
+    let key = sess
+        .get("key")
+        .and_then(|k| k.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name = sess
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(LastfmSession {
+        session_key: key,
+        username: name,
+    })
 }
 
 pub fn session_path() -> Option<PathBuf> {
@@ -257,20 +300,21 @@ fn md5_hex(data: &[u8]) -> String {
 fn md5_compute(data: &[u8]) -> [u8; 16] {
     // Standard MD5 constants
     const S: [u32; 64] = [
-        7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
-        5, 9,14,20,5, 9,14,20,5, 9,14,20,5, 9,14,20,
-        4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
-        6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21,
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
+        9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
+        15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
     ];
     const K: [u32; 64] = [
-        0xd76aa478,0xe8c7b756,0x242070db,0xc1bdceee,0xf57c0faf,0x4787c62a,0xa8304613,0xfd469501,
-        0x698098d8,0x8b44f7af,0xffff5bb1,0x895cd7be,0x6b901122,0xfd987193,0xa679438e,0x49b40821,
-        0xf61e2562,0xc040b340,0x265e5a51,0xe9b6c7aa,0xd62f105d,0x02441453,0xd8a1e681,0xe7d3fbc8,
-        0x21e1cde6,0xc33707d6,0xf4d50d87,0x455a14ed,0xa9e3e905,0xfcefa3f8,0x676f02d9,0x8d2a4c8a,
-        0xfffa3942,0x8771f681,0x6d9d6122,0xfde5380c,0xa4beea44,0x4bdecfa9,0xf6bb4b60,0xbebfbc70,
-        0x289b7ec6,0xeaa127fa,0xd4ef3085,0x04881d05,0xd9d4d039,0xe6db99e5,0x1fa27cf8,0xc4ac5665,
-        0xf4292244,0x432aff97,0xab9423a7,0xfc93a039,0x655b59c3,0x8f0ccc92,0xffeff47d,0x85845dd1,
-        0x6fa87e4f,0xfe2ce6e0,0xa3014314,0x4e0811a1,0xf7537e82,0xbd3af235,0x2ad7d2bb,0xeb86d391,
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613,
+        0xfd469501, 0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193,
+        0xa679438e, 0x49b40821, 0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d,
+        0x02441453, 0xd8a1e681, 0xe7d3fbc8, 0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+        0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a, 0xfffa3942, 0x8771f681, 0x6d9d6122,
+        0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70, 0x289b7ec6, 0xeaa127fa,
+        0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665, 0xf4292244,
+        0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb,
+        0xeb86d391,
     ];
 
     let msg_len = data.len();
@@ -297,17 +341,19 @@ fn md5_compute(data: &[u8]) -> [u8; 16] {
         let (mut a, mut b, mut c, mut d) = (a0, b0, c0, d0);
         for i in 0u32..64 {
             let (f, g) = match i {
-                0..=15  => ((b & c) | (!b & d), i),
+                0..=15 => ((b & c) | (!b & d), i),
                 16..=31 => ((d & b) | (!d & c), (5 * i + 1) % 16),
-                32..=47 => (b ^ c ^ d,           (3 * i + 5) % 16),
-                _       => (c ^ (b | !d),         (7 * i) % 16),
+                32..=47 => (b ^ c ^ d, (3 * i + 5) % 16),
+                _ => (c ^ (b | !d), (7 * i) % 16),
             };
             let temp = d;
             d = c;
             c = b;
             b = b.wrapping_add(
-                (a.wrapping_add(f).wrapping_add(K[i as usize]).wrapping_add(m[g as usize]))
-                    .rotate_left(S[i as usize]),
+                (a.wrapping_add(f)
+                    .wrapping_add(K[i as usize])
+                    .wrapping_add(m[g as usize]))
+                .rotate_left(S[i as usize]),
             );
             a = temp;
         }

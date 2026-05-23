@@ -1,4 +1,8 @@
-use std::{fs, path::{Path, PathBuf}, time::Duration};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use serde::Deserialize;
 
@@ -22,7 +26,12 @@ impl Lyrics {
 
     /// Asynchronous fetch from LRCLIB (#62). Returns None if nothing matches; caller
     /// should treat the result as the final answer (no further retries).
-    pub fn fetch_lrclib(artist: &str, title: &str, album: Option<&str>, duration: Option<Duration>) -> Option<Self> {
+    pub fn fetch_lrclib(
+        artist: &str,
+        title: &str,
+        album: Option<&str>,
+        duration: Option<Duration>,
+    ) -> Option<Self> {
         if artist.is_empty() || title.is_empty() {
             return None;
         }
@@ -38,7 +47,8 @@ impl Lyrics {
 
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(8))
-            .build().ok()?;
+            .build()
+            .ok()?;
         let mut req = client
             .get("https://lrclib.net/api/get")
             .query(&[("artist_name", artist), ("track_name", title)]);
@@ -130,7 +140,12 @@ struct LrclibResponse {
     plain_lyrics: Option<String>,
 }
 
-fn lrclib_cache_key(artist: &str, title: &str, album: Option<&str>, duration: Option<Duration>) -> String {
+fn lrclib_cache_key(
+    artist: &str,
+    title: &str,
+    album: Option<&str>,
+    duration: Option<Duration>,
+) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     artist.to_lowercase().hash(&mut h);

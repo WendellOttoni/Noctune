@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// 0 = unrated, 1-5 = stars, 6 = favorite
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -39,7 +43,10 @@ impl Ratings {
     }
 
     pub fn get(&self, path: &Path) -> u8 {
-        self.entries.get(&path.display().to_string()).copied().unwrap_or(0)
+        self.entries
+            .get(&path.display().to_string())
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn set(&mut self, path: &Path, rating: u8) {

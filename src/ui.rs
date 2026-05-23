@@ -86,44 +86,54 @@ fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
                 format!("  {:<14}", label),
                 Style::default().fg(parse_color(&app.theme.colors.muted)),
             ),
-            Span::styled(value, Style::default().fg(parse_color(&app.theme.colors.foreground))),
+            Span::styled(
+                value,
+                Style::default().fg(parse_color(&app.theme.colors.foreground)),
+            ),
         ])
     };
     let dash = "—".to_string();
 
-    let dur_str = meta.duration
+    let dur_str = meta
+        .duration
         .map(|d| {
             let s = d.as_secs();
             format!("{:02}:{:02}", s / 60, s % 60)
         })
         .unwrap_or_else(|| dash.clone());
 
-    let rate_str = meta.sample_rate
+    let rate_str = meta
+        .sample_rate
         .map(|r| format!("{} Hz", r))
         .unwrap_or_else(|| dash.clone());
-    let chans_str = meta.channels
+    let chans_str = meta
+        .channels
         .map(|c| format!("{}", c))
         .unwrap_or_else(|| dash.clone());
-    let bits_str = meta.bits_per_sample
+    let bits_str = meta
+        .bits_per_sample
         .map(|b| format!("{} bit", b))
         .unwrap_or_else(|| dash.clone());
 
     let lines: Vec<Line> = vec![
-        row("Title",        meta.title.unwrap_or_else(|| track.title.clone())),
-        row("Artist",       meta.artist.unwrap_or_else(|| dash.clone())),
-        row("Album Artist", meta.album_artist.unwrap_or_else(|| dash.clone())),
-        row("Album",        meta.album.unwrap_or_else(|| dash.clone())),
-        row("Year",         meta.year.unwrap_or_else(|| dash.clone())),
-        row("Genre",        meta.genre.unwrap_or_else(|| dash.clone())),
-        row("Track #",      meta.track_number.unwrap_or_else(|| dash.clone())),
+        row("Title", meta.title.unwrap_or_else(|| track.title.clone())),
+        row("Artist", meta.artist.unwrap_or_else(|| dash.clone())),
+        row(
+            "Album Artist",
+            meta.album_artist.unwrap_or_else(|| dash.clone()),
+        ),
+        row("Album", meta.album.unwrap_or_else(|| dash.clone())),
+        row("Year", meta.year.unwrap_or_else(|| dash.clone())),
+        row("Genre", meta.genre.unwrap_or_else(|| dash.clone())),
+        row("Track #", meta.track_number.unwrap_or_else(|| dash.clone())),
         Line::from(""),
-        row("Duration",     dur_str),
-        row("Codec",        meta.codec.unwrap_or_else(|| dash.clone())),
-        row("Sample rate",  rate_str),
-        row("Channels",     chans_str),
-        row("Bit depth",    bits_str),
+        row("Duration", dur_str),
+        row("Codec", meta.codec.unwrap_or_else(|| dash.clone())),
+        row("Sample rate", rate_str),
+        row("Channels", chans_str),
+        row("Bit depth", bits_str),
         Line::from(""),
-        row("Path",         track.path.display().to_string()),
+        row("Path", track.path.display().to_string()),
     ];
 
     let w = 72.min(area.width.saturating_sub(4));
@@ -139,7 +149,10 @@ fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(app.theme.border(true))
-            .title(Span::styled(" Track info — press any key ", app.theme.accent())),
+            .title(Span::styled(
+                " Track info — press any key ",
+                app.theme.accent(),
+            )),
     );
     f.render_widget(p, popup);
 }
@@ -169,24 +182,34 @@ fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         theme.symbols.play.clone()
     };
-    let title = app.player.current()
+    let title = app
+        .player
+        .current()
         .map(|t| t.display())
         .unwrap_or_else(|| "— nothing playing —".into());
     let queue_pos = match app.queue_index {
         Some(i) if !app.queue.is_empty() => format!(" [{}/{}]", i + 1, app.queue.len()),
         _ => String::new(),
     };
-    f.render_widget(Paragraph::new(Line::from(vec![
-        Span::styled(format!("{state_sym}  "), Style::default().fg(accent)),
-        Span::styled(title, Style::default().fg(fg).add_modifier(Modifier::BOLD)),
-        Span::styled(queue_pos, Style::default().fg(muted)),
-        Span::styled("  [m] full", Style::default().fg(muted)),
-    ])), rows[0]);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!("{state_sym}  "), Style::default().fg(accent)),
+            Span::styled(title, Style::default().fg(fg).add_modifier(Modifier::BOLD)),
+            Span::styled(queue_pos, Style::default().fg(muted)),
+            Span::styled("  [m] full", Style::default().fg(muted)),
+        ])),
+        rows[0],
+    );
 
     // Row 1: progress bar
     let elapsed = app.player.elapsed();
     let total = app.player.current().and_then(|t| t.duration);
-    let progress_line = build_progress(elapsed, total, rows[1].width.saturating_sub(2) as usize, theme);
+    let progress_line = build_progress(
+        elapsed,
+        total,
+        rows[1].width.saturating_sub(2) as usize,
+        theme,
+    );
     f.render_widget(Paragraph::new(progress_line), rows[1]);
     app.layout.progress = rows[1];
     app.layout.progress_total_ms = total.map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -205,12 +228,18 @@ fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
         crate::app::ReplayGainMode::Track => " rg:trk",
         crate::app::ReplayGainMode::Album => " rg:alb",
     };
-    f.render_widget(Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!(" {} / {}  vol:{}%{shuf}{rep}{rg}", format_duration(elapsed), total_str, vol_pct),
+    f.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            format!(
+                " {} / {}  vol:{}%{shuf}{rep}{rg}",
+                format_duration(elapsed),
+                total_str,
+                vol_pct
+            ),
             Style::default().fg(muted),
-        ),
-    ])), rows[2]);
+        )])),
+        rows[2],
+    );
 
     // Row 3: EQ
     let eq = app.player.eq().snapshot();
@@ -225,7 +254,13 @@ fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         format!(" {}", app.status)
     };
-    f.render_widget(Paragraph::new(Span::styled(status_text, Style::default().fg(parse_color(&theme.colors.secondary)))), rows[4]);
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            status_text,
+            Style::default().fg(parse_color(&theme.colors.secondary)),
+        )),
+        rows[4],
+    );
 }
 
 fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
@@ -249,9 +284,13 @@ fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
             let selected = i == app.playlist_browser_row;
             let deleting = app.playlist_browser_delete_confirm == Some(i);
             let style = if deleting {
-                Style::default().fg(parse_color(&theme.colors.accent)).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(parse_color(&theme.colors.accent))
+                    .add_modifier(Modifier::BOLD)
             } else if selected {
-                Style::default().fg(parse_color(&theme.colors.foreground)).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(parse_color(&theme.colors.foreground))
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(parse_color(&theme.colors.muted))
             };
@@ -260,21 +299,46 @@ fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
                 if selected { "▶ " } else { "  " },
                 e.name,
                 e.track_count,
-                if deleting { "  ← confirm Shift+D" } else { "" },
+                if deleting {
+                    "  ← confirm Shift+D"
+                } else {
+                    ""
+                },
             );
             ListItem::new(Line::from(Span::styled(label, style)))
         })
         .collect();
 
     let hint = Line::from(vec![
-        Span::styled("  Enter", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" load  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled(
+            "  Enter",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " load  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
         Span::styled("a", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" append  ", Style::default().fg(parse_color(&theme.colors.muted))),
-        Span::styled("Shift+D", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" delete  ", Style::default().fg(parse_color(&theme.colors.muted))),
-        Span::styled("Esc", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" close", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled(
+            " append  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+        Span::styled(
+            "Shift+D",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " delete  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+        Span::styled(
+            "Esc",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " close",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
     ]);
 
     let list = List::new(items)
@@ -286,7 +350,9 @@ fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
                 .title_bottom(hint),
         )
         .highlight_style(
-            Style::default().bg(parse_color(&theme.colors.secondary)).fg(parse_color(&theme.colors.background)),
+            Style::default()
+                .bg(parse_color(&theme.colors.secondary))
+                .fg(parse_color(&theme.colors.background)),
         );
 
     let mut state = ratatui::widgets::ListState::default();
@@ -314,34 +380,63 @@ fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.muted)),
         )))]
     } else {
-        profiles.iter().enumerate().map(|(i, p)| {
-            let selected = i == app.profile_browser_row;
-            let style = if selected {
-                Style::default().fg(parse_color(&theme.colors.foreground)).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(parse_color(&theme.colors.muted))
-            };
-            let label = format!(
-                " {}{}  vol:{:.0}%  EQ:{:+.0}/{:+.0}/{:+.0}  theme:{}",
-                if selected { "▶ " } else { "  " },
-                p.name,
-                p.volume * 100.0,
-                p.eq_low_db, p.eq_mid_db, p.eq_high_db,
-                p.theme,
-            );
-            ListItem::new(Line::from(Span::styled(label, style)))
-        }).collect()
+        profiles
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let selected = i == app.profile_browser_row;
+                let style = if selected {
+                    Style::default()
+                        .fg(parse_color(&theme.colors.foreground))
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(parse_color(&theme.colors.muted))
+                };
+                let label = format!(
+                    " {}{}  vol:{:.0}%  EQ:{:+.0}/{:+.0}/{:+.0}  theme:{}",
+                    if selected { "▶ " } else { "  " },
+                    p.name,
+                    p.volume * 100.0,
+                    p.eq_low_db,
+                    p.eq_mid_db,
+                    p.eq_high_db,
+                    p.theme,
+                );
+                ListItem::new(Line::from(Span::styled(label, style)))
+            })
+            .collect()
     };
 
     let hint = Line::from(vec![
-        Span::styled("  Enter", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" load  ", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled(
+            "  Enter",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " load  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
         Span::styled("n", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" save current  ", Style::default().fg(parse_color(&theme.colors.muted))),
-        Span::styled("Shift+D", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" delete  ", Style::default().fg(parse_color(&theme.colors.muted))),
-        Span::styled("Esc", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" close", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled(
+            " save current  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+        Span::styled(
+            "Shift+D",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " delete  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+        Span::styled(
+            "Esc",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " close",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
     ]);
 
     let list = List::new(items)
@@ -353,11 +448,17 @@ fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
                 .title_bottom(hint),
         )
         .highlight_style(
-            Style::default().bg(parse_color(&theme.colors.secondary)).fg(parse_color(&theme.colors.background)),
+            Style::default()
+                .bg(parse_color(&theme.colors.secondary))
+                .fg(parse_color(&theme.colors.background)),
         );
 
     let mut state = ratatui::widgets::ListState::default();
-    state.select(if profiles.is_empty() { None } else { Some(app.profile_browser_row) });
+    state.select(if profiles.is_empty() {
+        None
+    } else {
+        Some(app.profile_browser_row)
+    });
     f.render_stateful_widget(list, popup, &mut state);
 }
 
@@ -383,22 +484,40 @@ fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
     // Tab labels
     let tab_line = Line::from(vec![
         Span::styled(
-            if app.spotify_browser_tab == SpotifyTab::Search { " [Search] " } else { "  Search  " },
+            if app.spotify_browser_tab == SpotifyTab::Search {
+                " [Search] "
+            } else {
+                "  Search  "
+            },
             if app.spotify_browser_tab == SpotifyTab::Search {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
-            } else { Style::default().fg(muted) },
+            } else {
+                Style::default().fg(muted)
+            },
         ),
         Span::styled(
-            if app.spotify_browser_tab == SpotifyTab::MyPlaylists { " [My Playlists] " } else { "  My Playlists  " },
+            if app.spotify_browser_tab == SpotifyTab::MyPlaylists {
+                " [My Playlists] "
+            } else {
+                "  My Playlists  "
+            },
             if app.spotify_browser_tab == SpotifyTab::MyPlaylists {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
-            } else { Style::default().fg(muted) },
+            } else {
+                Style::default().fg(muted)
+            },
         ),
         Span::styled(
-            if app.spotify_browser_tab == SpotifyTab::LikedSongs { " [Liked Songs] " } else { "  Liked Songs  " },
+            if app.spotify_browser_tab == SpotifyTab::LikedSongs {
+                " [Liked Songs] "
+            } else {
+                "  Liked Songs  "
+            },
             if app.spotify_browser_tab == SpotifyTab::LikedSongs {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
-            } else { Style::default().fg(muted) },
+            } else {
+                Style::default().fg(muted)
+            },
         ),
     ]);
 
@@ -418,7 +537,10 @@ fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
-        .title(Span::styled(" Spotify ", Style::default().fg(accent).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " Spotify ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
         .title_bottom(hint);
     let inner = block.inner(popup);
     f.render_widget(block, popup);
@@ -426,7 +548,11 @@ fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
     // Layout: search bar (2 rows) + tab line (1) + results list (rest)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     // Search bar
@@ -438,7 +564,14 @@ fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
         format!(" Search: {}", app.spotify_browser_query)
     };
     f.render_widget(
-        Paragraph::new(Span::styled(query_display, Style::default().fg(if app.spotify_browser_query_editing { fg } else { muted }))),
+        Paragraph::new(Span::styled(
+            query_display,
+            Style::default().fg(if app.spotify_browser_query_editing {
+                fg
+            } else {
+                muted
+            }),
+        )),
         chunks[0],
     );
 
@@ -461,26 +594,38 @@ fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
                     list_area,
                 );
             } else {
-                let items: Vec<ListItem> = results.iter().enumerate().map(|(i, t)| {
-                    let selected = i == app.spotify_browser_row;
-                    let dur = t.duration.map(|d| {
-                        let s = d.as_secs();
-                        format!("{:02}:{:02}", s / 60, s % 60)
-                    }).unwrap_or_default();
-                    let label = format!(
-                        " {} {:<40} {:<24} {}",
-                        if selected { "▶" } else { " " },
-                        t.title.chars().take(38).collect::<String>(),
-                        t.artist.as_deref().unwrap_or("").chars().take(22).collect::<String>(),
-                        dur,
-                    );
-                    let style = if selected {
-                        Style::default().fg(fg).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(muted)
-                    };
-                    ListItem::new(Line::from(Span::styled(label, style)))
-                }).collect();
+                let items: Vec<ListItem> = results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let selected = i == app.spotify_browser_row;
+                        let dur = t
+                            .duration
+                            .map(|d| {
+                                let s = d.as_secs();
+                                format!("{:02}:{:02}", s / 60, s % 60)
+                            })
+                            .unwrap_or_default();
+                        let label = format!(
+                            " {} {:<40} {:<24} {}",
+                            if selected { "▶" } else { " " },
+                            t.title.chars().take(38).collect::<String>(),
+                            t.artist
+                                .as_deref()
+                                .unwrap_or("")
+                                .chars()
+                                .take(22)
+                                .collect::<String>(),
+                            dur,
+                        );
+                        let style = if selected {
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(muted)
+                        };
+                        ListItem::new(Line::from(Span::styled(label, style)))
+                    })
+                    .collect();
                 let mut state = ratatui::widgets::ListState::default();
                 state.select(Some(app.spotify_browser_row));
                 f.render_stateful_widget(
@@ -493,25 +638,33 @@ fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
         SpotifyTab::MyPlaylists => {
             if app.spotify_my_playlists.is_empty() {
                 f.render_widget(
-                    Paragraph::new(Span::styled("  Loading playlists…", Style::default().fg(muted))),
+                    Paragraph::new(Span::styled(
+                        "  Loading playlists…",
+                        Style::default().fg(muted),
+                    )),
                     list_area,
                 );
             } else {
-                let items: Vec<ListItem> = app.spotify_my_playlists.iter().enumerate().map(|(i, (_, name, count))| {
-                    let selected = i == app.spotify_playlist_row;
-                    let label = format!(
-                        " {} {:<50} {} tracks",
-                        if selected { "▶" } else { " " },
-                        name.chars().take(48).collect::<String>(),
-                        count,
-                    );
-                    let style = if selected {
-                        Style::default().fg(fg).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(muted)
-                    };
-                    ListItem::new(Line::from(Span::styled(label, style)))
-                }).collect();
+                let items: Vec<ListItem> = app
+                    .spotify_my_playlists
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, name, count))| {
+                        let selected = i == app.spotify_playlist_row;
+                        let label = format!(
+                            " {} {:<50} {} tracks",
+                            if selected { "▶" } else { " " },
+                            name.chars().take(48).collect::<String>(),
+                            count,
+                        );
+                        let style = if selected {
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(muted)
+                        };
+                        ListItem::new(Line::from(Span::styled(label, style)))
+                    })
+                    .collect();
                 let mut state = ratatui::widgets::ListState::default();
                 state.select(Some(app.spotify_playlist_row));
                 f.render_stateful_widget(
@@ -539,17 +692,31 @@ fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = app
         .device_list
         .iter()
-        .map(|name| ListItem::new(Span::styled(
-            format!("  {name}"),
-            Style::default().fg(parse_color(&theme.colors.foreground)),
-        )))
+        .map(|name| {
+            ListItem::new(Span::styled(
+                format!("  {name}"),
+                Style::default().fg(parse_color(&theme.colors.foreground)),
+            ))
+        })
         .collect();
 
     let hint = Line::from(vec![
-        Span::styled("  Enter", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" select  ", Style::default().fg(parse_color(&theme.colors.muted))),
-        Span::styled("Esc", Style::default().fg(parse_color(&theme.colors.accent))),
-        Span::styled(" close", Style::default().fg(parse_color(&theme.colors.muted))),
+        Span::styled(
+            "  Enter",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " select  ",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
+        Span::styled(
+            "Esc",
+            Style::default().fg(parse_color(&theme.colors.accent)),
+        ),
+        Span::styled(
+            " close",
+            Style::default().fg(parse_color(&theme.colors.muted)),
+        ),
     ]);
 
     let list = List::new(items)
@@ -603,28 +770,30 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         ((t * (curve_w - 1) as f32).round() as usize).min(curve_w - 1)
     };
 
-    let low_col  = freq_to_col(200.0);
-    let mid_col  = freq_to_col(1000.0);
+    let low_col = freq_to_col(200.0);
+    let mid_col = freq_to_col(1000.0);
     let high_col = freq_to_col(5000.0);
 
     // Subtle vertical grid lines at non-band key frequencies
     let grid_cols: HashSet<usize> = [50.0f32, 100.0, 500.0, 2000.0, 10000.0]
-        .iter().map(|&freq| freq_to_col(freq)).collect();
+        .iter()
+        .map(|&freq| freq_to_col(freq))
+        .collect();
 
     // Frequency response curve (approximated transfer functions for display)
     let curve_rows: Vec<usize> = (0..curve_w)
         .map(|col| {
             let t = col as f32 / (curve_w - 1).max(1) as f32;
             let freq = 20.0f32 * (1000.0f32).powf(t);
-            let fc_low  = 200.0f32;
-            let fc_mid  = 1000.0f32;
+            let fc_low = 200.0f32;
+            let fc_mid = 1000.0f32;
             let fc_high = 5000.0f32;
-            let g_low  = eq.low_db  * fc_low  * fc_low  / (freq * freq + fc_low  * fc_low);
-            let bw     = freq / fc_mid - fc_mid / freq;
-            let g_mid  = eq.mid_db  / (1.0 + (bw * 0.9).powi(2));
+            let g_low = eq.low_db * fc_low * fc_low / (freq * freq + fc_low * fc_low);
+            let bw = freq / fc_mid - fc_mid / freq;
+            let g_mid = eq.mid_db / (1.0 + (bw * 0.9).powi(2));
             let g_high = eq.high_db * freq * freq / (freq * freq + fc_high * fc_high);
-            let total  = (g_low + g_mid + g_high).clamp(-12.0, 12.0);
-            let row    = ((12.0 - total) / 24.0 * (CURVE_H - 1) as f32).round() as usize;
+            let total = (g_low + g_mid + g_high).clamp(-12.0, 12.0);
+            let row = ((12.0 - total) / 24.0 * (CURVE_H - 1) as f32).round() as usize;
             row.min(CURVE_H - 1)
         })
         .collect();
@@ -636,8 +805,8 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     // Band selector header: numbered nodes show which band is active
     {
         let nodes = [
-            (low_col,  "1", app.eq_tuner_band == 0),
-            (mid_col,  "2", app.eq_tuner_band == 1),
+            (low_col, "1", app.eq_tuner_band == 0),
+            (mid_col, "2", app.eq_tuner_band == 1),
             (high_col, "3", app.eq_tuner_band == 2),
         ];
         let mut spans = vec![Span::styled("      │", Style::default().fg(muted))];
@@ -648,7 +817,10 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
                 cursor = col;
             }
             let style = if selected {
-                Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(bg)
+                    .bg(accent)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(muted)
             };
@@ -678,7 +850,7 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
 
         for col in 0..curve_w {
             let cr = curve_rows[col] as isize;
-            let r  = row as isize;
+            let r = row as isize;
             let zr = zero_row as isize;
 
             let is_on_curve = cr == r;
@@ -694,32 +866,41 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
 
             // Fill region between curve and zero line
             let in_boost = cr < zr && r > cr && r < zr;
-            let in_cut   = cr > zr && r > zr && r < cr;
+            let in_cut = cr > zr && r > zr && r < cr;
 
             // Numbered nodes at band frequency columns, positioned on the curve
-            let is_low_node  = col == low_col  && is_on_curve;
-            let is_mid_node  = col == mid_col  && is_on_curve;
+            let is_low_node = col == low_col && is_on_curve;
+            let is_mid_node = col == mid_col && is_on_curve;
             let is_high_node = col == high_col && is_on_curve;
 
             let is_grid_col = grid_cols.contains(&col);
 
             let span = if is_low_node {
                 let style = if app.eq_tuner_band == 0 {
-                    Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(bg)
+                        .bg(accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(secondary)
                 };
                 Span::styled("1", style)
             } else if is_mid_node {
                 let style = if app.eq_tuner_band == 1 {
-                    Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(bg)
+                        .bg(accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(secondary)
                 };
                 Span::styled("2", style)
             } else if is_high_node {
                 let style = if app.eq_tuner_band == 2 {
-                    Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(bg)
+                        .bg(accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(secondary)
                 };
@@ -751,20 +932,20 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     // Frequency axis labels — denser than before
     {
         let freq_markers: &[(&str, f32)] = &[
-            ("20",  20.0),
-            ("50",  50.0),
+            ("20", 20.0),
+            ("50", 50.0),
             ("100", 100.0),
             ("200", 200.0),
             ("500", 500.0),
-            ("1k",  1000.0),
-            ("2k",  2000.0),
-            ("5k",  5000.0),
+            ("1k", 1000.0),
+            ("2k", 2000.0),
+            ("5k", 5000.0),
             ("10k", 10000.0),
             ("20k", 20000.0),
         ];
         let mut freq_row = vec![' '; curve_w];
         for (label, freq) in freq_markers {
-            let t   = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
+            let t = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
             let col = (t * (curve_w - 1) as f32).round() as usize;
             let col = col.min(curve_w.saturating_sub(label.len()));
             for (i, ch) in label.chars().enumerate() {
@@ -805,11 +986,20 @@ fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         let db_label = format!("{:+.0} dB", db);
         lines.push(Line::from(vec![
             Span::styled(format!(" {} ", cursor), cursor_style),
-            Span::styled(*label, Style::default().fg(if *selected { fg } else { muted })),
+            Span::styled(
+                *label,
+                Style::default().fg(if *selected { fg } else { muted }),
+            ),
             Span::styled("  ├", Style::default().fg(muted)),
-            Span::styled(bar, Style::default().fg(if *selected { accent } else { secondary })),
+            Span::styled(
+                bar,
+                Style::default().fg(if *selected { accent } else { secondary }),
+            ),
             Span::styled("┤", Style::default().fg(muted)),
-            Span::styled(format!(" {:<7}", db_label), Style::default().fg(if *selected { accent } else { fg })),
+            Span::styled(
+                format!(" {:<7}", db_label),
+                Style::default().fg(if *selected { accent } else { fg }),
+            ),
         ]));
     }
 
@@ -874,13 +1064,41 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
     }
 
     let rows: &[Row] = &[
-        Row { label: "EQ Low",       value: format!("{:+.0} dB", eq.low_db),  bar_pct: ((eq.low_db + 12.0) / 24.0) as f64 },
-        Row { label: "EQ Mid",       value: format!("{:+.0} dB", eq.mid_db),  bar_pct: ((eq.mid_db + 12.0) / 24.0) as f64 },
-        Row { label: "EQ High",      value: format!("{:+.0} dB", eq.high_db), bar_pct: ((eq.high_db + 12.0) / 24.0) as f64 },
-        Row { label: "EQ Preset",    value: preset_name.to_string(),           bar_pct: app.eq_preset_idx as f64 / (crate::eq::PRESETS.len() - 1).max(1) as f64 },
-        Row { label: "Volume",       value: format!("{}%", vol_pct),           bar_pct: (app.player.volume() / 1.5) as f64 },
-        Row { label: "Crossfade",    value: format!("{:.1}s", xf),             bar_pct: (xf / 10.0) as f64 },
-        Row { label: "Viz Sens",     value: format!("×{:.1}", sens),           bar_pct: ((sens - 0.1) / 2.9) as f64 },
+        Row {
+            label: "EQ Low",
+            value: format!("{:+.0} dB", eq.low_db),
+            bar_pct: ((eq.low_db + 12.0) / 24.0) as f64,
+        },
+        Row {
+            label: "EQ Mid",
+            value: format!("{:+.0} dB", eq.mid_db),
+            bar_pct: ((eq.mid_db + 12.0) / 24.0) as f64,
+        },
+        Row {
+            label: "EQ High",
+            value: format!("{:+.0} dB", eq.high_db),
+            bar_pct: ((eq.high_db + 12.0) / 24.0) as f64,
+        },
+        Row {
+            label: "EQ Preset",
+            value: preset_name.to_string(),
+            bar_pct: app.eq_preset_idx as f64 / (crate::eq::PRESETS.len() - 1).max(1) as f64,
+        },
+        Row {
+            label: "Volume",
+            value: format!("{}%", vol_pct),
+            bar_pct: (app.player.volume() / 1.5) as f64,
+        },
+        Row {
+            label: "Crossfade",
+            value: format!("{:.1}s", xf),
+            bar_pct: (xf / 10.0) as f64,
+        },
+        Row {
+            label: "Viz Sens",
+            value: format!("×{:.1}", sens),
+            bar_pct: ((sens - 0.1) / 2.9) as f64,
+        },
     ];
 
     let fg = parse_color(&theme.colors.foreground);
@@ -891,7 +1109,10 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
-        .title(Span::styled(" Audio Panel — ↑↓ select  ←→ adjust  e/Esc close ", theme.accent()));
+        .title(Span::styled(
+            " Audio Panel — ↑↓ select  ←→ adjust  e/Esc close ",
+            theme.accent(),
+        ));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -903,7 +1124,12 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
             break;
         }
         let selected = i == app.audio_panel_row;
-        let row_area = Rect { x: inner.x, y, width: inner.width, height: 1 };
+        let row_area = Rect {
+            x: inner.x,
+            y,
+            width: inner.width,
+            height: 1,
+        };
 
         let label_style = if selected {
             Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -918,11 +1144,14 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
         let line = Line::from(vec![
             Span::styled(format!("{}{:<12}", prefix, row.label), label_style),
             Span::styled(format!(" {:>8}  ", row.value), Style::default().fg(muted)),
-            Span::styled(bar, if selected {
-                Style::default().fg(accent)
-            } else {
-                Style::default().fg(parse_color(&theme.colors.muted))
-            }),
+            Span::styled(
+                bar,
+                if selected {
+                    Style::default().fg(accent)
+                } else {
+                    Style::default().fg(parse_color(&theme.colors.muted))
+                },
+            ),
         ]);
 
         let row_style = if selected {
@@ -935,10 +1164,16 @@ fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
 
     let hint_y = inner.y + App::AUDIO_PANEL_ROWS as u16 + 1;
     if hint_y < inner.y + inner.height {
-        let hint_area = Rect { x: inner.x, y: hint_y, width: inner.width, height: 1 };
-        let hint = Paragraph::new(Line::from(vec![
-            Span::styled("  ← / → to adjust  |  ↑↓ to navigate  |  e or Esc to close", Style::default().fg(muted)),
-        ]));
+        let hint_area = Rect {
+            x: inner.x,
+            y: hint_y,
+            width: inner.width,
+            height: 1,
+        };
+        let hint = Paragraph::new(Line::from(vec![Span::styled(
+            "  ← / → to adjust  |  ↑↓ to navigate  |  e or Esc to close",
+            Style::default().fg(muted),
+        )]));
         f.render_widget(hint, hint_area);
     }
 }
@@ -1029,7 +1264,10 @@ fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
-                .title(Span::styled(" Help  ↑↓ scroll · any other key closes ", theme.accent())),
+                .title(Span::styled(
+                    " Help  ↑↓ scroll · any other key closes ",
+                    theme.accent(),
+                )),
         )
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
@@ -1061,7 +1299,7 @@ fn render_viz_spectrum(f: &mut Frame, inner: Rect, app: &App) {
     let bar_w: u16 = 2;
     let gap: u16 = 1;
     let stride = bar_w + gap;
-    let n_bars = ((inner.width as u16) / stride).max(1) as usize;
+    let n_bars = (inner.width / stride).max(1) as usize;
     let bars = app.tap.compute_bars(n_bars);
 
     let blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
@@ -1084,14 +1322,25 @@ fn render_viz_spectrum(f: &mut Frame, inner: Rect, app: &App) {
             } else {
                 ' '
             };
-            let color = if val > 0.75 { accent } else if val > 0.4 { primary } else { secondary };
-            let bar_text: String = std::iter::repeat(ch).take(bar_w as usize).collect();
+            let color = if val > 0.75 {
+                accent
+            } else if val > 0.4 {
+                primary
+            } else {
+                secondary
+            };
+            let bar_text: String = std::iter::repeat_n(ch, bar_w as usize).collect();
             spans.push(Span::styled(bar_text, Style::default().fg(color)));
             if i + 1 < n_bars {
                 spans.push(Span::raw(" ".repeat(gap as usize)));
             }
         }
-        let r = Rect { x: inner.x, y: inner.y + row as u16, width: inner.width, height: 1 };
+        let r = Rect {
+            x: inner.x,
+            y: inner.y + row as u16,
+            width: inner.width,
+            height: 1,
+        };
         f.render_widget(Paragraph::new(Line::from(spans)), r);
     }
 }
@@ -1106,11 +1355,11 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
     let (samples, _) = app.tap.waveform_data(w);
     let mid = h / 2;
 
-    let bg       = parse_color(&app.theme.colors.background);
-    let accent   = parse_color(&app.theme.colors.accent);
-    let primary  = parse_color(&app.theme.colors.primary);
+    let bg = parse_color(&app.theme.colors.background);
+    let accent = parse_color(&app.theme.colors.accent);
+    let primary = parse_color(&app.theme.colors.primary);
     let secondary = parse_color(&app.theme.colors.secondary);
-    let muted    = parse_color(&app.theme.colors.muted);
+    let muted = parse_color(&app.theme.colors.muted);
 
     // sub[k]: fills (k+1)/8 from BOTTOM with foreground color.
     // Inverted (fg=bg, bg=fill): fills (7-k)/8 from TOP with fill color.
@@ -1122,30 +1371,39 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
     struct Col {
         trace_row: usize,
         trace_sub: usize, // 0 = top of cell, 7 = bottom of cell
-        fill_lo:   usize, // fill rows [fill_lo, fill_hi) with solid █
-        fill_hi:   usize,
-        above:     bool,  // trace is above center (s > 0)
-        below:     bool,  // trace is below center (s < 0)
+        fill_lo: usize,   // fill rows [fill_lo, fill_hi) with solid █
+        fill_hi: usize,
+        above: bool, // trace is above center (s > 0)
+        below: bool, // trace is below center (s < 0)
     }
 
-    let cols: Vec<Col> = (0..w).map(|c| {
-        let s = samples[c].clamp(-1.0, 1.0);
-        let px = ((half_px - s * half_px).max(0.0).round() as usize).min(h * 8 - 1);
-        let trace_row = px / 8;
-        let trace_sub = px % 8;
-        let above = trace_row < mid;
-        let below = trace_row > mid;
+    let cols: Vec<Col> = (0..w)
+        .map(|c| {
+            let s = samples[c].clamp(-1.0, 1.0);
+            let px = ((half_px - s * half_px).max(0.0).round() as usize).min(h * 8 - 1);
+            let trace_row = px / 8;
+            let trace_sub = px % 8;
+            let above = trace_row < mid;
+            let below = trace_row > mid;
 
-        let (fill_lo, fill_hi) = if above {
-            (trace_row + 1, mid + 1) // down to center inclusive
-        } else if below {
-            (mid, trace_row)         // up from center, exclusive of trace_row
-        } else {
-            (0, 0)
-        };
+            let (fill_lo, fill_hi) = if above {
+                (trace_row + 1, mid + 1) // down to center inclusive
+            } else if below {
+                (mid, trace_row) // up from center, exclusive of trace_row
+            } else {
+                (0, 0)
+            };
 
-        Col { trace_row, trace_sub, fill_lo, fill_hi, above, below }
-    }).collect();
+            Col {
+                trace_row,
+                trace_sub,
+                fill_lo,
+                fill_hi,
+                above,
+                below,
+            }
+        })
+        .collect();
 
     for row in 0..h {
         let mut spans = Vec::with_capacity(w);
@@ -1156,7 +1414,10 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
                 if c.above {
                     // Bottom-fill (8-trace_sub)/8: trace connects downward into the fill.
                     // trace_sub=0 (top of cell) → sub[7]=█ (whole cell); trace_sub=7 → sub[0]=▁ (sliver).
-                    Span::styled(sub[7 - c.trace_sub].to_string(), Style::default().fg(accent))
+                    Span::styled(
+                        sub[7 - c.trace_sub].to_string(),
+                        Style::default().fg(accent),
+                    )
                 } else if c.below {
                     // Top-fill (trace_sub+1)/8: trace connects upward into the fill.
                     // Achieved by drawing sub[6-trace_sub] with fg/bg swapped so the block
@@ -1175,7 +1436,7 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
                     Span::styled(ch.to_string(), Style::default().fg(muted))
                 }
             } else if row >= c.fill_lo && row < c.fill_hi {
-                let dist     = (row as i32 - mid as i32).unsigned_abs() as f32;
+                let dist = (row as i32 - mid as i32).unsigned_abs() as f32;
                 let max_dist = (c.trace_row as i32 - mid as i32).unsigned_abs() as f32;
                 let t = if max_dist > 0.0 { dist / max_dist } else { 0.0 };
                 let color = if t > 0.55 { primary } else { secondary };
@@ -1189,7 +1450,12 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
 
             spans.push(span);
         }
-        let r = Rect { x: inner.x, y: inner.y + row as u16, width: inner.width, height: 1 };
+        let r = Rect {
+            x: inner.x,
+            y: inner.y + row as u16,
+            width: inner.width,
+            height: 1,
+        };
         f.render_widget(Paragraph::new(Line::from(spans)), r);
     }
 }
@@ -1205,24 +1471,45 @@ fn render_viz_vu(f: &mut Frame, inner: Rect, app: &App) {
     let secondary = parse_color(&app.theme.colors.secondary);
     let muted = parse_color(&app.theme.colors.muted);
 
-    let bar_row = |f: &mut Frame, y: u16, label: &str, level: f32, color_hi: ratatui::style::Color| {
-        let label_w = 5usize;
-        let bar_w = w.saturating_sub(label_w + 2);
-        let filled = (level.clamp(0.0, 1.0) * bar_w as f32).round() as usize;
-        let empty = bar_w - filled;
-        let spans = vec![
-            Span::styled(format!("{:>5} ", label), Style::default().fg(muted)),
-            Span::styled("█".repeat(filled), Style::default().fg(color_hi)),
-            Span::styled("░".repeat(empty), Style::default().fg(secondary)),
-            Span::styled(format!(" {:3.0}%", level * 100.0), Style::default().fg(muted)),
-        ];
-        let r = Rect { x: inner.x, y, width: inner.width, height: 1 };
-        f.render_widget(Paragraph::new(Line::from(spans)), r);
-    };
+    let bar_row =
+        |f: &mut Frame, y: u16, label: &str, level: f32, color_hi: ratatui::style::Color| {
+            let label_w = 5usize;
+            let bar_w = w.saturating_sub(label_w + 2);
+            let filled = (level.clamp(0.0, 1.0) * bar_w as f32).round() as usize;
+            let empty = bar_w - filled;
+            let spans = vec![
+                Span::styled(format!("{:>5} ", label), Style::default().fg(muted)),
+                Span::styled("█".repeat(filled), Style::default().fg(color_hi)),
+                Span::styled("░".repeat(empty), Style::default().fg(secondary)),
+                Span::styled(
+                    format!(" {:3.0}%", level * 100.0),
+                    Style::default().fg(muted),
+                ),
+            ];
+            let r = Rect {
+                x: inner.x,
+                y,
+                width: inner.width,
+                height: 1,
+            };
+            f.render_widget(Paragraph::new(Line::from(spans)), r);
+        };
 
     let mid = inner.y + inner.height / 2;
-    bar_row(f, mid.saturating_sub(1), "RMS", rms, if rms > 0.8 { accent } else { primary });
-    bar_row(f, mid, "Peak", peak, if peak > 0.75 { accent } else { primary });
+    bar_row(
+        f,
+        mid.saturating_sub(1),
+        "RMS",
+        rms,
+        if rms > 0.8 { accent } else { primary },
+    );
+    bar_row(
+        f,
+        mid,
+        "Peak",
+        peak,
+        if peak > 0.75 { accent } else { primary },
+    );
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
@@ -1298,7 +1585,10 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         .map(|row| match row {
             crate::app::LibraryRow::Track(t) => {
                 let fav_span = if app.ratings.is_favorite(&t.path) {
-                    Some(Span::styled("♥ ", Style::default().fg(parse_color(&app.theme.colors.accent))))
+                    Some(Span::styled(
+                        "♥ ",
+                        Style::default().fg(parse_color(&app.theme.colors.accent)),
+                    ))
                 } else {
                     None
                 };
@@ -1310,7 +1600,9 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                     })
                     .unwrap_or_default();
                 let mut spans = Vec::new();
-                if let Some(s) = fav_span { spans.push(s); }
+                if let Some(s) = fav_span {
+                    spans.push(s);
+                }
                 let display = t.display();
                 let fg = parse_color(&app.theme.colors.foreground);
                 let needle = app.search_query();
@@ -1325,7 +1617,10 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                 } else {
                     spans.push(Span::styled(display, Style::default().fg(fg)));
                 }
-                spans.push(Span::styled(dur, Style::default().fg(parse_color(&app.theme.colors.muted))));
+                spans.push(Span::styled(
+                    dur,
+                    Style::default().fg(parse_color(&app.theme.colors.muted)),
+                ));
                 ListItem::new(Line::from(spans))
             }
             crate::app::LibraryRow::Header(album) => ListItem::new(Line::from(Span::styled(
@@ -1334,7 +1629,11 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                     .fg(parse_color(&app.theme.colors.accent))
                     .add_modifier(Modifier::BOLD),
             ))),
-            crate::app::LibraryRow::SmartHeader { label, count, expanded } => {
+            crate::app::LibraryRow::SmartHeader {
+                label,
+                count,
+                expanded,
+            } => {
                 let icon = if *expanded { "▼" } else { "▶" };
                 ListItem::new(Line::from(Span::styled(
                     format!(" {} {} ({})", icon, label, count),
@@ -1344,9 +1643,7 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
                 )))
             }
             crate::app::LibraryRow::Dir(p) => {
-                let name = p.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("?");
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                 ListItem::new(Line::from(Span::styled(
                     format!("📁 {}/", name),
                     Style::default().fg(parse_color(&app.theme.colors.accent)),
@@ -1361,7 +1658,12 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         .count();
     let title = if app.view_mode == crate::app::ViewMode::RecentlyPlayed {
         if app.search_active() || !app.search_query().is_empty() {
-            format!(" Recently Played [{}/{}] /{} ", shown, app.history.len(), app.search_query())
+            format!(
+                " Recently Played [{}/{}] /{} ",
+                shown,
+                app.history.len(),
+                app.search_query()
+            )
         } else {
             format!(" Recently Played ({}) ", app.history.len())
         }
@@ -1372,7 +1674,12 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
         let display = path.to_string_lossy();
         format!(" 📁 {} ", display)
     } else if app.search_active() || !app.search_query().is_empty() {
-        format!(" Library [{}/{}] /{} ", shown, app.library.len(), app.search_query())
+        format!(
+            " Library [{}/{}] /{} ",
+            shown,
+            app.library.len(),
+            app.search_query()
+        )
     } else {
         format!(" Library ({}) ", app.library.len())
     };
@@ -1394,7 +1701,10 @@ fn render_library(f: &mut Frame, area: Rect, app: &mut App) {
     app.layout.library = inner_rect(area);
     if rows.is_empty() {
         let msg = if !app.search_query().is_empty() {
-            format!(" No matches for /{}\n\n Press Esc to clear the search.", app.search_query())
+            format!(
+                " No matches for /{}\n\n Press Esc to clear the search.",
+                app.search_query()
+            )
         } else if app.view_mode == crate::app::ViewMode::RecentlyPlayed {
             " No recently played tracks.\n\n Play some tracks and they will appear here.\n Press Shift+H to return to the library.".to_string()
         } else if app.view_mode == crate::app::ViewMode::Browser {
@@ -1533,12 +1843,17 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
             if !art_text.trim().is_empty() {
                 let lines: Vec<Line> = art_text
                     .lines()
-                    .map(|l| Line::from(Span::styled(
-                        l.to_string(),
-                        Style::default().fg(parse_color(&app.theme.colors.primary)),
-                    )))
+                    .map(|l| {
+                        Line::from(Span::styled(
+                            l.to_string(),
+                            Style::default().fg(parse_color(&app.theme.colors.primary)),
+                        ))
+                    })
                     .collect();
-                f.render_widget(Paragraph::new(Text::from(lines)).alignment(Alignment::Center), art_area);
+                f.render_widget(
+                    Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+                    art_area,
+                );
             }
         } else {
             render_spectrum_art(f, art_area, app);
@@ -1598,20 +1913,28 @@ fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
     let total_str = total
         .map(format_duration)
         .unwrap_or_else(|| "--:--".to_string());
-    let hover_seek = app.hover_x.and_then(|hx| {
-        let prog = app.layout.progress;
-        if prog.width == 0 { return None; }
-        let total_dur = total?;
-        let frac = (hx.saturating_sub(prog.x)) as f32 / prog.width as f32;
-        let secs = (total_dur.as_secs_f32() * frac.clamp(0.0, 1.0)) as u64;
-        Some(format!("  → {:02}:{:02}", secs / 60, secs % 60))
-    }).unwrap_or_default();
+    let hover_seek = app
+        .hover_x
+        .and_then(|hx| {
+            let prog = app.layout.progress;
+            if prog.width == 0 {
+                return None;
+            }
+            let total_dur = total?;
+            let frac = (hx.saturating_sub(prog.x)) as f32 / prog.width as f32;
+            let secs = (total_dur.as_secs_f32() * frac.clamp(0.0, 1.0)) as u64;
+            Some(format!("  → {:02}:{:02}", secs / 60, secs % 60))
+        })
+        .unwrap_or_default();
     let time = Paragraph::new(Line::from(vec![
         Span::styled(
             format!(" {} / {}", format_duration(elapsed), total_str),
             Style::default().fg(parse_color(&app.theme.colors.muted)),
         ),
-        Span::styled(hover_seek, Style::default().fg(parse_color(&app.theme.colors.accent))),
+        Span::styled(
+            hover_seek,
+            Style::default().fg(parse_color(&app.theme.colors.accent)),
+        ),
     ]));
     f.render_widget(time, chunks[2]);
 
@@ -1667,7 +1990,12 @@ fn render_spectrum_art(f: &mut Frame, area: Rect, app: &App) {
     let note_line = Line::from(Span::styled(note_str, Style::default().fg(accent)));
     f.render_widget(
         Paragraph::new(note_line).alignment(Alignment::Center),
-        Rect { x: area.x, y: area.y, width: area.width, height: 1 },
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
     );
 
     // Bar chart rows (rows 1 .. h-1)
@@ -1692,11 +2020,17 @@ fn render_spectrum_art(f: &mut Frame, area: Rect, app: &App) {
             } else if val > threshold {
                 let frac = (val - threshold) / step;
                 let idx = ((frac * block_chars.len() as f32) as usize).min(block_chars.len() - 1);
-                std::iter::repeat(block_chars[idx]).take(bar_w).collect()
+                std::iter::repeat_n(block_chars[idx], bar_w).collect()
             } else {
                 " ".repeat(bar_w)
             };
-            let color = if val > 0.75 { accent } else if val > 0.4 { primary } else { secondary };
+            let color = if val > 0.75 {
+                accent
+            } else if val > 0.4 {
+                primary
+            } else {
+                secondary
+            };
             spans.push(Span::styled(ch, Style::default().fg(color)));
             if i + 1 < n_bars {
                 spans.push(Span::raw(" "));
@@ -1704,7 +2038,12 @@ fn render_spectrum_art(f: &mut Frame, area: Rect, app: &App) {
         }
         f.render_widget(
             Paragraph::new(Line::from(spans)),
-            Rect { x: area.x, y, width: area.width, height: 1 },
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            },
         );
     }
 
@@ -1712,7 +2051,12 @@ fn render_spectrum_art(f: &mut Frame, area: Rect, app: &App) {
     let label = Line::from(Span::styled("▶ NOW PLAY", Style::default().fg(muted)));
     f.render_widget(
         Paragraph::new(label).alignment(Alignment::Center),
-        Rect { x: area.x, y: area.y + h as u16 - 1, width: area.width, height: 1 },
+        Rect {
+            x: area.x,
+            y: area.y + h as u16 - 1,
+            width: area.width,
+            height: 1,
+        },
     );
 }
 
@@ -1722,7 +2066,13 @@ fn build_eq_row(eq: &crate::eq::EqState, theme: &Theme) -> Line<'static> {
     let primary = parse_color(&theme.colors.primary);
 
     let band = |label: &str, db: f32| -> Vec<Span<'static>> {
-        let color = if db == 0.0 { muted } else if db > 0.0 { accent } else { primary };
+        let color = if db == 0.0 {
+            muted
+        } else if db > 0.0 {
+            accent
+        } else {
+            primary
+        };
         vec![
             Span::styled(format!("{}: ", label), Style::default().fg(muted)),
             Span::styled(format!("{:+.0}dB", db), Style::default().fg(color)),
@@ -1730,7 +2080,10 @@ fn build_eq_row(eq: &crate::eq::EqState, theme: &Theme) -> Line<'static> {
         ]
     };
 
-    let mut spans: Vec<Span<'static>> = vec![Span::styled(" ≡ EQ  ".to_string(), Style::default().fg(muted))];
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(
+        " ≡ EQ  ".to_string(),
+        Style::default().fg(muted),
+    )];
     spans.extend(band("L", eq.low_db));
     spans.extend(band("M", eq.mid_db));
     spans.extend(band("H", eq.high_db));
@@ -1765,7 +2118,12 @@ fn build_volume_bar(volume: f32, width: usize, theme: &Theme) -> Line<'static> {
 /// Split `text` into spans, applying `match_color` to occurrences of `needle`
 /// (case-insensitive) and `base_color` to the rest. Used by the search filter to
 /// highlight matched substrings (#66).
-fn highlight_match(text: &str, needle: &str, base: ratatui::style::Color, hit: ratatui::style::Color) -> Vec<Span<'static>> {
+fn highlight_match(
+    text: &str,
+    needle: &str,
+    base: ratatui::style::Color,
+    hit: ratatui::style::Color,
+) -> Vec<Span<'static>> {
     let lower = text.to_lowercase();
     let needle_l = needle.to_lowercase();
     let mut out: Vec<Span<'static>> = Vec::new();
@@ -1773,7 +2131,10 @@ fn highlight_match(text: &str, needle: &str, base: ratatui::style::Color, hit: r
     while let Some(rel) = lower[cursor..].find(&needle_l) {
         let abs = cursor + rel;
         if abs > cursor {
-            out.push(Span::styled(text[cursor..abs].to_string(), Style::default().fg(base)));
+            out.push(Span::styled(
+                text[cursor..abs].to_string(),
+                Style::default().fg(base),
+            ));
         }
         let end = abs + needle_l.len();
         out.push(Span::styled(
@@ -1783,7 +2144,10 @@ fn highlight_match(text: &str, needle: &str, base: ratatui::style::Color, hit: r
         cursor = end;
     }
     if cursor < text.len() {
-        out.push(Span::styled(text[cursor..].to_string(), Style::default().fg(base)));
+        out.push(Span::styled(
+            text[cursor..].to_string(),
+            Style::default().fg(base),
+        ));
     }
     if out.is_empty() {
         out.push(Span::styled(text.to_string(), Style::default().fg(base)));
@@ -1811,7 +2175,10 @@ fn build_progress(
         }
         let pos = (elapsed.as_secs() as usize) % width.max(1);
         let before = theme.symbols.progress_empty.repeat(pos);
-        let after = theme.symbols.progress_empty.repeat(width.saturating_sub(pos + 1));
+        let after = theme
+            .symbols
+            .progress_empty
+            .repeat(width.saturating_sub(pos + 1));
         return Line::from(vec![
             Span::raw(" "),
             Span::styled(before, empty_color),
@@ -1829,9 +2196,17 @@ fn build_progress(
     let empty = width.saturating_sub(filled);
 
     let (fill, head, empt) = if filled == 0 {
-        (String::new(), String::new(), theme.symbols.progress_empty.repeat(empty))
+        (
+            String::new(),
+            String::new(),
+            theme.symbols.progress_empty.repeat(empty),
+        )
     } else if filled >= width {
-        (theme.symbols.progress_fill.repeat(width), String::new(), String::new())
+        (
+            theme.symbols.progress_fill.repeat(width),
+            String::new(),
+            String::new(),
+        )
     } else {
         (
             theme.symbols.progress_fill.repeat(filled.saturating_sub(1)),
@@ -1912,16 +2287,27 @@ fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
     let h = (area.height as i32 - 4).max(20) as u16;
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let rect = Rect { x, y, width: w, height: h };
+    let rect = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
 
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
             " Last.fm dashboard ",
-            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(parse_color(&app.theme.colors.accent))
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled("Recent scrobbles",
-            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Recent scrobbles",
+            Style::default()
+                .fg(parse_color(&app.theme.colors.accent))
+                .add_modifier(Modifier::BOLD),
+        )),
     ];
     if app.lastfm_panel_recent.is_empty() {
         lines.push(Line::from(" (loading or no scrobbles yet)"));
@@ -1931,18 +2317,29 @@ fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Top artists (last month)",
-        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "Top artists (last month)",
+        Style::default()
+            .fg(parse_color(&app.theme.colors.accent))
+            .add_modifier(Modifier::BOLD),
+    )));
     if app.lastfm_panel_top_artists.is_empty() {
         lines.push(Line::from(" (loading)"));
     } else {
         for (i, a) in app.lastfm_panel_top_artists.iter().enumerate() {
-            lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, a.name, a.playcount)));
+            lines.push(Line::from(format!(
+                " {:>2}. {} ({} plays)",
+                i + 1,
+                a.name,
+                a.playcount
+            )));
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" [Ctrl+L] close ",
-        Style::default().fg(parse_color(&app.theme.colors.muted)))));
+    lines.push(Line::from(Span::styled(
+        " [Ctrl+L] close ",
+        Style::default().fg(parse_color(&app.theme.colors.muted)),
+    )));
 
     f.render_widget(Clear, rect);
     let block = Block::default()
@@ -1965,39 +2362,72 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App) {
     let h = (area.height as i32 - 4).max(20) as u16;
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let rect = Rect { x, y, width: w, height: h };
+    let rect = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
 
     let listen_h = stats.estimated_listen_secs / 3600;
     let listen_m = (stats.estimated_listen_secs % 3600) / 60;
 
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
-            format!(" Listening stats — total {}h{:02}m, {} plays across {} tracks ",
-                listen_h, listen_m, stats.total_plays, stats.unique_tracks),
-            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD),
+            format!(
+                " Listening stats — total {}h{:02}m, {} plays across {} tracks ",
+                listen_h, listen_m, stats.total_plays, stats.unique_tracks
+            ),
+            Style::default()
+                .fg(parse_color(&app.theme.colors.accent))
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled("Top tracks",
-            Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Top tracks",
+            Style::default()
+                .fg(parse_color(&app.theme.colors.accent))
+                .add_modifier(Modifier::BOLD),
+        )),
     ];
     for (i, (display, _path, count)) in stats.top_tracks.iter().enumerate() {
-        lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, display, count)));
+        lines.push(Line::from(format!(
+            " {:>2}. {} ({} plays)",
+            i + 1,
+            display,
+            count
+        )));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Top artists",
-        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "Top artists",
+        Style::default()
+            .fg(parse_color(&app.theme.colors.accent))
+            .add_modifier(Modifier::BOLD),
+    )));
     for (i, (artist, count)) in stats.top_artists.iter().enumerate() {
-        lines.push(Line::from(format!(" {:>2}. {} ({} plays)", i + 1, artist, count)));
+        lines.push(Line::from(format!(
+            " {:>2}. {} ({} plays)",
+            i + 1,
+            artist,
+            count
+        )));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Recently played",
-        Style::default().fg(parse_color(&app.theme.colors.accent)).add_modifier(Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "Recently played",
+        Style::default()
+            .fg(parse_color(&app.theme.colors.accent))
+            .add_modifier(Modifier::BOLD),
+    )));
     for (i, (display, _)) in stats.recent_tracks.iter().enumerate() {
         lines.push(Line::from(format!(" {:>2}. {}", i + 1, display)));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(" [Ctrl+S] close ",
-        Style::default().fg(parse_color(&app.theme.colors.muted)))));
+    lines.push(Line::from(Span::styled(
+        " [Ctrl+S] close ",
+        Style::default().fg(parse_color(&app.theme.colors.muted)),
+    )));
 
     f.render_widget(Clear, rect);
     let block = Block::default()

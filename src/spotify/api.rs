@@ -211,7 +211,9 @@ impl SpotifyApi {
                 album: SpAlbum,
             }
             #[derive(Deserialize)]
-            struct SpAlbum { name: String }
+            struct SpAlbum {
+                name: String,
+            }
             let resp = self
                 .client
                 .get(&endpoint)
@@ -225,7 +227,9 @@ impl SpotifyApi {
             url = page.next;
             for item in page.items {
                 let Some(t) = item.track else { continue };
-                if t.uri.is_empty() || !t.uri.starts_with("spotify:track:") { continue }
+                if t.uri.is_empty() || !t.uri.starts_with("spotify:track:") {
+                    continue;
+                }
                 tracks.push(crate::audio::Track {
                     path: PathBuf::from(&t.uri),
                     title: t.name,
@@ -327,31 +331,43 @@ impl SpotifyApi {
             album: SpAlbum,
         }
         #[derive(Deserialize)]
-        struct SpAlbum { name: String }
+        struct SpAlbum {
+            name: String,
+        }
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(format!("{API_BASE}/search"))
             .header("Authorization", self.auth_header())
-            .query(&[("q", query), ("type", "track"), ("limit", &limit.to_string())])
+            .query(&[
+                ("q", query),
+                ("type", "track"),
+                ("limit", &limit.to_string()),
+            ])
             .send()
             .context("GET /search")?;
         if !resp.status().is_success() {
             return Err(anyhow!("search failed: {}", resp.status()));
         }
         let result: SearchResult = resp.json()?;
-        Ok(result.tracks.items.into_iter().map(|t| crate::audio::Track {
-            path: PathBuf::from(&t.uri),
-            title: t.name,
-            artist: t.artists.first().map(|a| a.name.clone()),
-            album: Some(t.album.name),
-            genre: None,
-            year: None,
-            duration: Some(Duration::from_millis(t.duration_ms)),
-            replaygain_track_db: None,
-            replaygain_album_db: None,
-            cover_url: None,
-            added_at: None,
-        }).collect())
+        Ok(result
+            .tracks
+            .items
+            .into_iter()
+            .map(|t| crate::audio::Track {
+                path: PathBuf::from(&t.uri),
+                title: t.name,
+                artist: t.artists.first().map(|a| a.name.clone()),
+                album: Some(t.album.name),
+                genre: None,
+                year: None,
+                duration: Some(Duration::from_millis(t.duration_ms)),
+                replaygain_track_db: None,
+                replaygain_album_db: None,
+                cover_url: None,
+                added_at: None,
+            })
+            .collect())
     }
 
     /// Get the current user's saved (liked) tracks.
@@ -361,18 +377,29 @@ impl SpotifyApi {
         let mut url = Some(format!("{API_BASE}/me/tracks?limit={limit}"));
         while let Some(endpoint) = url {
             #[derive(Deserialize)]
-            struct Page { next: Option<String>, items: Vec<SavedItem> }
-            #[derive(Deserialize)]
-            struct SavedItem { track: SpTrack }
-            #[derive(Deserialize)]
-            struct SpTrack {
-                uri: String, name: String, duration_ms: u64,
-                artists: Vec<ArtistRef>, album: SpAlbum,
+            struct Page {
+                next: Option<String>,
+                items: Vec<SavedItem>,
             }
             #[derive(Deserialize)]
-            struct SpAlbum { name: String }
+            struct SavedItem {
+                track: SpTrack,
+            }
+            #[derive(Deserialize)]
+            struct SpTrack {
+                uri: String,
+                name: String,
+                duration_ms: u64,
+                artists: Vec<ArtistRef>,
+                album: SpAlbum,
+            }
+            #[derive(Deserialize)]
+            struct SpAlbum {
+                name: String,
+            }
 
-            let resp = self.client
+            let resp = self
+                .client
                 .get(&endpoint)
                 .header("Authorization", self.auth_header())
                 .send()
@@ -389,9 +416,11 @@ impl SpotifyApi {
                     title: t.name,
                     artist: t.artists.first().map(|a| a.name.clone()),
                     album: Some(t.album.name),
-                    genre: None, year: None,
+                    genre: None,
+                    year: None,
                     duration: Some(Duration::from_millis(t.duration_ms)),
-                    replaygain_track_db: None, replaygain_album_db: None,
+                    replaygain_track_db: None,
+                    replaygain_album_db: None,
                     cover_url: None,
                     added_at: None,
                 });
@@ -407,13 +436,23 @@ impl SpotifyApi {
         let mut url = Some(format!("{API_BASE}/me/playlists?limit=50"));
         while let Some(endpoint) = url {
             #[derive(Deserialize)]
-            struct Page { next: Option<String>, items: Vec<SpPlaylist> }
+            struct Page {
+                next: Option<String>,
+                items: Vec<SpPlaylist>,
+            }
             #[derive(Deserialize)]
-            struct SpPlaylist { id: String, name: String, tracks: TrackCount }
+            struct SpPlaylist {
+                id: String,
+                name: String,
+                tracks: TrackCount,
+            }
             #[derive(Deserialize)]
-            struct TrackCount { total: u32 }
+            struct TrackCount {
+                total: u32,
+            }
 
-            let resp = self.client
+            let resp = self
+                .client
                 .get(&endpoint)
                 .header("Authorization", self.auth_header())
                 .send()
@@ -434,7 +473,8 @@ impl SpotifyApi {
     #[allow(dead_code)]
     pub fn set_volume(&mut self, pct: u8) -> Result<()> {
         self.ensure_fresh()?;
-        let resp = self.client
+        let resp = self
+            .client
             .put(format!("{API_BASE}/me/player/volume"))
             .header("Authorization", self.auth_header())
             .query(&[("volume_percent", pct.to_string())])
@@ -457,11 +497,16 @@ impl SpotifyApi {
             let mut parts = rest.splitn(2, ':');
             let kind = parts.next()?;
             let id = parts.next()?.split('?').next()?.to_string();
-            return Some((match kind {
-                "track" => "track", "album" => "album",
-                "playlist" => "playlist", "artist" => "artist",
-                _ => return None,
-            }, id));
+            return Some((
+                match kind {
+                    "track" => "track",
+                    "album" => "album",
+                    "playlist" => "playlist",
+                    "artist" => "artist",
+                    _ => return None,
+                },
+                id,
+            ));
         }
         // URL form: https://open.spotify.com/TYPE/ID
         if input.contains("open.spotify.com") {
@@ -470,11 +515,16 @@ impl SpotifyApi {
             let mut parts = path.splitn(2, '/');
             let kind = parts.next()?;
             let id = parts.next()?.split('?').next()?.to_string();
-            return Some((match kind {
-                "track" => "track", "album" => "album",
-                "playlist" => "playlist", "artist" => "artist",
-                _ => return None,
-            }, id));
+            return Some((
+                match kind {
+                    "track" => "track",
+                    "album" => "album",
+                    "playlist" => "playlist",
+                    "artist" => "artist",
+                    _ => return None,
+                },
+                id,
+            ));
         }
         None
     }

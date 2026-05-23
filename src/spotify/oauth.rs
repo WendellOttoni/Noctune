@@ -145,7 +145,11 @@ pub fn wait_for_redirect(port: u16, expected_state: &str) -> Result<String> {
 
     for req in server.incoming_requests() {
         let url = req.url().to_string();
-        let query = url.splitn(2, '?').nth(1).unwrap_or("");
+        let Some(query) = url.split_once('?').map(|x| x.1) else {
+            // browsers often probe /favicon.ico — skip non-callback requests
+            let _ = req.respond(tiny_http::Response::empty(404));
+            continue;
+        };
         let mut code = None::<String>;
         let mut state = None::<String>;
         let mut error = None::<String>;
@@ -163,8 +167,11 @@ pub fn wait_for_redirect(port: u16, expected_state: &str) -> Result<String> {
         }
 
         let body = "<html><body><h2>Noctune</h2><p>You can close this tab.</p></body></html>";
-        let resp = tiny_http::Response::from_string(body)
-            .with_header("Content-Type: text/html; charset=utf-8".parse::<tiny_http::Header>().unwrap());
+        let resp = tiny_http::Response::from_string(body).with_header(
+            "Content-Type: text/html; charset=utf-8"
+                .parse::<tiny_http::Header>()
+                .unwrap(),
+        );
         let _ = req.respond(resp);
 
         if let Some(err) = error {

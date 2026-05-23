@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
 pub use api::SpotifyApi;
-pub use oauth::{authorize, exchange_code, refresh_token};
 #[allow(unused_imports)]
 pub use oauth::AuthSession;
+pub use oauth::{authorize, exchange_code, refresh_token};
 
 pub const REQUIRED_SCOPES: &[&str] = &[
     "user-read-playback-state",

@@ -56,12 +56,54 @@ impl EqHandle {
 }
 
 pub const PRESETS: &[(&str, EqState)] = &[
-    ("Flat",    EqState { low_db:  0.0, mid_db:  0.0, high_db:  0.0 }),
-    ("Bass",    EqState { low_db:  6.0, mid_db:  0.0, high_db:  2.0 }),
-    ("Vocal",   EqState { low_db: -2.0, mid_db:  4.0, high_db:  1.0 }),
-    ("Treble",  EqState { low_db: -2.0, mid_db:  0.0, high_db:  6.0 }),
-    ("Loud",    EqState { low_db:  5.0, mid_db:  1.0, high_db:  5.0 }),
-    ("V-Shape", EqState { low_db:  8.0, mid_db: -6.0, high_db:  8.0 }),
+    (
+        "Flat",
+        EqState {
+            low_db: 0.0,
+            mid_db: 0.0,
+            high_db: 0.0,
+        },
+    ),
+    (
+        "Bass",
+        EqState {
+            low_db: 6.0,
+            mid_db: 0.0,
+            high_db: 2.0,
+        },
+    ),
+    (
+        "Vocal",
+        EqState {
+            low_db: -2.0,
+            mid_db: 4.0,
+            high_db: 1.0,
+        },
+    ),
+    (
+        "Treble",
+        EqState {
+            low_db: -2.0,
+            mid_db: 0.0,
+            high_db: 6.0,
+        },
+    ),
+    (
+        "Loud",
+        EqState {
+            low_db: 5.0,
+            mid_db: 1.0,
+            high_db: 5.0,
+        },
+    ),
+    (
+        "V-Shape",
+        EqState {
+            low_db: 8.0,
+            mid_db: -6.0,
+            high_db: 8.0,
+        },
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -253,9 +295,8 @@ impl<S: Source<Item = f32>> Iterator for EqSource<S> {
     fn next(&mut self) -> Option<f32> {
         self.maybe_refresh();
         let s = self.inner.next()?;
-        let bypass = self.state.low_db == 0.0
-            && self.state.mid_db == 0.0
-            && self.state.high_db == 0.0;
+        let bypass =
+            self.state.low_db == 0.0 && self.state.mid_db == 0.0 && self.state.high_db == 0.0;
         if bypass {
             self.chan_idx = (self.chan_idx + 1) % self.channels.max(1);
             return Some(s);
