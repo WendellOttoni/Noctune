@@ -48,16 +48,16 @@ impl MetadataCache {
     pub fn save(&self, path: &Path) {
         if let Some(parent) = path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("cache: failed to create dir {}: {e}", parent.display());
+                tracing::warn!(target: "cache", "failed to create dir {}: {e}", parent.display());
             }
         }
         match serde_json::to_string(self) {
             Ok(s) => {
                 if let Err(e) = fs::write(path, s) {
-                    eprintln!("cache: failed to write {}: {e}", path.display());
+                    tracing::warn!(target: "cache", "failed to write {}: {e}", path.display());
                 }
             }
-            Err(e) => eprintln!("cache: failed to serialize: {e}"),
+            Err(e) => tracing::warn!(target: "cache", "failed to serialize: {e}"),
         }
     }
 

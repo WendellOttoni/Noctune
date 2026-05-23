@@ -268,16 +268,16 @@ pub fn save_session(s: &LastfmSession) {
     if let Some(p) = session_path() {
         if let Some(parent) = p.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("lastfm: failed to create dir {}: {e}", parent.display());
+                tracing::warn!(target: "lastfm", "failed to create dir {}: {e}", parent.display());
             }
         }
         match serde_json::to_string(s) {
             Ok(j) => {
                 if let Err(e) = fs::write(&p, j) {
-                    eprintln!("lastfm: failed to save session {}: {e}", p.display());
+                    tracing::warn!(target: "lastfm", "failed to save session {}: {e}", p.display());
                 }
             }
-            Err(e) => eprintln!("lastfm: failed to serialize session: {e}"),
+            Err(e) => tracing::warn!(target: "lastfm", "failed to serialize session: {e}"),
         }
     }
 }

@@ -29,16 +29,16 @@ impl Ratings {
         let Some(p) = &self.path else { return };
         if let Some(parent) = p.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("ratings: failed to create dir {}: {e}", parent.display());
+                tracing::warn!(target: "ratings", "failed to create dir {}: {e}", parent.display());
             }
         }
         match serde_json::to_string(self) {
             Ok(s) => {
                 if let Err(e) = fs::write(p, s) {
-                    eprintln!("ratings: failed to save {}: {e}", p.display());
+                    tracing::warn!(target: "ratings", "failed to save {}: {e}", p.display());
                 }
             }
-            Err(e) => eprintln!("ratings: failed to serialize: {e}"),
+            Err(e) => tracing::warn!(target: "ratings", "failed to serialize: {e}"),
         }
     }
 
