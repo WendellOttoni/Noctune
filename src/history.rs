@@ -12,9 +12,41 @@ pub struct TrackRecord {
     pub last_played: u64,
 }
 
+/// Identity of a played playlist (#84). `Local` references a `.m3u` on disk
+/// by absolute path; `Shared` is reserved for imported playlists from the
+/// future share backend (#80) and carries the originator's id + URL so the
+/// entry remains meaningful even after the original local file is gone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum PlaylistRef {
+    Local {
+        path: PathBuf,
+    },
+    #[allow(dead_code)] // wired up by the share UI (#82/#83)
+    Shared {
+        id: String,
+        server_url: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistPlayRecord {
+    pub id: PlaylistRef,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    pub track_count: u32,
+    pub last_played: u64,
+    pub play_count: u32,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayHistory {
     entries: HashMap<String, TrackRecord>,
+    /// Per-playlist history (#84). `#[serde(default)]` so existing
+    /// `play-history.json` files without this field load cleanly.
+    #[serde(default)]
+    playlists: Vec<PlaylistPlayRecord>,
     #[serde(skip)]
     path: Option<PathBuf>,
 }
@@ -129,6 +161,79 @@ impl PlayHistory {
         v.truncate(limit);
         v.into_iter().map(|(k, _)| k).collect()
     }
+
+    // ── Playlist history (#84) ────────────────────────────────────────────
+
+    /// Cap on stored playlist history entries. Oldest get dropped beyond this.
+    const MAX_PLAYLIST_ENTRIES: usize = 200;
+
+    /// Record that the user loaded `id` for playback. Increments `play_count`
+    /// and bumps `last_played` if the entry already exists; otherwise inserts.
+    /// Persists immediately so a crash doesn't lose the last play.
+    pub fn record_playlist_play(
+        &mut self,
+        id: PlaylistRef,
+        name: impl Into<String>,
+        author: Option<String>,
+        track_count: u32,
+    ) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let name = name.into();
+        if let Some(existing) = self.playlists.iter_mut().find(|p| p.id == id) {
+            existing.play_count += 1;
+            existing.last_played = now;
+            existing.track_count = track_count;
+            // Allow renames to stick (user renamed the .m3u file via OS)
+            existing.name = name;
+            existing.author = author;
+        } else {
+            self.playlists.push(PlaylistPlayRecord {
+                id,
+                name,
+                author,
+                track_count,
+                last_played: now,
+                play_count: 1,
+            });
+        }
+        // Trim oldest if we crossed the cap. Sort by last_played desc and
+        // truncate — cheap on the small N this tops out at.
+        if self.playlists.len() > Self::MAX_PLAYLIST_ENTRIES {
+            self.playlists
+                .sort_by(|a, b| b.last_played.cmp(&a.last_played));
+            self.playlists.truncate(Self::MAX_PLAYLIST_ENTRIES);
+        }
+        self.save();
+    }
+
+    /// Most recently played playlists, newest first.
+    pub fn recent_playlists(&self, limit: usize) -> Vec<PlaylistPlayRecord> {
+        let mut v = self.playlists.clone();
+        v.sort_by(|a, b| b.last_played.cmp(&a.last_played));
+        v.truncate(limit);
+        v
+    }
+
+    /// Look up a record by id (used to surface "last played Xd ago" hints
+    /// next to playlist browser rows).
+    pub fn playlist_record(&self, id: &PlaylistRef) -> Option<&PlaylistPlayRecord> {
+        self.playlists.iter().find(|p| &p.id == id)
+    }
+
+    /// Remove an entry from the playlist history. Does not touch the
+    /// underlying `.m3u` file on disk.
+    pub fn forget_playlist(&mut self, id: &PlaylistRef) -> bool {
+        let before = self.playlists.len();
+        self.playlists.retain(|p| &p.id != id);
+        let changed = self.playlists.len() != before;
+        if changed {
+            self.save();
+        }
+        changed
+    }
 }
 
 fn history_path() -> Option<PathBuf> {
@@ -198,5 +303,78 @@ mod tests {
         let json = serde_json::to_string(&h).unwrap();
         let loaded: PlayHistory = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.play_count(&PathBuf::from("/x")), 1);
+    }
+
+    // ── Playlist history tests (#84) ──────────────────────────────────────
+
+    fn local(p: &str) -> PlaylistRef {
+        PlaylistRef::Local {
+            path: PathBuf::from(p),
+        }
+    }
+
+    #[test]
+    fn record_playlist_play_inserts_then_increments() {
+        let mut h = PlayHistory::default();
+        let id = local("/m/Mix.m3u");
+        h.record_playlist_play(id.clone(), "Mix", None, 12);
+        h.record_playlist_play(id.clone(), "Mix", None, 12);
+        let r = h.playlist_record(&id).unwrap();
+        assert_eq!(r.play_count, 2);
+        assert!(r.last_played > 0);
+    }
+
+    #[test]
+    fn recent_playlists_sorted_desc_by_last_played() {
+        let mut h = PlayHistory::default();
+        h.record_playlist_play(local("/a"), "A", None, 1);
+        h.record_playlist_play(local("/b"), "B", None, 1);
+        // bump /a so it becomes most recent again
+        h.record_playlist_play(local("/a"), "A", None, 1);
+        let r = h.recent_playlists(10);
+        assert_eq!(r[0].name, "A");
+        assert_eq!(r[1].name, "B");
+    }
+
+    #[test]
+    fn forget_playlist_removes_only_target() {
+        let mut h = PlayHistory::default();
+        h.record_playlist_play(local("/a"), "A", None, 1);
+        h.record_playlist_play(local("/b"), "B", None, 1);
+        assert!(h.forget_playlist(&local("/a")));
+        assert!(h.playlist_record(&local("/a")).is_none());
+        assert!(h.playlist_record(&local("/b")).is_some());
+    }
+
+    #[test]
+    fn forget_unknown_returns_false() {
+        let mut h = PlayHistory::default();
+        assert!(!h.forget_playlist(&local("/never-played")));
+    }
+
+    #[test]
+    fn json_with_unknown_playlists_field_loads_clean() {
+        // Old format (no `playlists` field) must still parse — guards against
+        // a #[serde(deny_unknown_fields)] regression.
+        let old = r#"{"entries":{}}"#;
+        let h: PlayHistory = serde_json::from_str(old).unwrap();
+        assert!(h.recent_playlists(10).is_empty());
+    }
+
+    #[test]
+    fn shared_and_local_refs_dont_collide() {
+        let mut h = PlayHistory::default();
+        let l = PlaylistRef::Local {
+            path: PathBuf::from("abc"),
+        };
+        let s = PlaylistRef::Shared {
+            id: "abc".into(),
+            server_url: "https://example.com".into(),
+        };
+        h.record_playlist_play(l.clone(), "L", None, 1);
+        h.record_playlist_play(s.clone(), "S", Some("user".into()), 1);
+        assert!(h.playlist_record(&l).is_some());
+        assert!(h.playlist_record(&s).is_some());
+        assert_eq!(h.recent_playlists(10).len(), 2);
     }
 }

@@ -322,11 +322,20 @@ fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 Style::default().fg(parse_color(&theme.colors.muted))
             };
+            // #84: surface the last time this playlist was played, if known.
+            let recency = app
+                .play_history
+                .playlist_record(&crate::history::PlaylistRef::Local {
+                    path: e.path.clone(),
+                })
+                .map(|r| format!(" · played {}", relative_time(r.last_played)))
+                .unwrap_or_default();
             let label = format!(
-                " {}{} ({} tracks){}",
+                " {}{} ({} tracks){}{}",
                 if selected { "▶ " } else { "  " },
                 e.name,
                 e.track_count,
+                recency,
                 if deleting {
                     "  ← confirm Shift+D"
                 } else {
@@ -2131,4 +2140,36 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App) {
         .border_style(app.theme.border(true))
         .title(Span::styled(" Stats (#64) ", app.theme.accent()));
     f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// Format a unix timestamp as a short relative duration ago — e.g. "5m", "3h",
+/// "2d", "3w". `0` (never played) returns "never" so callers can branch on it.
+/// Used by the playlist browser row hints (#84).
+fn relative_time(ts: u64) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    if ts == 0 {
+        return "never".into();
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let secs = now.saturating_sub(ts);
+    if secs < 60 {
+        return "just now".into();
+    }
+    let m = secs / 60;
+    if m < 60 {
+        return format!("{m}m ago");
+    }
+    let h = m / 60;
+    if h < 24 {
+        return format!("{h}h ago");
+    }
+    let d = h / 24;
+    if d < 14 {
+        return format!("{d}d ago");
+    }
+    let w = d / 7;
+    format!("{w}w ago")
 }
