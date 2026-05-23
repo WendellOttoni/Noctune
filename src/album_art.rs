@@ -37,15 +37,54 @@ impl Protocol {
 
 pub struct ArtPicker {
     pub protocol: Protocol,
+    /// Single-slot cache for the most recently emitted overlay escape sequence
+    /// (#91). One slot is enough because only the currently-playing track's art
+    /// is rendered; track change or resize invalidates via `key` mismatch.
+    cache: Option<(ArtCacheKey, Vec<u8>)>,
+}
+
+/// Identifies a cached overlay payload. `generation` is bumped by the caller
+/// whenever the underlying `DynamicImage` is replaced; area fields cover resize
+/// invalidation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtCacheKey {
+    pub generation: u64,
+    pub protocol: Protocol,
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
 }
 
 impl ArtPicker {
     pub fn new() -> Self {
-        Self { protocol: Protocol::detect() }
+        Self {
+            protocol: Protocol::detect(),
+            cache: None,
+        }
     }
 
     pub fn load(&self, bytes: &[u8]) -> Option<DynamicImage> {
         image::load_from_memory(bytes).ok()
+    }
+
+    /// Return cached escape sequence for `key`, or build it via `build` and
+    /// store it. The closure runs at most once per (generation, area, protocol).
+    pub fn cached_overlay<F>(&mut self, key: ArtCacheKey, build: F) -> &[u8]
+    where
+        F: FnOnce() -> Vec<u8>,
+    {
+        let hit = matches!(&self.cache, Some((k, _)) if *k == key);
+        if !hit {
+            self.cache = Some((key, build()));
+        }
+        // Safe: we just ensured cache is Some.
+        self.cache.as_ref().map(|(_, b)| b.as_slice()).unwrap_or(&[])
+    }
+
+    /// Drop the cached payload — call when the album art image itself changes.
+    pub fn invalidate(&mut self) {
+        self.cache = None;
     }
 }
 
@@ -82,9 +121,11 @@ pub fn render_blocks(f: &mut Frame, area: Rect, img: &DynamicImage) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
-/// Emit a Kitty graphics protocol sequence for `img` positioned at `area`.
-/// Must be called AFTER `terminal.draw()` so the cursor is free to move.
-pub fn render_kitty(img: &DynamicImage, area: Rect, cell_w: u16, cell_h: u16) {
+/// Build the Kitty graphics protocol escape sequence for `img` positioned at
+/// `area`. Caller writes the returned bytes to stdout after `terminal.draw()`.
+/// Kept as a separate build step so the result can be cached (#91) and reused
+/// across frames without re-running `resize_exact`/base64 encode.
+pub fn build_kitty(img: &DynamicImage, area: Rect, cell_w: u16, cell_h: u16) -> Vec<u8> {
     let pw = (area.width as u32) * (cell_w as u32);
     let ph = (area.height as u32) * (cell_h as u32);
     let resized = img.resize_exact(pw, ph, image::imageops::FilterType::Lanczos3);
@@ -99,14 +140,11 @@ pub fn render_kitty(img: &DynamicImage, area: Rect, cell_w: u16, cell_h: u16) {
         .map(|c| std::str::from_utf8(c).unwrap_or(""))
         .collect();
 
-    let mut out = std::io::stdout().lock();
-    // Move cursor to art_area origin
+    let mut out: Vec<u8> = Vec::with_capacity(encoded.len() + 64 * chunks.len() + 16);
     let _ = write!(out, "\x1b[{};{}H", area.y + 1, area.x + 1);
-
     for (i, chunk) in chunks.iter().enumerate() {
         let more = if i + 1 < chunks.len() { 1 } else { 0 };
         if i == 0 {
-            // First chunk: include image metadata
             let _ = write!(
                 out,
                 "\x1b_Ga=T,f=32,s={pw},v={ph},c={cols},r={rows},q=2,m={more};{chunk}\x1b\\",
@@ -117,12 +155,12 @@ pub fn render_kitty(img: &DynamicImage, area: Rect, cell_w: u16, cell_h: u16) {
             let _ = write!(out, "\x1b_Gm={more};{chunk}\x1b\\");
         }
     }
-    let _ = out.flush();
+    out
 }
 
-/// Emit an iTerm2 inline image sequence for `img` positioned at `area`.
-/// Must be called AFTER `terminal.draw()`.
-pub fn render_iterm2(img: &DynamicImage, area: Rect) {
+/// Build the iTerm2 inline image escape sequence for `img` positioned at
+/// `area`. See `build_kitty` for the rationale behind the split.
+pub fn build_iterm2(img: &DynamicImage, area: Rect) -> Vec<u8> {
     let pw = area.width as u32 * 8;
     let ph = area.height as u32 * 16;
     let resized = img.resize_exact(pw, ph, image::imageops::FilterType::Lanczos3);
@@ -138,17 +176,11 @@ pub fn render_iterm2(img: &DynamicImage, area: Rect) {
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_bytes);
     let len = png_bytes.len();
 
-    let mut out = std::io::stdout().lock();
+    let mut out: Vec<u8> = Vec::with_capacity(encoded.len() + 128);
     let _ = write!(out, "\x1b[{};{}H", area.y + 1, area.x + 1);
     let _ = write!(
         out,
-        "\x1b]1337;File=inline=1;width={}px;height={}px;size={};preserveAspectRatio=0:{}{}\\",
-        pw,
-        ph,
-        len,
-        encoded,
-        // BEL terminator
-        '\x07',
+        "\x1b]1337;File=inline=1;width={pw}px;height={ph}px;size={len};preserveAspectRatio=0:{encoded}\x07",
     );
-    let _ = out.flush();
+    out
 }

@@ -241,6 +241,10 @@ pub struct App {
     pub playlist_browser_delete_confirm: Option<usize>,
     pub active_playlist_name: Option<String>,
     pub album_art: Option<DynamicImage>,
+    /// Monotonic counter bumped whenever `album_art` is replaced. Used as part
+    /// of the overlay cache key in `ArtPicker` (#91) so a track change
+    /// invalidates the cached escape sequence without comparing image bytes.
+    pub art_generation: u64,
     pub art_picker: ArtPicker,
     pub sys_stats: crate::stats::SystemStats,
     pub custom_eq_presets: Vec<crate::config::EqPreset>,
@@ -494,6 +498,7 @@ impl App {
             eq_tuner_band: 0,
             pending_gapless_idx: None,
             album_art: None,
+            art_generation: 0,
             art_picker,
             sys_stats: crate::stats::SystemStats::new(),
             custom_eq_presets: crate::config::EqPresets::load().presets,
@@ -2318,6 +2323,8 @@ impl App {
         self.queue_index = None;
         self.player.stop();
         self.album_art = None;
+        self.art_generation = self.art_generation.wrapping_add(1);
+        self.art_picker.invalidate();
         self.status = format!("Queue cleared ({n} tracks). Press u to undo.");
     }
 
@@ -2491,6 +2498,8 @@ impl App {
         let new_art = crate::metadata::probe_picture(&t.path)
             .and_then(|bytes| self.art_picker.load(&bytes));
         self.album_art = new_art;
+        self.art_generation = self.art_generation.wrapping_add(1);
+        self.art_picker.invalidate();
         self.status = format!("Playing: {}", t.display());
         if let Some(s) = &mut self.media_session {
             s.update_metadata(
@@ -3035,22 +3044,33 @@ impl App {
 
     /// Render rich-protocol album art (Kitty / iTerm2) after ratatui's frame draw.
     /// Called every frame when art is loaded; a no-op for block mode (handled in ui.rs).
-    fn render_overlay_art(&self) {
-        let Some(img) = &self.album_art else { return };
+    fn render_overlay_art(&mut self) {
+        let Some(img) = self.album_art.as_ref() else { return };
         let area = self.layout.art_area;
         if area.width == 0 || area.height == 0 { return }
-        match self.art_picker.protocol {
-            crate::album_art::Protocol::Kitty => {
-                // Use common cell size defaults; exact pixel size affects quality not positioning.
-                crate::album_art::render_kitty(img, area, 8, 16);
-            }
-            crate::album_art::Protocol::Iterm2 => {
-                crate::album_art::render_iterm2(img, area);
-            }
-            crate::album_art::Protocol::Blocks => {
-                // Handled inside ratatui render loop (ui.rs); nothing to do here.
-            }
+        let protocol = self.art_picker.protocol;
+        if matches!(protocol, crate::album_art::Protocol::Blocks) {
+            // Handled inside ratatui render loop (ui.rs); nothing to do here.
+            return;
         }
+        // #91: cached escape sequence keyed by (track change, area, protocol).
+        // Subsequent frames with the same art+geometry skip resize + base64 encode.
+        let key = crate::album_art::ArtCacheKey {
+            generation: self.art_generation,
+            protocol,
+            x: area.x,
+            y: area.y,
+            w: area.width,
+            h: area.height,
+        };
+        let bytes = self.art_picker.cached_overlay(key, || match protocol {
+            crate::album_art::Protocol::Kitty => crate::album_art::build_kitty(img, area, 8, 16),
+            crate::album_art::Protocol::Iterm2 => crate::album_art::build_iterm2(img, area),
+            crate::album_art::Protocol::Blocks => Vec::new(),
+        });
+        let mut out = std::io::stdout().lock();
+        let _ = std::io::Write::write_all(&mut out, bytes);
+        let _ = std::io::Write::flush(&mut out);
     }
 }
 
