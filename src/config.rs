@@ -451,3 +451,49 @@ fn default_music_dirs() -> Vec<PathBuf> {
         .map(|p| vec![p])
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_round_trips_toml() {
+        let cfg = Config::default();
+        let text = toml::to_string_pretty(&cfg).expect("serialize default");
+        let parsed: Config = toml::from_str(&text).expect("parse default");
+        assert_eq!(parsed.theme, cfg.theme);
+        assert_eq!(parsed.playback.default_volume, cfg.playback.default_volume);
+    }
+
+    #[test]
+    fn unknown_sections_dont_break_load() {
+        // serde drops unknown sections by default. This guards against a future
+        // #[serde(deny_unknown_fields)] regression.
+        let text = "theme = \"default\"\nmusic_dirs = []\n\n[future_section]\nfoo = 1\n";
+        // Minimal toml — many required fields are missing, but parsing the unknown
+        // section alone should not blow up.
+        let res = toml::from_str::<Config>(text);
+        // Required fields missing means err is expected; we just ensure it's not
+        // a "unknown field" kind of failure.
+        if let Err(e) = res {
+            let msg = e.to_string();
+            assert!(
+                !msg.contains("unknown field `future_section`"),
+                "unexpected: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn ytdlp_defaults_sane() {
+        let d = YtdlpConfig::default();
+        assert!(d.max_retries >= 1);
+        assert!(d.backoff_secs >= 1);
+    }
+
+    #[test]
+    fn history_defaults_sane() {
+        let d = HistoryConfig::default();
+        assert!(d.max_entries > 0);
+    }
+}

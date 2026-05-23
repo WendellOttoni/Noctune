@@ -272,3 +272,64 @@ impl Bindings {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_chord_plain_letter() {
+        let c = parse_chord("a").unwrap();
+        assert_eq!(c.code, KeyCode::Char('a'));
+        assert_eq!(c.mods, KeyModifiers::NONE);
+    }
+
+    #[test]
+    fn parse_chord_with_ctrl() {
+        let c = parse_chord("Ctrl+p").unwrap();
+        assert_eq!(c.code, KeyCode::Char('p'));
+        assert!(c.mods.contains(KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn parse_chord_with_shift() {
+        let c = parse_chord("Shift+s").unwrap();
+        assert!(c.mods.contains(KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn parse_chord_combined_modifiers() {
+        let c = parse_chord("Ctrl+Shift+x").unwrap();
+        assert!(c.mods.contains(KeyModifiers::CONTROL));
+        assert!(c.mods.contains(KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn parse_chord_named_keys() {
+        assert_eq!(parse_chord("Tab").unwrap().code, KeyCode::Tab);
+        assert_eq!(parse_chord("Enter").unwrap().code, KeyCode::Enter);
+        assert_eq!(parse_chord("Esc").unwrap().code, KeyCode::Esc);
+        assert_eq!(parse_chord("Up").unwrap().code, KeyCode::Up);
+        assert_eq!(parse_chord("space").unwrap().code, KeyCode::Char(' '));
+    }
+
+    #[test]
+    fn parse_chord_literal_plus_and_minus() {
+        // Bare "+" / "-" must parse as literal keys, not split-on-+ noise.
+        assert_eq!(parse_chord("+").unwrap().code, KeyCode::Char('+'));
+        assert_eq!(parse_chord("-").unwrap().code, KeyCode::Char('-'));
+    }
+
+    #[test]
+    fn parse_chord_rejects_invalid() {
+        assert!(parse_chord("").is_none());
+        assert!(parse_chord("Shift+Foo").is_none());
+        assert!(parse_chord("NotARealKey").is_none());
+    }
+
+    #[test]
+    fn parse_chord_trailing_plus_is_invalid() {
+        // "Ctrl+" splits into ["Ctrl", ""] — empty key has no valid mapping.
+        assert!(parse_chord("Ctrl+").is_none());
+    }
+}
