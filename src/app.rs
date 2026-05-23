@@ -206,6 +206,10 @@ pub struct App {
     /// #87: memoised result of `smart_rows()`. Recomputed only when the
     /// fingerprint (library + play history + expanded categories) changes.
     pub smart_cache: Option<SmartRowsCache>,
+    /// #86: memoised result of `library_rows()` for non-Smart view modes.
+    /// Rebuilt only when search / sort / view_mode / library_revision /
+    /// history_revision change.
+    pub library_view_cache: Option<LibraryViewCache>,
     pub radio_mode: crate::radio_mode::RadioMode,
     pub radio_fetch_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub radio_seed_editing: bool,
@@ -312,6 +316,24 @@ pub struct SmartRowsCache {
     pub play_history_revision: u64,
     pub expanded: [bool; 4],
     pub rows: Vec<LibraryRow>,
+}
+
+/// #86: fingerprint of every input that can change the non-Smart library view
+/// rows (Flat / Albums / RecentlyPlayed). When this matches the cached value,
+/// the render loop skips re-filtering and re-cloning the entire library.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LibraryViewFingerprint {
+    library_revision: u64,
+    history_revision: u64,
+    view_mode: ViewMode,
+    sort: SortMode,
+    search: String,
+}
+
+#[derive(Debug)]
+pub struct LibraryViewCache {
+    fingerprint: LibraryViewFingerprint,
+    rows: Vec<LibraryRow>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -477,6 +499,7 @@ impl App {
             history_revision: 0,
             play_history_revision: 0,
             smart_cache: None,
+            library_view_cache: None,
             radio_mode: crate::radio_mode::RadioMode::default(),
             radio_fetch_rx: None,
             radio_seed_editing: false,
@@ -599,8 +622,42 @@ impl App {
             return self.smart_rows_cached().to_vec();
         }
         if self.view_mode == ViewMode::Browser {
+            // Filesystem-backed and infrequent; not worth caching against an
+            // external mtime fingerprint here.
             return self.browser_rows();
         }
+        self.library_rows_cached().to_vec()
+    }
+
+    /// #86: cached non-Smart library rows. Rebuild only when the fingerprint
+    /// changes; the render loop otherwise reuses the existing Vec without
+    /// re-running `to_lowercase` across the whole library on every frame.
+    fn library_rows_cached(&mut self) -> &[LibraryRow] {
+        let fp = LibraryViewFingerprint {
+            library_revision: self.library_revision,
+            history_revision: self.history_revision,
+            view_mode: self.view_mode,
+            sort: self.sort,
+            search: self.search.clone(),
+        };
+        let stale = match &self.library_view_cache {
+            Some(c) => c.fingerprint != fp,
+            None => true,
+        };
+        if stale {
+            let rows = self.build_library_rows();
+            self.library_view_cache = Some(LibraryViewCache {
+                fingerprint: fp,
+                rows,
+            });
+        }
+        self.library_view_cache
+            .as_ref()
+            .map(|c| c.rows.as_slice())
+            .unwrap_or(&[])
+    }
+
+    fn build_library_rows(&self) -> Vec<LibraryRow> {
         let visible = self.visible_library();
         if self.view_mode == ViewMode::Flat
             || self.view_mode == ViewMode::RecentlyPlayed
