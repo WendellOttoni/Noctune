@@ -227,6 +227,65 @@ pub fn parse_color(s: &str) -> Color {
     try_parse_color(s).unwrap_or(Color::Reset)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_named_colors() {
+        assert_eq!(try_parse_color("red").unwrap(), Color::Red);
+        assert_eq!(try_parse_color("Cyan").unwrap(), Color::Cyan);
+        assert_eq!(try_parse_color("gray").unwrap(), Color::Gray);
+        assert_eq!(try_parse_color("grey").unwrap(), Color::Gray);
+    }
+
+    #[test]
+    fn parse_hex_colors() {
+        assert_eq!(try_parse_color("#ff0000").unwrap(), Color::Rgb(255, 0, 0));
+        assert_eq!(try_parse_color("#00ff00").unwrap(), Color::Rgb(0, 255, 0));
+        assert_eq!(
+            try_parse_color("#AABBCC").unwrap(),
+            Color::Rgb(170, 187, 204)
+        );
+    }
+
+    #[test]
+    fn parse_color_rejects_invalid_hex() {
+        assert!(matches!(
+            try_parse_color("#zzzzzz"),
+            Err(ColorParseError::InvalidHex(_))
+        ));
+        assert!(matches!(
+            try_parse_color("#abc"),
+            Err(ColorParseError::InvalidHex(_))
+        ));
+    }
+
+    #[test]
+    fn parse_color_rejects_unknown_name() {
+        assert!(matches!(
+            try_parse_color("not-a-color"),
+            Err(ColorParseError::UnknownName(_))
+        ));
+    }
+
+    #[test]
+    fn parse_color_rejects_empty() {
+        assert!(matches!(try_parse_color(""), Err(ColorParseError::Empty)));
+        assert!(matches!(
+            try_parse_color("   "),
+            Err(ColorParseError::Empty)
+        ));
+    }
+
+    #[test]
+    fn lenient_parse_color_falls_back_to_reset() {
+        assert_eq!(parse_color("not-real"), Color::Reset);
+        assert_eq!(parse_color("#xyz"), Color::Reset);
+        assert_eq!(parse_color("red"), Color::Red);
+    }
+}
+
 const DEFAULT_LOGO: &str = r#"
 ███╗   ██╗ ██████╗  ██████╗████████╗██╗   ██╗███╗   ██╗███████╗
 ████╗  ██║██╔═══██╗██╔════╝╚══██╔══╝██║   ██║████╗  ██║██╔════╝

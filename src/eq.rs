@@ -325,3 +325,49 @@ impl<S: Source<Item = f32>> Source for EqSource<S> {
         self.inner.total_duration()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn handle_adjusts_within_clamp() {
+        let h = EqHandle::new();
+        assert_eq!(h.snapshot().low_db, 0.0);
+        h.adjust_low(3.0);
+        assert!((h.snapshot().low_db - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn handle_clamps_at_extremes() {
+        let h = EqHandle::new();
+        h.adjust_low(100.0);
+        assert_eq!(h.snapshot().low_db, 12.0);
+        h.adjust_low(-100.0);
+        assert_eq!(h.snapshot().low_db, -12.0);
+    }
+
+    #[test]
+    fn handle_set_replaces_state() {
+        let h = EqHandle::new();
+        h.set(EqState {
+            low_db: 1.0,
+            mid_db: 2.0,
+            high_db: 3.0,
+        });
+        let s = h.snapshot();
+        assert_eq!(s.low_db, 1.0);
+        assert_eq!(s.mid_db, 2.0);
+        assert_eq!(s.high_db, 3.0);
+    }
+
+    #[test]
+    fn presets_are_named_and_in_range() {
+        assert!(PRESETS.iter().any(|(name, _)| *name == "Flat"));
+        for (_, st) in PRESETS {
+            assert!(st.low_db >= -12.0 && st.low_db <= 12.0);
+            assert!(st.mid_db >= -12.0 && st.mid_db <= 12.0);
+            assert!(st.high_db >= -12.0 && st.high_db <= 12.0);
+        }
+    }
+}
