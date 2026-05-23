@@ -26,7 +26,10 @@ mod visualizer;
 mod ytdlp;
 
 fn main() -> Result<()> {
-    let config = config::Config::load_or_default()?;
+    let (config, config_warnings) = config::Config::load_or_default()?;
+    for w in &config_warnings {
+        eprintln!("noctune: {w}");
+    }
     let theme = theme::Theme::load(&config.theme)?;
 
     // Initialize art picker before raw mode so terminal queries (Kitty/Sixel/iTerm2

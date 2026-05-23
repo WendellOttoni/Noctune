@@ -271,20 +271,49 @@ impl Config {
         Ok(())
     }
 
-    pub fn load_or_default() -> Result<Self> {
+    /// Load config from disk, falling back to defaults on any error. Returns
+    /// accumulated warnings so the caller can surface them before the TUI
+    /// takes over stderr (#97).
+    pub fn load_or_default() -> Result<(Self, Vec<String>)> {
+        let mut warnings: Vec<String> = Vec::new();
         let path = config_path()?;
-        if path.exists() {
-            let text = fs::read_to_string(&path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            Ok(toml::from_str(&text)?)
+        let cfg = if path.exists() {
+            match fs::read_to_string(&path) {
+                Ok(text) => match toml::from_str::<Self>(&text) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warnings.push(format!(
+                            "config.toml: parse error — {e}; using defaults"
+                        ));
+                        Self::default()
+                    }
+                },
+                Err(e) => {
+                    warnings.push(format!(
+                        "config.toml: could not read {} — {e}; using defaults",
+                        path.display()
+                    ));
+                    Self::default()
+                }
+            }
         } else {
             let cfg = Self::default();
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).ok();
+                let _ = fs::create_dir_all(parent);
             }
-            fs::write(&path, toml::to_string_pretty(&cfg)?).ok();
-            Ok(cfg)
+            let _ = fs::write(&path, toml::to_string_pretty(&cfg).unwrap_or_default());
+            cfg
+        };
+        // Validate music_dirs — warn for each that doesn't exist on disk.
+        for dir in &cfg.music_dirs {
+            if !dir.exists() {
+                warnings.push(format!(
+                    "config.toml: music_dirs entry '{}' does not exist",
+                    dir.display()
+                ));
+            }
         }
+        Ok((cfg, warnings))
     }
 }
 
