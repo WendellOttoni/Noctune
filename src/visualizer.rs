@@ -1,6 +1,6 @@
 use parking_lot::Mutex;
 use rodio::Source;
-use rustfft::{num_complex::Complex32, FftPlanner};
+use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::{sync::Arc, time::Duration};
 
 const RING_SIZE: usize = 4096;
@@ -68,13 +68,17 @@ impl VizState {
 pub struct VizTap {
     ring: Arc<Mutex<SampleRing>>,
     state: Arc<Mutex<VizState>>,
+    fft: Arc<dyn Fft<f32>>,
 }
 
 impl VizTap {
     pub fn new(sensitivity: f32) -> Self {
+        let mut planner = FftPlanner::<f32>::new();
+        let fft = planner.plan_fft_forward(FFT_SIZE);
         Self {
             ring: Arc::new(Mutex::new(SampleRing::new())),
             state: Arc::new(Mutex::new(VizState::new(sensitivity))),
+            fft,
         }
     }
 
@@ -103,9 +107,7 @@ impl VizTap {
         }
 
         let mut buf: Vec<Complex32> = window.iter().map(|&r| Complex32::new(r, 0.0)).collect();
-        let mut planner = FftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(FFT_SIZE);
-        fft.process(&mut buf);
+        self.fft.process(&mut buf);
 
         let half = FFT_SIZE / 2;
         // Normalize FFT magnitude by window length so peak_db is roughly in dBFS.
