@@ -3,7 +3,7 @@ pub mod oauth;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 pub use api::SpotifyApi;
 #[allow(unused_imports)]
@@ -38,6 +38,10 @@ impl Tokens {
     }
 }
 
+const SECRETS_SERVICE: &str = "spotify";
+const SECRETS_KEY: &str = "tokens";
+
+/// Legacy file path — only used for one-time migration into the keyring (#98).
 pub fn tokens_path() -> Result<PathBuf> {
     Ok(crate::config::project_dirs()?
         .config_dir()
@@ -45,18 +49,22 @@ pub fn tokens_path() -> Result<PathBuf> {
 }
 
 pub fn load_tokens() -> Option<Tokens> {
-    let path = tokens_path().ok()?;
-    let text = fs::read_to_string(&path).ok()?;
+    // Pull any legacy file into keyring before reading. After migration the
+    // file no longer exists and this is a cheap no-op.
+    if let Ok(legacy) = tokens_path() {
+        crate::secrets::migrate_from_file(SECRETS_SERVICE, SECRETS_KEY, &legacy);
+    }
+    let text = crate::secrets::load(SECRETS_SERVICE, SECRETS_KEY)?;
     serde_json::from_str(&text).ok()
 }
 
 pub fn save_tokens(tokens: &Tokens) -> Result<()> {
-    let path = tokens_path()?;
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            eprintln!("spotify: failed to create dir {}: {e}", parent.display());
-        }
-    }
-    fs::write(&path, serde_json::to_string_pretty(tokens)?)?;
+    let text = serde_json::to_string(tokens)?;
+    crate::secrets::store(SECRETS_SERVICE, SECRETS_KEY, &text);
     Ok(())
+}
+
+#[allow(dead_code)]
+pub fn delete_tokens() {
+    crate::secrets::delete(SECRETS_SERVICE, SECRETS_KEY);
 }
