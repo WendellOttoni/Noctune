@@ -3014,7 +3014,24 @@ impl App {
                 })
             })
             .collect();
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        // #84: sort by last-played desc when we have history; ties and entries
+        // never played fall back to alphabetical so the UI stays predictable.
+        let history = &self.play_history;
+        entries.sort_by(|a, b| {
+            let la = history
+                .playlist_record(&crate::history::PlaylistRef::Local {
+                    path: a.path.clone(),
+                })
+                .map(|r| r.last_played)
+                .unwrap_or(0);
+            let lb = history
+                .playlist_record(&crate::history::PlaylistRef::Local {
+                    path: b.path.clone(),
+                })
+                .map(|r| r.last_played)
+                .unwrap_or(0);
+            lb.cmp(&la).then_with(|| a.name.cmp(&b.name))
+        });
         if entries.is_empty() {
             self.set_info("No playlists saved yet.");
             return;
@@ -3123,6 +3140,19 @@ impl App {
                 self.queue_state.select(Some(0));
             }
             self.active_playlist_name = Some(entry.name.clone());
+        }
+        // #84: record this playback in the playlist history. Only counts when
+        // tracks actually loaded so an empty/broken `.m3u` doesn't pollute the
+        // recent list.
+        if loaded > 0 {
+            self.play_history.record_playlist_play(
+                crate::history::PlaylistRef::Local {
+                    path: entry.path.clone(),
+                },
+                entry.name.clone(),
+                None,
+                loaded as u32,
+            );
         }
         self.show_playlist_browser = false;
         self.set_info(if append {
