@@ -782,4 +782,22 @@ impl Track {
             added_at: None,
         }
     }
+
+    /// Build a streaming track using a title (and optional artist/duration) we
+    /// already know — e.g. parsed from a `.m3u` `#EXTINF` line. Avoids the
+    /// "<url> (stream)" placeholder title when we have the real name on hand.
+    pub fn from_url_with_meta(
+        url: String,
+        title: Option<String>,
+        artist: Option<String>,
+        duration: Option<Duration>,
+    ) -> Self {
+        let mut t = Self::from_url(url);
+        if let Some(title) = title {
+            t.title = title;
+        }
+        t.artist = artist;
+        t.duration = duration;
+        t
+    }
 }

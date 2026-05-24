@@ -2976,6 +2976,20 @@ impl App {
         let path = dir.join(format!("{safe_name}.m3u"));
         let mut text = String::from("#EXTM3U\n");
         for t in &self.queue {
+            // #119: persist title/artist/duration via the standard `#EXTINF`
+            // directive so reloading a playlist in another session shows real
+            // track names instead of raw stream URLs.
+            let secs = t
+                .duration
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(-1);
+            let display = match &t.artist {
+                Some(a) if !a.is_empty() => format!("{a} - {}", t.title),
+                _ => t.title.clone(),
+            };
+            // EXTINF must be a single line; strip any embedded newlines.
+            let display = display.replace(['\r', '\n'], " ");
+            text.push_str(&format!("#EXTINF:{secs},{display}\n"));
             text.push_str(&t.path.display().to_string());
             text.push('\n');
         }
@@ -3119,13 +3133,33 @@ impl App {
             self.queue_index = None;
         }
         let start = self.queue.len();
+        // #119: track the most recent `#EXTINF` so the following path/URL
+        // inherits its title/artist/duration. Cleared after consumption so a
+        // stray EXTINF doesn't bleed onto an unrelated entry.
+        let mut pending_extinf: Option<(Option<std::time::Duration>, Option<String>, String)> = None;
         for line in text.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
+            if line.is_empty() {
                 continue;
             }
+            if let Some(rest) = line.strip_prefix("#EXTINF:") {
+                pending_extinf = Some(parse_extinf(rest));
+                continue;
+            }
+            if line.starts_with('#') {
+                continue;
+            }
+            let (dur, artist, title) = match pending_extinf.take() {
+                Some((d, a, t)) => (d, a, Some(t)),
+                None => (None, None, None),
+            };
             if line.starts_with("http://") || line.starts_with("https://") {
-                self.queue.push(Track::from_url(line.to_string()));
+                self.queue.push(Track::from_url_with_meta(
+                    line.to_string(),
+                    title,
+                    artist,
+                    dur,
+                ));
             } else {
                 let p = std::path::PathBuf::from(line);
                 if p.exists() {
@@ -3511,5 +3545,62 @@ impl App {
         let mut out = std::io::stdout().lock();
         let _ = std::io::Write::write_all(&mut out, bytes);
         let _ = std::io::Write::flush(&mut out);
+    }
+}
+
+/// Parse the payload of an M3U `#EXTINF:` line (everything after the colon).
+///
+/// Expected shape: `<seconds>,<display>` where `<display>` is conventionally
+/// `Artist - Title` but may be just the title. Negative seconds (commonly
+/// `-1`) mean "unknown duration".
+fn parse_extinf(rest: &str) -> (Option<std::time::Duration>, Option<String>, String) {
+    let (secs_str, display) = match rest.split_once(',') {
+        Some((s, d)) => (s.trim(), d.trim()),
+        None => ("", rest.trim()),
+    };
+    let duration = secs_str
+        .parse::<i64>()
+        .ok()
+        .filter(|s| *s >= 0)
+        .map(|s| std::time::Duration::from_secs(s as u64));
+    let (artist, title) = match display.split_once(" - ") {
+        Some((a, t)) if !a.is_empty() && !t.is_empty() => (Some(a.to_string()), t.to_string()),
+        _ => (None, display.to_string()),
+    };
+    (duration, artist, title)
+}
+
+#[cfg(test)]
+mod extinf_tests {
+    use super::parse_extinf;
+    use std::time::Duration;
+
+    #[test]
+    fn parses_artist_title_and_duration() {
+        let (d, a, t) = parse_extinf("213,Some Artist - Some Title");
+        assert_eq!(d, Some(Duration::from_secs(213)));
+        assert_eq!(a.as_deref(), Some("Some Artist"));
+        assert_eq!(t, "Some Title");
+    }
+
+    #[test]
+    fn unknown_duration_returns_none() {
+        let (d, _, _) = parse_extinf("-1,X - Y");
+        assert!(d.is_none());
+    }
+
+    #[test]
+    fn missing_artist_falls_back_to_title_only() {
+        let (_, a, t) = parse_extinf("0,Just a title");
+        assert!(a.is_none());
+        assert_eq!(t, "Just a title");
+    }
+
+    #[test]
+    fn handles_payload_without_comma() {
+        let (d, a, t) = parse_extinf("only title");
+        assert!(d.is_none());
+        assert!(a.is_none());
+        assert_eq!(t, "only title");
     }
 }
