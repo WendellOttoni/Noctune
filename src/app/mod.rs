@@ -650,11 +650,19 @@ impl App {
         };
         // Watch the active theme file so external edits hot-reload (#68).
         app.rearm_theme_watcher();
-        // OS media session (#54) — silently disabled if souvlaki cannot create the
-        // controls (e.g. headless Linux without a dbus session).
-        if let Ok((session, rx)) = crate::media_session::MediaSession::new("Noctune") {
-            app.media_session = Some(session);
-            app.media_session_rx = Some(rx);
+        // OS media session (#54) — disabled if souvlaki cannot create the controls
+        // (e.g. headless Linux without a dbus session). Log the failure so users can
+        // tell apart "no SMTC card because the integration is off" from "no SMTC card
+        // because something else is wrong".
+        match crate::media_session::MediaSession::new("Noctune") {
+            Ok((session, rx)) => {
+                app.media_session = Some(session);
+                app.media_session_rx = Some(rx);
+                tracing::info!(target: "media_session", "OS media session active");
+            }
+            Err(e) => {
+                tracing::warn!(target: "media_session", "could not init OS media session: {e}");
+            }
         }
         Ok(app)
     }
@@ -1002,6 +1010,10 @@ impl App {
 
     fn tick(&mut self) -> Result<()> {
         self.tick_count = self.tick_count.wrapping_add(1);
+
+        // #54 follow-up: pump Win32 messages so SMTC callbacks reach us. Without
+        // this the OS may not surface our media card at all. No-op on non-Windows.
+        crate::media_session::pump_messages();
 
         // Refresh system stats once per second (~30 ticks at 33ms each)
         if self.tick_count.is_multiple_of(30) {
