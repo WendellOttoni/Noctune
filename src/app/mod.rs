@@ -2979,10 +2979,7 @@ impl App {
             // #119: persist title/artist/duration via the standard `#EXTINF`
             // directive so reloading a playlist in another session shows real
             // track names instead of raw stream URLs.
-            let secs = t
-                .duration
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(-1);
+            let secs = t.duration.map(|d| d.as_secs() as i64).unwrap_or(-1);
             let display = match &t.artist {
                 Some(a) if !a.is_empty() => format!("{a} - {}", t.title),
                 _ => t.title.clone(),
@@ -3136,7 +3133,8 @@ impl App {
         // #119: track the most recent `#EXTINF` so the following path/URL
         // inherits its title/artist/duration. Cleared after consumption so a
         // stray EXTINF doesn't bleed onto an unrelated entry.
-        let mut pending_extinf: Option<(Option<std::time::Duration>, Option<String>, String)> = None;
+        let mut pending_extinf: Option<(Option<std::time::Duration>, Option<String>, String)> =
+            None;
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() {
