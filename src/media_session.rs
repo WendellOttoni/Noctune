@@ -164,3 +164,26 @@ impl MediaSession {
         let _ = self.controls.set_playback(MediaPlayback::Stopped);
     }
 }
+
+/// Pump pending Win32 messages for the hidden window so souvlaki's SMTC
+/// callbacks fire. Without this the OS sees us register a media session but
+/// never delivers play/pause/next/prev events — and the SMTC card may not
+/// surface in the volume flyout. Cheap to call from the main loop; PeekMessage
+/// returns immediately when the queue is empty.
+#[cfg(target_os = "windows")]
+pub fn pump_messages() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+    };
+    unsafe {
+        let mut msg: MSG = std::mem::zeroed();
+        while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[inline]
+pub fn pump_messages() {}
