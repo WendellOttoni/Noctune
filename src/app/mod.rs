@@ -407,7 +407,10 @@ impl App {
     /// prefer this over poking `self.status` directly so the color in the
     /// status bar stays in sync with the message intent.
     pub fn set_status<S: Into<String>>(&mut self, kind: StatusKind, msg: S) {
-        self.set_info(msg);
+        // Write the fields directly here. Calling `set_info` from this method
+        // (as an earlier sed-driven refactor accidentally did) creates mutual
+        // recursion with `set_info` → stack overflow on the first status change.
+        self.status = msg.into();
         self.status_kind = kind;
     }
 
