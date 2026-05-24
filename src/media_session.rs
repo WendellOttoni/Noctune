@@ -17,9 +17,56 @@ mod win {
     use anyhow::{anyhow, Result};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, HWND_MESSAGE, WNDCLASSEXW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, WNDCLASSEXW, WS_POPUP,
     };
+
+    const AUMID: &str = "dev.noctune.Noctune";
+    const DISPLAY_NAME: &str = "Noctune";
+
+    /// SMTC on Windows refuses to attach unless the calling process has an
+    /// AppUserModelID set. Console apps don't get one by default, so we declare
+    /// one ourselves before souvlaki creates the media controls, and register a
+    /// friendly DisplayName under HKCU so the SMTC card / Volume flyout show
+    /// "Noctune" instead of "Unknown app".
+    fn ensure_app_user_model_id() {
+        register_aumid_display_name();
+        let id: Vec<u16> = format!("{AUMID}\0").encode_utf16().collect();
+        unsafe {
+            let _ = SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
+        }
+    }
+
+    /// Writes `HKCU\Software\Classes\AppUserModelId\<AUMID>\DisplayName` so the
+    /// OS can resolve our AUMID to the string "Noctune". No admin needed —
+    /// HKCU is per-user. Idempotent; safe to run on every launch.
+    fn register_aumid_display_name() {
+        use windows_sys::Win32::System::Registry::{
+            RegCloseKey, RegCreateKeyW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, REG_SZ,
+        };
+        let subkey: Vec<u16> = format!("Software\\Classes\\AppUserModelId\\{AUMID}\0")
+            .encode_utf16()
+            .collect();
+        let value_name: Vec<u16> = "DisplayName\0".encode_utf16().collect();
+        let display: Vec<u16> = format!("{DISPLAY_NAME}\0").encode_utf16().collect();
+        unsafe {
+            let mut hkey: HKEY = std::ptr::null_mut();
+            let status = RegCreateKeyW(HKEY_CURRENT_USER, subkey.as_ptr(), &mut hkey);
+            if status == 0 {
+                let bytes = (display.len() * 2) as u32;
+                let _ = RegSetValueExW(
+                    hkey,
+                    value_name.as_ptr(),
+                    0,
+                    REG_SZ,
+                    display.as_ptr() as *const u8,
+                    bytes,
+                );
+                let _ = RegCloseKey(hkey);
+            }
+        }
+    }
 
     /// Hidden message-only window — souvlaki uses its HWND as the SMTC handle.
     pub struct HiddenWindow {
@@ -28,6 +75,7 @@ mod win {
 
     impl HiddenWindow {
         pub fn new() -> Result<Self> {
+            ensure_app_user_model_id();
             unsafe {
                 let class_name: Vec<u16> = "NoctuneMediaSession\0".encode_utf16().collect();
                 let hinstance = GetModuleHandleW(std::ptr::null());
@@ -44,16 +92,21 @@ mod win {
                 // We don't care — we only need the class to exist before CreateWindowExW.
                 let _ = RegisterClassExW(&wc);
 
+                // SMTC's ISystemMediaTransportControlsInterop::GetForWindow rejects
+                // HWND_MESSAGE windows with E_INVALIDARG — it wants a real top-level
+                // window on the desktop. We create a 0×0 popup that never gets shown,
+                // which satisfies the API without ever appearing in the user's taskbar
+                // or alt-tab list.
                 let hwnd = CreateWindowExW(
                     0,
                     class_name.as_ptr(),
                     class_name.as_ptr(),
+                    WS_POPUP,
                     0,
                     0,
                     0,
                     0,
-                    0,
-                    HWND_MESSAGE,
+                    std::ptr::null_mut(),
                     std::ptr::null_mut(),
                     hinstance as _,
                     std::ptr::null(),
