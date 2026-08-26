@@ -2095,14 +2095,18 @@ impl App {
                     return;
                 }
                 KeyCode::Char('f') => {
-                    let stations = self.radio_filtered_stations();
-                    if let Some(&st) = stations.get(self.radio_row) {
-                        let p = std::path::PathBuf::from(&st.url);
+                    let target_opt = {
+                        let stations = self.radio_filtered_stations();
+                        stations.get(self.radio_row).map(|st| {
+                            (st.name.clone(), std::path::PathBuf::from(&st.url))
+                        })
+                    };
+                    if let Some((name, p)) = target_opt {
                         let fav = self.ratings.toggle_favorite(&p);
                         self.set_info(if fav {
-                            format!("Rádio favoritada: {} ♥", st.name)
+                            format!("Rádio favoritada: {name} ♥")
                         } else {
-                            format!("Rádio removida dos favoritos: {}", st.name)
+                            format!("Rádio removida dos favoritos: {name}")
                         });
                     }
                     return;
