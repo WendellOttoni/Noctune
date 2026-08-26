@@ -68,6 +68,14 @@ pub enum Action {
     RadioBrowser,
     /// Check and apply in-place app updates from GitHub.
     SelfUpdate,
+    /// Switch directly to Library view.
+    ViewLibrary,
+    /// Switch focus directly to Queue view.
+    ViewQueue,
+    /// Switch directly to Dedicated Radio view.
+    ViewRadio,
+    /// Switch directly to File Browser view.
+    ViewBrowser,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -212,12 +220,10 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('P')), Action::SpotifyLogin),
             (KeyChord::new(KeyCode::Char('@')), Action::SpotifyToggle),
             (KeyChord::new(KeyCode::Char('V')), Action::ToggleView),
-            (KeyChord::new(KeyCode::Char('1')), Action::EqLowDown),
-            (KeyChord::new(KeyCode::Char('2')), Action::EqLowUp),
-            (KeyChord::new(KeyCode::Char('3')), Action::EqMidDown),
-            (KeyChord::new(KeyCode::Char('4')), Action::EqMidUp),
-            (KeyChord::new(KeyCode::Char('5')), Action::EqHighDown),
-            (KeyChord::new(KeyCode::Char('6')), Action::EqHighUp),
+            (KeyChord::new(KeyCode::Char('1')), Action::ViewLibrary),
+            (KeyChord::new(KeyCode::Char('2')), Action::ViewQueue),
+            (KeyChord::new(KeyCode::Char('3')), Action::ViewRadio),
+            (KeyChord::new(KeyCode::Char('4')), Action::ViewBrowser),
             (KeyChord::new(KeyCode::Char('i')), Action::OpenUrl),
             (KeyChord::new(KeyCode::Char('0')), Action::EqPreset),
             (KeyChord::new(KeyCode::Char('R')), Action::Rescan),

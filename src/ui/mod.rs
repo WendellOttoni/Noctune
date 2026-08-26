@@ -1282,6 +1282,11 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_main(f: &mut Frame, area: Rect, app: &mut App) {
+    if app.view_mode == crate::app::ViewMode::Radio {
+        render_radio_view(f, area, app);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -2395,4 +2400,285 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     }
 
     f.render_widget(Paragraph::new(lines), list_area);
+}
+
+fn render_radio_view(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let primary = parse_color(&theme.colors.primary);
+    let secondary = parse_color(&theme.colors.secondary);
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(26), // Col 1: Categories
+            Constraint::Min(36),    // Col 2: Stations List
+            Constraint::Length(32), // Col 3: Station Hub / Live Details
+        ])
+        .split(area);
+
+    // --- Col 1: Categories ---
+    let cat_focused = app.radio_focus_pane == 0;
+    let cat_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(cat_focused))
+        .title(Span::styled(
+            " 📻 Categorias ",
+            if cat_focused {
+                theme.accent()
+            } else {
+                Style::default().fg(muted)
+            },
+        ));
+    let cat_inner = cat_block.inner(chunks[0]);
+    f.render_widget(cat_block, chunks[0]);
+
+    let categories = crate::radio_browser::RadioCategory::ALL;
+    let mut cat_items = Vec::new();
+    for (i, cat) in categories.iter().enumerate() {
+        let is_sel = i == app.radio_category_idx;
+        let prefix = if is_sel { "▶ " } else { "  " };
+        let style = if is_sel {
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(fg)
+        };
+        cat_items.push(ListItem::new(Line::from(vec![
+            Span::styled(prefix, Style::default().fg(accent)),
+            Span::styled(cat.label(), style),
+        ])));
+    }
+    f.render_widget(List::new(cat_items), cat_inner);
+
+    // --- Col 2: Stations List & Search ---
+    let stations_focused = app.radio_focus_pane == 1;
+    let current_cat = categories
+        .get(app.radio_category_idx)
+        .copied()
+        .unwrap_or(crate::radio_browser::RadioCategory::All);
+    let stations_title = format!(" Estações ({}) ", current_cat.label());
+    let stations_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(stations_focused))
+        .title(Span::styled(
+            stations_title,
+            if stations_focused {
+                theme.accent()
+            } else {
+                Style::default().fg(muted)
+            },
+        ));
+    let stations_inner = stations_block.inner(chunks[1]);
+    f.render_widget(stations_block, chunks[1]);
+
+    let (list_rect, search_rect) = if current_cat == crate::radio_browser::RadioCategory::Search {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Min(2)])
+            .split(stations_inner);
+        (split[1], Some(split[0]))
+    } else {
+        (stations_inner, None)
+    };
+
+    if let Some(s_rect) = search_rect {
+        let cursor = if app.radio_search_editing { "█" } else { "" };
+        let s_text = if app.radio_search_query.is_empty() && !app.radio_search_editing {
+            "  🔍 (pressione / para digitar a busca, Enter para buscar)".to_string()
+        } else {
+            format!("  🔍 {}{cursor}", app.radio_search_query)
+        };
+        let s_style = if app.radio_search_editing {
+            Style::default().fg(fg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(muted)
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(s_text, s_style)])),
+            s_rect,
+        );
+    }
+
+    let stations = app.radio_filtered_stations();
+    if stations.is_empty() {
+        let empty_msg = if current_cat == crate::radio_browser::RadioCategory::Favorites {
+            "  Nenhuma rádio favoritada ainda.\n  Pressione 'f' em qualquer rádio para favoritar."
+        } else if current_cat == crate::radio_browser::RadioCategory::Search {
+            if app.radio_search_rx.is_some() {
+                "  Buscando rádios online…"
+            } else {
+                "  Pressione '/' para buscar por nome, país ou gênero."
+            }
+        } else {
+            "  Nenhuma estação encontrada nesta categoria."
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(empty_msg, Style::default().fg(muted))),
+            list_rect,
+        );
+    } else {
+        let items_per_page = list_rect.height as usize;
+        let scroll_offset = if app.radio_row >= items_per_page {
+            app.radio_row - items_per_page + 1
+        } else {
+            0
+        };
+
+        let current_track_path = app
+            .player
+            .current()
+            .map(|t| t.path.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let mut lines = Vec::new();
+        for (i, &st) in stations
+            .iter()
+            .enumerate()
+            .skip(scroll_offset)
+            .take(items_per_page)
+        {
+            let is_sel = i == app.radio_row;
+            let is_playing = current_track_path == st.url;
+            let is_fav = app.ratings.is_favorite(&std::path::PathBuf::from(&st.url));
+
+            let prefix = if is_playing {
+                "▶ "
+            } else if is_sel {
+                "→ "
+            } else {
+                "  "
+            };
+
+            let fav_icon = if is_fav { "♥ " } else { "  " };
+
+            let name_style = if is_playing {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else if is_sel {
+                Style::default().fg(fg).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(fg)
+            };
+
+            let country = st.country.as_deref().unwrap_or("World");
+            let bitrate_str = st
+                .bitrate
+                .map(|b| format!("{b}k"))
+                .unwrap_or_else(|| "128k".into());
+
+            let row_line = Line::from(vec![
+                Span::styled(prefix, Style::default().fg(accent)),
+                Span::styled(fav_icon, Style::default().fg(accent)),
+                Span::styled(format!("{:<26} ", st.name), name_style),
+                Span::styled(format!(" {:<10} ", country), Style::default().fg(secondary)),
+                Span::styled(
+                    format!(" {:<5} ", bitrate_str),
+                    Style::default().fg(primary),
+                ),
+            ]);
+            lines.push(row_line);
+        }
+        f.render_widget(Paragraph::new(lines), list_rect);
+    }
+
+    // --- Col 3: Station Hub & Info ---
+    let hub_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(false))
+        .title(Span::styled(" Station Info ", theme.accent()));
+    let hub_inner = hub_block.inner(chunks[2]);
+    f.render_widget(hub_block, chunks[2]);
+
+    let selected_station = stations.get(app.radio_row).copied();
+
+    let mut info_lines = Vec::new();
+    info_lines.push(Line::from(vec![
+        Span::styled("Status: ", Style::default().fg(muted)),
+        Span::styled(
+            if app.player.is_paused() {
+                "⏸ Pausado"
+            } else if app.is_loading() {
+                "⏳ Conectando…"
+            } else {
+                "● LIVE STREAM"
+            },
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    info_lines.push(Line::from(""));
+
+    if let Some(st) = selected_station {
+        info_lines.push(Line::from(vec![
+            Span::styled("Estação:\n", Style::default().fg(muted)),
+            Span::styled(
+                format!(" {}\n", st.name),
+                Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        if let Some(c) = &st.country {
+            info_lines.push(Line::from(vec![
+                Span::styled("País: ", Style::default().fg(muted)),
+                Span::styled(c.clone(), Style::default().fg(secondary)),
+            ]));
+        }
+        if let Some(b) = st.bitrate {
+            info_lines.push(Line::from(vec![
+                Span::styled("Bitrate: ", Style::default().fg(muted)),
+                Span::styled(format!("{b} kbps"), Style::default().fg(primary)),
+            ]));
+        }
+        if !st.tags.is_empty() {
+            info_lines.push(Line::from(vec![
+                Span::styled("Gênero / Vibes:\n", Style::default().fg(muted)),
+                Span::styled(format!(" {}\n", st.tags), Style::default().fg(muted)),
+            ]));
+        }
+        if let Some(h) = &st.homepage {
+            info_lines.push(Line::from(vec![
+                Span::styled("Web: ", Style::default().fg(muted)),
+                Span::styled(h.clone(), Style::default().fg(primary)),
+            ]));
+        }
+    } else {
+        info_lines.push(Line::from(Span::styled(
+            "Nenhuma rádio selecionada",
+            Style::default().fg(muted),
+        )));
+    }
+
+    info_lines.push(Line::from(""));
+    info_lines.push(Line::from(Span::styled(
+        "Controles:",
+        Style::default().fg(accent).add_modifier(Modifier::BOLD),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " Tab   alternar painel",
+        Style::default().fg(fg),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " Enter sintonizar rádio",
+        Style::default().fg(fg),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " a     enfileirar",
+        Style::default().fg(fg),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " f     favoritar (♥)",
+        Style::default().fg(fg),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " /     buscar rádios",
+        Style::default().fg(fg),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " 1/2/4 outras visões",
+        Style::default().fg(fg),
+    )));
+
+    f.render_widget(
+        Paragraph::new(info_lines).wrap(Wrap { trim: true }),
+        hub_inner,
+    );
 }

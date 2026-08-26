@@ -753,8 +753,16 @@ pub fn build_source(
             // starts at the requested position instead of from zero.
             crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)?
         } else {
-            let reader = http_get_reader(&path_str)?;
-            SymphoniaSource::from_reader(reader, Hint::new())?
+            // Try direct HTTP stream first with proper headers and MIME hints
+            match open_http_stream(&path_str) {
+                Ok(src) => src,
+                Err(e) => {
+                    tracing::warn!(target: "audio", "direct stream failed ({e}), falling back to yt-dlp/ffmpeg");
+                    // Fallback to yt-dlp/ffmpeg for HLS / complex containers
+                    crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)
+                        .map_err(|e2| anyhow!("stream playback failed: direct: {e} | fallback: {e2}"))?
+                }
+            }
         }
     } else {
         let file =
@@ -783,21 +791,52 @@ pub fn build_source(
     Ok(source)
 }
 
-fn http_get_reader(url: &str) -> Result<impl Read + Send + 'static> {
-    // Streams the HTTP response body instead of buffering it all in RAM (issue #60).
-    // For formats requiring seek (mp4/m4a moov atom), the symphonia probe may fail
-    // — those URLs should be handled via yt-dlp or a future ranged-request path.
+fn open_http_stream(url: &str) -> Result<SymphoniaSource> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/0.4.3")
         .build()?;
+
     let resp = client
         .get(url)
+        .header("Icy-MetaData", "0")
+        .header("Accept", "*/*")
         .send()
         .with_context(|| format!("GET {url}"))?;
+
     if !resp.status().is_success() {
-        return Err(anyhow!("{url} returned {}", resp.status()));
+        return Err(anyhow!("{url} returned HTTP {}", resp.status()));
     }
-    Ok(resp)
+
+    let mut hint = Hint::new();
+    if let Some(ct) = resp.headers().get("content-type").and_then(|v| v.to_str().ok()) {
+        let mime = ct.split(';').next().unwrap_or(ct).trim();
+        if mime == "audio/mpeg" || mime == "audio/mp3" {
+            hint.with_extension("mp3");
+            hint.mime_type("audio/mpeg");
+        } else if mime == "audio/aac" || mime == "audio/aacp" {
+            hint.with_extension("aac");
+            hint.mime_type("audio/aac");
+        } else if mime == "audio/ogg" || mime == "application/ogg" {
+            hint.with_extension("ogg");
+            hint.mime_type("audio/ogg");
+        } else if mime == "audio/flac" {
+            hint.with_extension("flac");
+            hint.mime_type("audio/flac");
+        } else {
+            hint.mime_type(mime);
+        }
+    }
+
+    if let Some(path_part) = url.split('?').next() {
+        if let Some(ext) = path_part.rsplit('.').next() {
+            if ext.len() <= 4 && !ext.contains('/') {
+                hint.with_extension(ext);
+            }
+        }
+    }
+
+    SymphoniaSource::from_reader(resp, hint)
 }
 
 impl Track {

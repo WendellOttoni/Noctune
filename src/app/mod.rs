@@ -328,6 +328,8 @@ pub struct App {
     pub radio_curated_list: Vec<crate::radio_browser::RadioStation>,
     pub radio_search_results: Vec<crate::radio_browser::RadioStation>,
     pub radio_row: usize,
+    pub radio_category_idx: usize,
+    pub radio_focus_pane: usize,
     pub radio_search_query: String,
     pub radio_search_editing: bool,
     pub radio_search_rx: Option<std::sync::mpsc::Receiver<Result<Vec<crate::radio_browser::RadioStation>, String>>>,
@@ -404,6 +406,7 @@ pub enum ViewMode {
     RecentlyPlayed,
     Smart,
     Browser,
+    Radio,
 }
 
 impl ViewMode {
@@ -412,7 +415,8 @@ impl ViewMode {
             ViewMode::Flat => ViewMode::Albums,
             ViewMode::Albums => ViewMode::Smart,
             ViewMode::Smart => ViewMode::Browser,
-            ViewMode::Browser => ViewMode::Flat,
+            ViewMode::Browser => ViewMode::Radio,
+            ViewMode::Radio => ViewMode::Flat,
             ViewMode::RecentlyPlayed => ViewMode::Flat,
         }
     }
@@ -423,6 +427,7 @@ impl ViewMode {
             ViewMode::RecentlyPlayed => "recently played",
             ViewMode::Smart => "smart",
             ViewMode::Browser => "browser",
+            ViewMode::Radio => "radio",
         }
     }
 }
@@ -682,6 +687,8 @@ impl App {
             radio_curated_list: crate::radio_browser::curated_stations(),
             radio_search_results: Vec::new(),
             radio_row: 0,
+            radio_category_idx: 0,
+            radio_focus_pane: 0,
             radio_search_query: String::new(),
             radio_search_editing: false,
             radio_search_rx: None,
@@ -1894,6 +1901,105 @@ impl App {
             return;
         }
 
+        // Radio View Search input active
+        if self.view_mode == ViewMode::Radio && self.radio_search_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.radio_search_editing = false;
+                }
+                KeyCode::Enter => {
+                    self.radio_search_editing = false;
+                    self.trigger_radio_search();
+                }
+                KeyCode::Backspace => {
+                    self.radio_search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.radio_search_query.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Radio View keyboard navigation
+        if self.view_mode == ViewMode::Radio && self.focus == Pane::Library {
+            match key.code {
+                KeyCode::Tab => {
+                    self.radio_focus_pane = (self.radio_focus_pane + 1) % 2;
+                    return;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.radio_focus_pane == 0 {
+                        self.radio_category_idx = self.radio_category_idx.saturating_sub(1);
+                        self.radio_row = 0;
+                    } else {
+                        self.radio_row = self.radio_row.saturating_sub(1);
+                    }
+                    return;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.radio_focus_pane == 0 {
+                        let max_cat = crate::radio_browser::RadioCategory::ALL.len().saturating_sub(1);
+                        if self.radio_category_idx < max_cat {
+                            self.radio_category_idx += 1;
+                            self.radio_row = 0;
+                        }
+                    } else {
+                        let count = self.radio_filtered_stations().len();
+                        if count > 0 && self.radio_row + 1 < count {
+                            self.radio_row += 1;
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Enter => {
+                    if self.radio_focus_pane == 0 {
+                        if self.radio_category_idx == 8 {
+                            // Search category
+                            self.radio_search_editing = true;
+                        } else {
+                            self.radio_focus_pane = 1;
+                        }
+                    } else {
+                        let stations = self.radio_filtered_stations();
+                        if let Some(&st) = stations.get(self.radio_row) {
+                            let st_clone = st.clone();
+                            self.play_radio_station(&st_clone, false);
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Char('a') => {
+                    let stations = self.radio_filtered_stations();
+                    if let Some(&st) = stations.get(self.radio_row) {
+                        let st_clone = st.clone();
+                        self.play_radio_station(&st_clone, true);
+                    }
+                    return;
+                }
+                KeyCode::Char('f') => {
+                    let stations = self.radio_filtered_stations();
+                    if let Some(&st) = stations.get(self.radio_row) {
+                        let p = std::path::PathBuf::from(&st.url);
+                        let fav = self.ratings.toggle_favorite(&p);
+                        self.set_info(if fav {
+                            "Rádio adicionada aos favoritos ♥"
+                        } else {
+                            "Rádio removida dos favoritos"
+                        });
+                    }
+                    return;
+                }
+                KeyCode::Char('/') => {
+                    self.radio_category_idx = 8; // Search
+                    self.radio_search_editing = true;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         if let Some(action) = self.bindings.lookup(key.code, key.modifiers) {
             self.run_action(action);
         } else {
@@ -2139,8 +2245,31 @@ impl App {
                 }
             }
             Action::EditTags => self.open_tag_editor(),
-            Action::RadioBrowser => self.open_radio_browser(),
+            Action::RadioBrowser => {
+                self.view_mode = ViewMode::Radio;
+                self.focus = Pane::Library;
+                self.set_info("📻 Radio Mode — Tab switch pane · Enter play · / search");
+            }
             Action::SelfUpdate => self.handle_self_update(),
+            Action::ViewLibrary => {
+                self.view_mode = ViewMode::Flat;
+                self.focus = Pane::Library;
+                self.set_info("View: Library (1)");
+            }
+            Action::ViewQueue => {
+                self.focus = Pane::Queue;
+                self.set_info("Focus: Queue (2)");
+            }
+            Action::ViewRadio => {
+                self.view_mode = ViewMode::Radio;
+                self.focus = Pane::Library;
+                self.set_info("📻 Radio Mode (3) — Tab switch pane · Enter play · / search");
+            }
+            Action::ViewBrowser => {
+                self.view_mode = ViewMode::Browser;
+                self.focus = Pane::Library;
+                self.set_info("View: Folders Browser (4)");
+            }
         }
     }
 
@@ -2693,6 +2822,73 @@ impl App {
                 let res = crate::updater::check_for_updates().map_err(|e| e.to_string());
                 let _ = tx.send(res);
             });
+        }
+    }
+
+    pub fn radio_filtered_stations(&self) -> Vec<&crate::radio_browser::RadioStation> {
+        let cat = crate::radio_browser::RadioCategory::ALL
+            .get(self.radio_category_idx)
+            .copied()
+            .unwrap_or(crate::radio_browser::RadioCategory::All);
+
+        match cat {
+            crate::radio_browser::RadioCategory::All => self.radio_curated_list.iter().collect(),
+            crate::radio_browser::RadioCategory::Favorites => self
+                .radio_curated_list
+                .iter()
+                .chain(self.radio_search_results.iter())
+                .filter(|st| self.ratings.is_favorite(&PathBuf::from(&st.url)))
+                .collect(),
+            crate::radio_browser::RadioCategory::Lofi => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    let t = st.tags.to_lowercase();
+                    t.contains("lofi") || t.contains("chill") || t.contains("study") || t.contains("beats")
+                })
+                .collect(),
+            crate::radio_browser::RadioCategory::Jazz => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    let t = st.tags.to_lowercase();
+                    t.contains("jazz") || t.contains("blues") || t.contains("swing") || t.contains("lounge")
+                })
+                .collect(),
+            crate::radio_browser::RadioCategory::Synthwave => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    let t = st.tags.to_lowercase();
+                    t.contains("synthwave") || t.contains("retrowave") || t.contains("cyber") || t.contains("hacker") || t.contains("darkwave")
+                })
+                .collect(),
+            crate::radio_browser::RadioCategory::Rock => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    let t = st.tags.to_lowercase();
+                    t.contains("rock") || t.contains("metal") || t.contains("indie") || t.contains("alternative")
+                })
+                .collect(),
+            crate::radio_browser::RadioCategory::Brazil => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    let t = st.tags.to_lowercase();
+                    let c = st.country.as_deref().unwrap_or("").to_lowercase();
+                    c.contains("brazil") || c.contains("brasil") || t.contains("mpb") || t.contains("bossa")
+                })
+                .collect(),
+            crate::radio_browser::RadioCategory::Classical => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    let t = st.tags.to_lowercase();
+                    t.contains("classical") || t.contains("piano") || t.contains("baroque") || t.contains("orchestral") || t.contains("opera")
+                })
+                .collect(),
+            crate::radio_browser::RadioCategory::Search => self.radio_search_results.iter().collect(),
         }
     }
 

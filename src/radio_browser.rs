@@ -21,6 +21,47 @@ pub struct RadioStation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadioCategory {
+    All,
+    Favorites,
+    Lofi,
+    Jazz,
+    Synthwave,
+    Rock,
+    Brazil,
+    Classical,
+    Search,
+}
+
+impl RadioCategory {
+    pub const ALL: [RadioCategory; 9] = [
+        RadioCategory::All,
+        RadioCategory::Favorites,
+        RadioCategory::Lofi,
+        RadioCategory::Jazz,
+        RadioCategory::Synthwave,
+        RadioCategory::Rock,
+        RadioCategory::Brazil,
+        RadioCategory::Classical,
+        RadioCategory::Search,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            RadioCategory::All => "📻 Destaques (Todas)",
+            RadioCategory::Favorites => "★ Favoritas",
+            RadioCategory::Lofi => "☕ Lo-Fi & Chill",
+            RadioCategory::Jazz => "🎷 Jazz & Blues",
+            RadioCategory::Synthwave => "⚡ Synthwave & Cyber",
+            RadioCategory::Rock => "🎸 Rock & Metal",
+            RadioCategory::Brazil => "🇧🇷 Brasil & MPB",
+            RadioCategory::Classical => "🎻 Clássica & Piano",
+            RadioCategory::Search => "🔍 Busca Global (+40k)",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioTab {
     Curated,
     Search,
