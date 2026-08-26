@@ -946,7 +946,11 @@ impl ResilientStreamReader {
                         Box::new(resp)
                     };
                     self.current_reader = Some(reader);
-                    tracing::info!(target: "audio", "Auto-reconnected live stream: {}", self.url);
+                    tracing::info!(
+                        target: "audio",
+                        "Auto-reconnected live stream: {}",
+                        self.url
+                    );
                     return true;
                 }
                 _ => {}
@@ -970,7 +974,10 @@ impl Read for ResilientStreamReader {
                     }
                     Ok(n) => return Ok(n),
                     Err(e) => {
-                        tracing::warn!(target: "audio", "Stream read interrupted ({e}), auto-reconnecting...");
+                        tracing::warn!(
+                            target: "audio",
+                            "Stream read interrupted ({e}), auto-reconnecting..."
+                        );
                         self.current_reader = None;
                         if self.reconnect() {
                             continue;
