@@ -3780,12 +3780,17 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if let Some(lyrics) = &self.lyrics {
-                    if let Some(line) = lyrics.lines.get(self.lyrics_scroll) {
-                        self.seek_to_async(line.at);
-                        self.lyrics_auto_scroll = true;
-                        self.set_info(format!("Letra: saltou para {}", crate::ui::format_duration(line.at)));
-                    }
+                let target_dur = self
+                    .lyrics
+                    .as_ref()
+                    .and_then(|l| l.lines.get(self.lyrics_scroll).map(|line| line.at));
+                if let Some(dur) = target_dur {
+                    self.seek_to_async(dur);
+                    self.lyrics_auto_scroll = true;
+                    self.set_info(format!(
+                        "Letra: saltou para {}",
+                        crate::ui::format_duration(dur)
+                    ));
                 }
             }
             _ => {}
