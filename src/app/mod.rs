@@ -3784,10 +3784,7 @@ impl App {
                     if let Some(line) = lyrics.lines.get(self.lyrics_scroll) {
                         self.seek_to_async(line.at);
                         self.lyrics_auto_scroll = true;
-                        self.set_info(format!(
-                            "Letra: saltou para {}",
-                            crate::ui::format_duration(line.at)
-                        ));
+                        self.set_info(format!("Letra: saltou para {}", crate::ui::format_duration(line.at)));
                     }
                 }
             }

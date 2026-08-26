@@ -2870,17 +2870,9 @@ fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
                     Style::default().fg(muted),
                 )
             } else if cur_idx.map(|c| i < c).unwrap_or(false) {
-                (
-                    "   ",
-                    Style::default().fg(muted),
-                    Style::default().fg(muted),
-                )
+                ("   ", Style::default().fg(muted), Style::default().fg(muted))
             } else {
-                (
-                    "   ",
-                    Style::default().fg(fg),
-                    Style::default().fg(muted),
-                )
+                ("   ", Style::default().fg(fg), Style::default().fg(muted))
             };
 
             lines.push(Line::from(vec![
