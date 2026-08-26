@@ -334,6 +334,7 @@ pub struct App {
     pub radio_category_idx: usize,
     pub radio_focus_pane: usize,
     pub radio_search_query: String,
+    pub radio_search_editing: bool,
     pub radio_search_rx:
         Option<std::sync::mpsc::Receiver<Result<Vec<crate::radio_browser::RadioStation>, String>>>,
     pub update_info: Option<crate::updater::UpdateInfo>,
