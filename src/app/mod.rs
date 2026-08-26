@@ -341,6 +341,7 @@ pub struct App {
     update_check_rx:
         Option<std::sync::mpsc::Receiver<Result<Option<crate::updater::UpdateInfo>, String>>>,
     update_apply_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    pub stream_reconnect_attempts: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -703,6 +704,7 @@ impl App {
             is_updating: false,
             update_check_rx: None,
             update_apply_rx: None,
+            stream_reconnect_attempts: 0,
         };
 
         // Spawn background update check on startup
@@ -1268,10 +1270,28 @@ impl App {
                     }
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Playlist: load failed — {e}"));
-                    self.load_rx = None;
-                    self.loading_track = None;
-                    self.pending_seek_offset = None;
+                    let is_stream = self
+                        .loading_track
+                        .as_ref()
+                        .map(Self::track_is_stream)
+                        .unwrap_or(false);
+                    if is_stream && self.stream_reconnect_attempts < 3 {
+                        self.stream_reconnect_attempts += 1;
+                        self.set_info(format!(
+                            "⏳ Conexão com a rádio oscilou. Reconectando ({}/3)…",
+                            self.stream_reconnect_attempts
+                        ));
+                        self.load_rx = None;
+                        self.loading_track = None;
+                        self.pending_seek_offset = None;
+                        self.play_current();
+                    } else {
+                        self.stream_reconnect_attempts = 0;
+                        self.set_error(format!("Playlist/Stream: falha ao carregar — {e}"));
+                        self.load_rx = None;
+                        self.loading_track = None;
+                        self.pending_seek_offset = None;
+                    }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -1688,6 +1708,21 @@ impl App {
 
         // Regular end detection (covers repeat:one and tracks with no duration)
         if self.player.is_empty() && self.player.current().is_some() {
+            if let Some(cur) = self.player.current() {
+                if Self::track_is_stream(cur)
+                    && self.stream_reconnect_attempts < 3
+                    && !self.player.is_paused()
+                {
+                    self.stream_reconnect_attempts += 1;
+                    self.set_info(format!(
+                        "⏳ Sinal da rádio interrompido. Reconectando ({}/3)…",
+                        self.stream_reconnect_attempts
+                    ));
+                    self.play_current();
+                    return Ok(());
+                }
+            }
+            self.stream_reconnect_attempts = 0;
             self.advance();
         }
         Ok(())
@@ -3704,6 +3739,7 @@ impl App {
     }
 
     fn on_track_started(&mut self, t: Track) {
+        self.stream_reconnect_attempts = 0;
         let new_art =
             crate::metadata::probe_picture(&t.path).and_then(|bytes| self.art_picker.load(&bytes));
         self.album_art = new_art;

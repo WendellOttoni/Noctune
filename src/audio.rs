@@ -878,6 +878,101 @@ impl<R: Read> Read for IcyReader<R> {
     }
 }
 
+struct ResilientStreamReader {
+    url: String,
+    stream_title: Arc<Mutex<Option<String>>>,
+    client: reqwest::blocking::Client,
+    current_reader: Option<Box<dyn Read + Send>>,
+}
+
+impl ResilientStreamReader {
+    fn new(
+        url: String,
+        stream_title: Arc<Mutex<Option<String>>>,
+        initial_reader: Box<dyn Read + Send>,
+    ) -> Self {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/0.4.5")
+            .build()
+            .unwrap_or_default();
+
+        Self {
+            url,
+            stream_title,
+            client,
+            current_reader: Some(initial_reader),
+        }
+    }
+
+    fn reconnect(&mut self) -> bool {
+        for attempt in 1..=5 {
+            std::thread::sleep(Duration::from_millis(250 * attempt as u64));
+            match self
+                .client
+                .get(&self.url)
+                .header("Icy-MetaData", "1")
+                .header("Accept", "*/*")
+                .send()
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    let metaint: Option<usize> = resp
+                        .headers()
+                        .get("icy-metaint")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse().ok());
+
+                    let reader: Box<dyn Read + Send> = if let Some(m) = metaint {
+                        if m > 0 {
+                            Box::new(IcyReader::new(resp, m, self.stream_title.clone()))
+                        } else {
+                            Box::new(resp)
+                        }
+                    } else {
+                        Box::new(resp)
+                    };
+                    self.current_reader = Some(reader);
+                    tracing::info!(target: "audio", "Auto-reconnected live stream: {}", self.url);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+}
+
+impl Read for ResilientStreamReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if let Some(reader) = &mut self.current_reader {
+                match reader.read(buf) {
+                    Ok(0) => {
+                        self.current_reader = None;
+                        if self.reconnect() {
+                            continue;
+                        }
+                        return Ok(0);
+                    }
+                    Ok(n) => return Ok(n),
+                    Err(e) => {
+                        tracing::warn!(target: "audio", "Stream read interrupted ({e}), auto-reconnecting...");
+                        self.current_reader = None;
+                        if self.reconnect() {
+                            continue;
+                        }
+                        return Err(e);
+                    }
+                }
+            } else if self.reconnect() {
+                continue;
+            } else {
+                return Ok(0);
+            }
+        }
+    }
+}
+
 fn open_http_stream(
     url: &str,
     stream_title: Arc<Mutex<Option<String>>>,
@@ -954,14 +1049,19 @@ fn open_http_stream(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse().ok());
 
-    if let Some(metaint) = metaint {
+    let initial_reader: Box<dyn Read + Send> = if let Some(metaint) = metaint {
         if metaint > 0 {
-            let reader = IcyReader::new(resp, metaint, stream_title);
-            return SymphoniaSource::from_reader(reader, hint);
+            Box::new(IcyReader::new(resp, metaint, stream_title.clone()))
+        } else {
+            Box::new(resp)
         }
-    }
+    } else {
+        Box::new(resp)
+    };
 
-    SymphoniaSource::from_reader(resp, hint)
+    let resilient_reader =
+        ResilientStreamReader::new(url.to_string(), stream_title, initial_reader);
+    SymphoniaSource::from_reader(resilient_reader, hint)
 }
 
 impl Track {
