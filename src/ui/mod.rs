@@ -2308,9 +2308,23 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let tabs_line = Line::from(vec![
         Span::raw("  "),
-        Span::styled(if is_curated { "[★ Curated Stations]" } else { " ★ Curated Stations " }, tab_curated_style),
+        Span::styled(
+            if is_curated {
+                "[★ Curated Stations]"
+            } else {
+                " ★ Curated Stations "
+            },
+            tab_curated_style,
+        ),
         Span::raw("   "),
-        Span::styled(if !is_curated { "[🔍 Search Radio-Browser (+40k)]" } else { " 🔍 Search Radio-Browser (+40k) " }, tab_search_style),
+        Span::styled(
+            if !is_curated {
+                "[🔍 Search Radio-Browser (+40k)]"
+            } else {
+                " 🔍 Search Radio-Browser (+40k) "
+            },
+            tab_search_style,
+        ),
     ]);
     f.render_widget(Paragraph::new(tabs_line), chunks[0]);
 
@@ -2327,7 +2341,10 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(muted)
         };
-        f.render_widget(Paragraph::new(Line::from(vec![Span::styled(search_text, search_style)])), chunks[1]);
+        f.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(search_text, search_style)])),
+            chunks[1],
+        );
     }
 
     // Station list
@@ -2357,7 +2374,10 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
         } else {
             "  No curated stations available."
         };
-        f.render_widget(Paragraph::new(Span::styled(empty_msg, Style::default().fg(muted))), list_area);
+        f.render_widget(
+            Paragraph::new(Span::styled(empty_msg, Style::default().fg(muted))),
+            list_area,
+        );
         return;
     }
 
@@ -2369,7 +2389,12 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let mut lines = Vec::new();
-    for (i, st) in stations.iter().enumerate().skip(scroll_offset).take(items_per_page) {
+    for (i, st) in stations
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(items_per_page)
+    {
         let selected = i == app.radio_row;
         let prefix = if selected { "▶ " } else { "  " };
         let name_style = if selected {
@@ -2379,7 +2404,10 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
         };
 
         let country = st.country.as_deref().unwrap_or("World");
-        let bitrate_str = st.bitrate.map(|b| format!("{b}k")).unwrap_or_else(|| "128k".into());
+        let bitrate_str = st
+            .bitrate
+            .map(|b| format!("{b}k"))
+            .unwrap_or_else(|| "128k".into());
         let tags_trimmed = if st.tags.len() > 24 {
             format!("{}…", &st.tags[..23])
         } else {
