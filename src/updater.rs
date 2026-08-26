@@ -135,6 +135,12 @@ fn replace_binary(exe_path: &PathBuf, new_bytes: &[u8]) -> Result<()> {
         std::fs::rename(&temp_path, exe_path).context("Failed to swap executable in place")?;
     }
 
+    #[cfg(not(any(target_os = "windows", unix)))]
+    {
+        let _ = (exe_path, new_bytes);
+        return Err(anyhow!("Unsupported operating system for in-place self-update"));
+    }
+
     Ok(())
 }
 

@@ -196,7 +196,7 @@ impl SymphoniaSource {
                     let spec = *decoded.spec();
                     let cap = decoded.capacity() as u64;
                     let sbuf = match &mut self.sample_buf {
-                        Some(sb) if sb.capacity() >= cap => sb,
+                        Some(sb) if (sb.capacity() as u64) >= cap => sb,
                         _ => {
                             self.sample_buf = Some(SampleBuffer::<f32>::new(cap, spec));
                             self.sample_buf.as_mut().unwrap()
