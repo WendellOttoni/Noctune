@@ -207,7 +207,9 @@ impl LastfmClient {
     }
 
     pub fn flush_queue(&self) -> Result<usize> {
-        let Some(path) = queue_file_path() else { return Ok(0) };
+        let Some(path) = queue_file_path() else {
+            return Ok(0);
+        };
         if !path.exists() {
             return Ok(0);
         }
@@ -222,7 +224,10 @@ impl LastfmClient {
         let mut remaining = Vec::new();
         let mut flushed = 0;
         for item in list {
-            if self.send_single_scrobble(&item.artist, &item.title, item.timestamp).is_ok() {
+            if self
+                .send_single_scrobble(&item.artist, &item.title, item.timestamp)
+                .is_ok()
+            {
                 flushed += 1;
             } else {
                 remaining.push(item);

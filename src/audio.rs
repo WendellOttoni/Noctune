@@ -900,13 +900,25 @@ fn open_http_stream(
     let mut hint = Hint::new();
     if let Some(ct) = resp.headers().get("content-type").and_then(|v| v.to_str().ok()) {
         let mime = ct.split(';').next().unwrap_or(ct).trim().to_lowercase();
-        if mime == "audio/mpeg" || mime == "audio/mp3" || mime == "audio/x-mpeg" || mime == "audio/x-mp3" {
+        if mime == "audio/mpeg"
+            || mime == "audio/mp3"
+            || mime == "audio/x-mpeg"
+            || mime == "audio/x-mp3"
+        {
             hint.with_extension("mp3");
             hint.mime_type("audio/mpeg");
-        } else if mime == "audio/aac" || mime == "audio/aacp" || mime == "audio/x-aac" || mime == "audio/x-aacp" {
+        } else if mime == "audio/aac"
+            || mime == "audio/aacp"
+            || mime == "audio/x-aac"
+            || mime == "audio/x-aacp"
+        {
             hint.with_extension("aac");
             hint.mime_type("audio/aac");
-        } else if mime == "audio/ogg" || mime == "application/ogg" || mime == "audio/opus" || mime == "audio/vorbis" {
+        } else if mime == "audio/ogg"
+            || mime == "application/ogg"
+            || mime == "audio/opus"
+            || mime == "audio/vorbis"
+        {
             hint.with_extension("ogg");
             hint.mime_type("audio/ogg");
         } else if mime == "audio/flac" || mime == "audio/x-flac" {

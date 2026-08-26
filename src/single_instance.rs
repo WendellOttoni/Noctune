@@ -14,7 +14,11 @@ impl SingleInstanceGuard {
     pub fn acquire() -> Result<Option<Self>> {
         let lock_path = match crate::config::project_dirs() {
             Ok(dirs) => dirs.config_dir().join("noctune.pid"),
-            Err(_) => return Ok(Some(Self { lock_path: PathBuf::from("noctune.pid") })),
+            Err(_) => {
+                return Ok(Some(Self {
+                    lock_path: PathBuf::from("noctune.pid"),
+                }))
+            }
         };
 
         if let Some(parent) = lock_path.parent() {

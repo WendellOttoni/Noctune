@@ -2270,7 +2270,8 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     };
     f.render_widget(Clear, popup);
 
-    let title = " 📻 Online Radio Hub — Tab switch tab · Enter play · a enqueue · / search · Esc close ";
+    let title =
+        " 📻 Online Radio Hub — Tab switch tab · Enter play · a enqueue · / search · Esc close ";
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
