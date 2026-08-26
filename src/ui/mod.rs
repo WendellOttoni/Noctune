@@ -2312,10 +2312,7 @@ fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(fg).add_modifier(Modifier::BOLD),
             )
         } else if val.is_empty() {
-            (
-                placeholders[i].to_string(),
-                Style::default().fg(muted),
-            )
+            (placeholders[i].to_string(), Style::default().fg(muted))
         } else {
             (val.clone(), Style::default().fg(fg))
         };

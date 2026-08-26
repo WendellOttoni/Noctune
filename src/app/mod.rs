@@ -334,11 +334,12 @@ pub struct App {
     pub radio_category_idx: usize,
     pub radio_focus_pane: usize,
     pub radio_search_query: String,
-    pub radio_search_editing: bool,
-    pub radio_search_rx: Option<std::sync::mpsc::Receiver<Result<Vec<crate::radio_browser::RadioStation>, String>>>,
+    pub radio_search_rx:
+        Option<std::sync::mpsc::Receiver<Result<Vec<crate::radio_browser::RadioStation>, String>>>,
     pub update_info: Option<crate::updater::UpdateInfo>,
     pub is_updating: bool,
-    update_check_rx: Option<std::sync::mpsc::Receiver<Result<Option<crate::updater::UpdateInfo>, String>>>,
+    update_check_rx:
+        Option<std::sync::mpsc::Receiver<Result<Option<crate::updater::UpdateInfo>, String>>>,
     update_apply_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
 }
 
@@ -1289,7 +1290,8 @@ impl App {
                         self.prefetch.building_next = None;
                         if let Ok(source) = res {
                             let cur = self.queue_index.unwrap_or(0);
-                            let expected_next = self.pick_next_index(cur).and_then(|i| self.queue.get(i));
+                            let expected_next =
+                                self.pick_next_index(cur).and_then(|i| self.queue.get(i));
                             if expected_next.map(|t| &t.path) == Some(&path) {
                                 self.prefetch.next = Some(PreloadedTrack { path, source });
                             }
@@ -1300,7 +1302,11 @@ impl App {
                         if let Ok(source) = res {
                             let cur = self.queue_index.unwrap_or(0);
                             let expected_prev_idx = if cur == 0 {
-                                if self.queue.len() > 1 { Some(self.queue.len() - 1) } else { None }
+                                if self.queue.len() > 1 {
+                                    Some(self.queue.len() - 1)
+                                } else {
+                                    None
+                                }
                             } else {
                                 Some(cur - 1)
                             };
@@ -1339,7 +1345,10 @@ impl App {
         if let Some(rx) = &self.update_check_rx {
             match rx.try_recv() {
                 Ok(Ok(Some(info))) => {
-                    self.set_info(format!("✨ Update v{} available! Press Shift+U to update.", info.latest_version));
+                    self.set_info(format!(
+                        "✨ Update v{} available! Press Shift+U to update.",
+                        info.latest_version
+                    ));
                     self.update_info = Some(info);
                     self.update_check_rx = None;
                 }
@@ -1987,7 +1996,9 @@ impl App {
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if self.radio_focus_pane == 0 {
-                        let max_cat = crate::radio_browser::RadioCategory::ALL.len().saturating_sub(1);
+                        let max_cat = crate::radio_browser::RadioCategory::ALL
+                            .len()
+                            .saturating_sub(1);
                         if self.radio_category_idx < max_cat {
                             self.radio_category_idx += 1;
                             self.radio_row = 0;
@@ -2694,7 +2705,11 @@ impl App {
                 self.tag_editor_row = (self.tag_editor_row + 1) % 5;
             }
             KeyCode::BackTab | KeyCode::Up => {
-                self.tag_editor_row = if self.tag_editor_row == 0 { 4 } else { self.tag_editor_row - 1 };
+                self.tag_editor_row = if self.tag_editor_row == 0 {
+                    4
+                } else {
+                    self.tag_editor_row - 1
+                };
             }
             KeyCode::Enter => {
                 self.save_tag_editor();
@@ -2711,17 +2726,39 @@ impl App {
     }
 
     fn save_tag_editor(&mut self) {
-        let Some(path) = self.tag_editor_path.take() else { return };
+        let Some(path) = self.tag_editor_path.take() else {
+            return;
+        };
         let title = self.tag_editor_fields[0].trim().to_string();
-        let artist = if self.tag_editor_fields[1].trim().is_empty() { None } else { Some(self.tag_editor_fields[1].trim().to_string()) };
-        let album = if self.tag_editor_fields[2].trim().is_empty() { None } else { Some(self.tag_editor_fields[2].trim().to_string()) };
-        let genre = if self.tag_editor_fields[3].trim().is_empty() { None } else { Some(self.tag_editor_fields[3].trim().to_string()) };
-        let year = if self.tag_editor_fields[4].trim().is_empty() { None } else { Some(self.tag_editor_fields[4].trim().to_string()) };
+        let artist = if self.tag_editor_fields[1].trim().is_empty() {
+            None
+        } else {
+            Some(self.tag_editor_fields[1].trim().to_string())
+        };
+        let album = if self.tag_editor_fields[2].trim().is_empty() {
+            None
+        } else {
+            Some(self.tag_editor_fields[2].trim().to_string())
+        };
+        let genre = if self.tag_editor_fields[3].trim().is_empty() {
+            None
+        } else {
+            Some(self.tag_editor_fields[3].trim().to_string())
+        };
+        let year = if self.tag_editor_fields[4].trim().is_empty() {
+            None
+        } else {
+            Some(self.tag_editor_fields[4].trim().to_string())
+        };
 
         // Update in Library
         for t in &mut self.library {
             if t.path == path {
-                t.title = if title.is_empty() { t.title.clone() } else { title.clone() };
+                t.title = if title.is_empty() {
+                    t.title.clone()
+                } else {
+                    title.clone()
+                };
                 t.artist = artist.clone();
                 t.album = album.clone();
                 t.genre = genre.clone();
@@ -2731,7 +2768,11 @@ impl App {
         // Update in Queue
         for t in &mut self.queue {
             if t.path == path {
-                t.title = if title.is_empty() { t.title.clone() } else { title.clone() };
+                t.title = if title.is_empty() {
+                    t.title.clone()
+                } else {
+                    title.clone()
+                };
                 t.artist = artist.clone();
                 t.album = album.clone();
                 t.genre = genre.clone();
@@ -2812,8 +2853,12 @@ impl App {
             }
             KeyCode::Enter => {
                 let station = match self.radio_tab {
-                    crate::radio_browser::RadioTab::Curated => self.radio_curated_list.get(self.radio_row).cloned(),
-                    crate::radio_browser::RadioTab::Search => self.radio_search_results.get(self.radio_row).cloned(),
+                    crate::radio_browser::RadioTab::Curated => {
+                        self.radio_curated_list.get(self.radio_row).cloned()
+                    }
+                    crate::radio_browser::RadioTab::Search => {
+                        self.radio_search_results.get(self.radio_row).cloned()
+                    }
                 };
                 if let Some(st) = station {
                     self.play_radio_station(&st, false);
@@ -2821,8 +2866,12 @@ impl App {
             }
             KeyCode::Char('a') => {
                 let station = match self.radio_tab {
-                    crate::radio_browser::RadioTab::Curated => self.radio_curated_list.get(self.radio_row).cloned(),
-                    crate::radio_browser::RadioTab::Search => self.radio_search_results.get(self.radio_row).cloned(),
+                    crate::radio_browser::RadioTab::Curated => {
+                        self.radio_curated_list.get(self.radio_row).cloned()
+                    }
+                    crate::radio_browser::RadioTab::Search => {
+                        self.radio_search_results.get(self.radio_row).cloned()
+                    }
                 };
                 if let Some(st) = station {
                     self.play_radio_station(&st, true);
@@ -3010,7 +3059,10 @@ impl App {
                 .iter()
                 .filter(|st| {
                     let t = st.tags.to_lowercase();
-                    t.contains("lofi") || t.contains("chill") || t.contains("study") || t.contains("beats")
+                    t.contains("lofi")
+                        || t.contains("chill")
+                        || t.contains("study")
+                        || t.contains("beats")
                 })
                 .collect(),
             crate::radio_browser::RadioCategory::Jazz => self
@@ -3018,7 +3070,10 @@ impl App {
                 .iter()
                 .filter(|st| {
                     let t = st.tags.to_lowercase();
-                    t.contains("jazz") || t.contains("blues") || t.contains("swing") || t.contains("lounge")
+                    t.contains("jazz")
+                        || t.contains("blues")
+                        || t.contains("swing")
+                        || t.contains("lounge")
                 })
                 .collect(),
             crate::radio_browser::RadioCategory::Synthwave => self
@@ -3026,7 +3081,11 @@ impl App {
                 .iter()
                 .filter(|st| {
                     let t = st.tags.to_lowercase();
-                    t.contains("synthwave") || t.contains("retrowave") || t.contains("cyber") || t.contains("hacker") || t.contains("darkwave")
+                    t.contains("synthwave")
+                        || t.contains("retrowave")
+                        || t.contains("cyber")
+                        || t.contains("hacker")
+                        || t.contains("darkwave")
                 })
                 .collect(),
             crate::radio_browser::RadioCategory::Rock => self
@@ -3034,7 +3093,10 @@ impl App {
                 .iter()
                 .filter(|st| {
                     let t = st.tags.to_lowercase();
-                    t.contains("rock") || t.contains("metal") || t.contains("indie") || t.contains("alternative")
+                    t.contains("rock")
+                        || t.contains("metal")
+                        || t.contains("indie")
+                        || t.contains("alternative")
                 })
                 .collect(),
             crate::radio_browser::RadioCategory::Brazil => self
@@ -3043,7 +3105,10 @@ impl App {
                 .filter(|st| {
                     let t = st.tags.to_lowercase();
                     let c = st.country.as_deref().unwrap_or("").to_lowercase();
-                    c.contains("brazil") || c.contains("brasil") || t.contains("mpb") || t.contains("bossa")
+                    c.contains("brazil")
+                        || c.contains("brasil")
+                        || t.contains("mpb")
+                        || t.contains("bossa")
                 })
                 .collect(),
             crate::radio_browser::RadioCategory::Classical => self
@@ -3051,10 +3116,16 @@ impl App {
                 .iter()
                 .filter(|st| {
                     let t = st.tags.to_lowercase();
-                    t.contains("classical") || t.contains("piano") || t.contains("baroque") || t.contains("orchestral") || t.contains("opera")
+                    t.contains("classical")
+                        || t.contains("piano")
+                        || t.contains("baroque")
+                        || t.contains("orchestral")
+                        || t.contains("opera")
                 })
                 .collect(),
-            crate::radio_browser::RadioCategory::Search => self.radio_search_results.iter().collect(),
+            crate::radio_browser::RadioCategory::Search => {
+                self.radio_search_results.iter().collect()
+            }
         }
     }
 
@@ -3523,9 +3594,13 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         let t_clone = t.clone();
         std::thread::spawn(move || {
-            let result =
-                crate::audio::build_source(&t_clone, std::time::Duration::ZERO, stream_err, stream_title)
-                    .map_err(|e| e.to_string());
+            let result = crate::audio::build_source(
+                &t_clone,
+                std::time::Duration::ZERO,
+                stream_err,
+                stream_title,
+            )
+            .map_err(|e| e.to_string());
             let _ = tx.send(result);
         });
         self.load_rx = Some(rx);
@@ -3586,9 +3661,8 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         let t_clone = track.clone();
         std::thread::spawn(move || {
-            let result =
-                crate::audio::build_source(&t_clone, offset, stream_err, stream_title)
-                    .map_err(|e| e.to_string());
+            let result = crate::audio::build_source(&t_clone, offset, stream_err, stream_title)
+                .map_err(|e| e.to_string());
             let _ = tx.send(result);
         });
         self.load_rx = Some(rx);
@@ -3727,8 +3801,13 @@ impl App {
                             let stream_err = self.player.stream_err_handle();
                             let stream_title = self.player.stream_title_handle();
                             std::thread::spawn(move || {
-                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err, stream_title)
-                                    .map_err(|e| e.to_string());
+                                let res = crate::audio::build_source(
+                                    &target,
+                                    Duration::ZERO,
+                                    stream_err,
+                                    stream_title,
+                                )
+                                .map_err(|e| e.to_string());
                                 let _ = tx.send((SlotKind::Next, path, res));
                             });
                         }
@@ -3758,8 +3837,13 @@ impl App {
                             let stream_err = self.player.stream_err_handle();
                             let stream_title = self.player.stream_title_handle();
                             std::thread::spawn(move || {
-                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err, stream_title)
-                                    .map_err(|e| e.to_string());
+                                let res = crate::audio::build_source(
+                                    &target,
+                                    Duration::ZERO,
+                                    stream_err,
+                                    stream_title,
+                                )
+                                .map_err(|e| e.to_string());
                                 let _ = tx.send((SlotKind::Prev, path, res));
                             });
                         }
@@ -3819,7 +3903,11 @@ impl App {
             return;
         }
         let i = self.queue_index.unwrap_or(0);
-        let new = if i == 0 { self.queue.len().saturating_sub(1) } else { i - 1 };
+        let new = if i == 0 {
+            self.queue.len().saturating_sub(1)
+        } else {
+            i - 1
+        };
         self.queue_index = Some(new);
         self.queue_state.select(Some(new));
 
@@ -4083,7 +4171,11 @@ impl App {
             } else {
                 let candidate = std::path::Path::new(line);
                 let p = if candidate.is_relative() {
-                    entry.path.parent().map(|dir| dir.join(candidate)).unwrap_or_else(|| std::path::PathBuf::from(line))
+                    entry
+                        .path
+                        .parent()
+                        .map(|dir| dir.join(candidate))
+                        .unwrap_or_else(|| std::path::PathBuf::from(line))
                 } else {
                     std::path::PathBuf::from(line)
                 };

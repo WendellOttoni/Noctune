@@ -235,7 +235,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
 }
 
 pub fn custom_stations_path() -> Result<std::path::PathBuf> {
-    Ok(crate::config::project_dirs()?.config_dir().join("custom_radios.json"))
+    Ok(crate::config::project_dirs()?
+        .config_dir()
+        .join("custom_radios.json"))
 }
 
 pub fn load_custom_stations() -> Vec<RadioStation> {
