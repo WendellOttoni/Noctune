@@ -2076,7 +2076,7 @@ fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
-fn format_duration(d: Duration) -> String {
+pub(crate) fn format_duration(d: Duration) -> String {
     let s = d.as_secs();
     format!("{:02}:{:02}", s / 60, s % 60)
 }
@@ -2903,7 +2903,10 @@ fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Música: ", Style::default().fg(muted)),
-                Span::styled(current_display, Style::default().fg(fg).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    current_display,
+                    Style::default().fg(fg).add_modifier(Modifier::BOLD),
+                ),
             ]),
             Line::from(""),
             Line::from(Span::styled(

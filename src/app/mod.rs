@@ -3786,7 +3786,7 @@ impl App {
                         self.lyrics_auto_scroll = true;
                         self.set_info(format!(
                             "Letra: saltou para {}",
-                            format_duration(line.at)
+                            crate::ui::format_duration(line.at)
                         ));
                     }
                 }

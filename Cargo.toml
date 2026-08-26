@@ -1,6 +1,6 @@
 [package]
 name = "noctune"
-version = "0.4.5"
+version = "0.4.6"
 edition = "2021"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
