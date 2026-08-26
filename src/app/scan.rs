@@ -63,33 +63,43 @@ pub fn scan_library_with_progress(
             let key = path.display().to_string();
             let (mtime, size) = crate::cache::file_stat(path);
             let now = crate::cache::now_unix();
-            {
+            let cached_track = {
                 let mut map = cache_mtx.lock();
                 if let Some(entry) = map.get_mut(&key) {
                     if entry.mtime == mtime && entry.size == size {
                         entry.last_accessed = now;
-                        return crate::cache::track_from_cache(path, entry);
+                        Some(crate::cache::track_from_cache(path, entry))
+                    } else {
+                        None
                     }
+                } else {
+                    None
                 }
-            }
-            // Cache miss — probe under no lock.
-            let meta: crate::metadata::TrackMeta = crate::metadata::probe(path);
-            let entry = crate::cache::CacheEntry {
-                mtime,
-                size,
-                title: meta.title.clone(),
-                artist: meta.artist.clone(),
-                album: meta.album.clone(),
-                genre: meta.genre.clone(),
-                year: meta.year.clone(),
-                duration_ms: meta.duration.map(|d| d.as_millis() as u64),
-                replaygain_track_db: meta.replaygain_track_db,
-                replaygain_album_db: meta.replaygain_album_db,
-                last_accessed: now,
-                added_at: Some(mtime),
             };
-            let track = crate::cache::track_from_cache(path, &entry);
-            cache_mtx.lock().insert(key, entry);
+            let track = match cached_track {
+                Some(t) => t,
+                None => {
+                    // Cache miss — probe under no lock.
+                    let meta: crate::metadata::TrackMeta = crate::metadata::probe(path);
+                    let entry = crate::cache::CacheEntry {
+                        mtime,
+                        size,
+                        title: meta.title.clone(),
+                        artist: meta.artist.clone(),
+                        album: meta.album.clone(),
+                        genre: meta.genre.clone(),
+                        year: meta.year.clone(),
+                        duration_ms: meta.duration.map(|d| d.as_millis() as u64),
+                        replaygain_track_db: meta.replaygain_track_db,
+                        replaygain_album_db: meta.replaygain_album_db,
+                        last_accessed: now,
+                        added_at: Some(mtime),
+                    };
+                    let track = crate::cache::track_from_cache(path, &entry);
+                    cache_mtx.lock().insert(key, entry);
+                    track
+                }
+            };
             // Emit progress every ~32 tracks to avoid flooding the channel
             // on large libraries.
             let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -103,6 +113,11 @@ pub fn scan_library_with_progress(
         .collect();
 
     cache.entries = cache_mtx.into_inner();
-    out.sort_by_key(|a| a.title.to_lowercase());
+    out.sort_by(|a, b| {
+        a.title
+            .chars()
+            .flat_map(|c| c.to_lowercase())
+            .cmp(b.title.chars().flat_map(|c| c.to_lowercase()))
+    });
     out
 }

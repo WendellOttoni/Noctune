@@ -16,15 +16,18 @@ mod lyrics;
 mod media_session;
 mod metadata;
 mod radio;
+mod radio_browser;
 mod radio_mode;
 mod ratings;
 mod secrets;
 mod share;
+mod single_instance;
 mod spotify;
 mod stats;
 mod theme;
 mod tui;
 mod ui;
+mod updater;
 mod visualizer;
 mod ytdlp;
 
@@ -32,6 +35,15 @@ fn main() -> Result<()> {
     let log_opts = logging::parse_cli_flags();
     let _log_guard = logging::init(&log_opts)?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "noctune starting");
+
+    let _instance_guard = match single_instance::SingleInstanceGuard::acquire()? {
+        Some(g) => g,
+        None => {
+            eprintln!("noctune is already running. Exiting.");
+            tracing::warn!("another noctune instance is already running; exiting");
+            return Ok(());
+        }
+    };
 
     let (config, config_warnings) = config::Config::load_or_default()?;
     for w in &config_warnings {

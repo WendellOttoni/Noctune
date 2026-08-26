@@ -1,3 +1,4 @@
+mod prefetch;
 mod scan;
 mod util;
 
@@ -12,6 +13,7 @@ use std::{path::PathBuf, time::Duration};
 use notify::Watcher as _;
 
 // Re-exports of moved-out helpers so the rest of this module compiles unchanged.
+use self::prefetch::{PrefetchSlots, PreloadedTrack, SlotKind};
 use self::scan::scan_library_with_progress;
 use self::util::{
     parse_spotify_url, pseudo_random, rect_contains, rg_scale, sort_tracks,
@@ -130,6 +132,8 @@ pub enum VizMode {
     Spectrum,
     Waveform,
     VuMeter,
+    Waterfall,
+    Oscilloscope,
 }
 
 impl VizMode {
@@ -137,7 +141,9 @@ impl VizMode {
         match self {
             VizMode::Spectrum => VizMode::Waveform,
             VizMode::Waveform => VizMode::VuMeter,
-            VizMode::VuMeter => VizMode::Spectrum,
+            VizMode::VuMeter => VizMode::Waterfall,
+            VizMode::Waterfall => VizMode::Oscilloscope,
+            VizMode::Oscilloscope => VizMode::Spectrum,
         }
     }
     pub fn label(self) -> &'static str {
@@ -145,6 +151,8 @@ impl VizMode {
             VizMode::Spectrum => "spectrum",
             VizMode::Waveform => "waveform",
             VizMode::VuMeter => "vu-meter",
+            VizMode::Waterfall => "waterfall",
+            VizMode::Oscilloscope => "oscilloscope",
         }
     }
 }
@@ -208,6 +216,7 @@ pub struct App {
     pub load_rx: Option<std::sync::mpsc::Receiver<Result<crate::audio::SymphoniaSource, String>>>,
     pub loading_track: Option<Track>,
     pub pending_seek_offset: Option<Duration>,
+    pub prefetch: PrefetchSlots,
     pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
     /// (#104) Live progress events from the scan worker — `(done, total)`.
     pub scan_progress_rx: Option<std::sync::mpsc::Receiver<(usize, usize)>>,
@@ -310,6 +319,22 @@ pub struct App {
     pub spotify_my_playlists: Vec<(String, String, u32)>,
     pub spotify_playlist_row: usize,
     spotify_search_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
+    pub show_tag_editor: bool,
+    pub tag_editor_path: Option<PathBuf>,
+    pub tag_editor_fields: [String; 5],
+    pub tag_editor_row: usize,
+    pub show_radio_browser: bool,
+    pub radio_tab: crate::radio_browser::RadioTab,
+    pub radio_curated_list: Vec<crate::radio_browser::RadioStation>,
+    pub radio_search_results: Vec<crate::radio_browser::RadioStation>,
+    pub radio_row: usize,
+    pub radio_search_query: String,
+    pub radio_search_editing: bool,
+    pub radio_search_rx: Option<std::sync::mpsc::Receiver<Result<Vec<crate::radio_browser::RadioStation>, String>>>,
+    pub update_info: Option<crate::updater::UpdateInfo>,
+    pub is_updating: bool,
+    update_check_rx: Option<std::sync::mpsc::Receiver<Result<Option<crate::updater::UpdateInfo>, String>>>,
+    update_apply_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -563,6 +588,7 @@ impl App {
             load_rx: None,
             loading_track: None,
             pending_seek_offset: None,
+            prefetch: PrefetchSlots::new(),
             scan_rx: Some(scan_rx),
             scan_progress_rx: Some(scan_progress_rx),
             scan_progress: None,
@@ -647,7 +673,32 @@ impl App {
             spotify_my_playlists: Vec::new(),
             spotify_playlist_row: 0,
             spotify_search_rx: None,
+            show_tag_editor: false,
+            tag_editor_path: None,
+            tag_editor_fields: Default::default(),
+            tag_editor_row: 0,
+            show_radio_browser: false,
+            radio_tab: crate::radio_browser::RadioTab::Curated,
+            radio_curated_list: crate::radio_browser::curated_stations(),
+            radio_search_results: Vec::new(),
+            radio_row: 0,
+            radio_search_query: String::new(),
+            radio_search_editing: false,
+            radio_search_rx: None,
+            update_info: None,
+            is_updating: false,
+            update_check_rx: None,
+            update_apply_rx: None,
         };
+
+        // Spawn background update check on startup
+        let (update_tx, update_rx) = std::sync::mpsc::channel();
+        app.update_check_rx = Some(update_rx);
+        std::thread::spawn(move || {
+            let res = crate::updater::check_for_updates().map_err(|e| e.to_string());
+            let _ = update_tx.send(res);
+        });
+
         // Watch the active theme file so external edits hot-reload (#68).
         app.rearm_theme_watcher();
         // OS media session (#54) — disabled if souvlaki cannot create the controls
@@ -1217,6 +1268,104 @@ impl App {
             }
         }
 
+        // Poll prefetch channel for adjacent track pre-buffering
+        if let Some(rx) = &self.prefetch.rx {
+            while let Ok((kind, path, res)) = rx.try_recv() {
+                match kind {
+                    SlotKind::Next => {
+                        self.prefetch.building_next = None;
+                        if let Ok(source) = res {
+                            let cur = self.queue_index.unwrap_or(0);
+                            let expected_next = self.pick_next_index(cur).and_then(|i| self.queue.get(i));
+                            if expected_next.map(|t| &t.path) == Some(&path) {
+                                self.prefetch.next = Some(PreloadedTrack { path, source });
+                            }
+                        }
+                    }
+                    SlotKind::Prev => {
+                        self.prefetch.building_prev = None;
+                        if let Ok(source) = res {
+                            let cur = self.queue_index.unwrap_or(0);
+                            let expected_prev_idx = if cur == 0 {
+                                if self.queue.len() > 1 { Some(self.queue.len() - 1) } else { None }
+                            } else {
+                                Some(cur - 1)
+                            };
+                            let expected_prev = expected_prev_idx.and_then(|i| self.queue.get(i));
+                            if expected_prev.map(|t| &t.path) == Some(&path) {
+                                self.prefetch.prev = Some(PreloadedTrack { path, source });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Poll radio search results
+        if let Some(rx) = &self.radio_search_rx {
+            match rx.try_recv() {
+                Ok(Ok(stations)) => {
+                    let n = stations.len();
+                    self.radio_search_results = stations;
+                    self.radio_row = 0;
+                    self.set_info(format!("Radio: found {n} stations."));
+                    self.radio_search_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.set_error(format!("Radio search error: {e}"));
+                    self.radio_search_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.radio_search_rx = None;
+                }
+            }
+        }
+
+        // Poll background update checks
+        if let Some(rx) = &self.update_check_rx {
+            match rx.try_recv() {
+                Ok(Ok(Some(info))) => {
+                    self.set_info(format!("✨ Update v{} available! Press Shift+U to update.", info.latest_version));
+                    self.update_info = Some(info);
+                    self.update_check_rx = None;
+                }
+                Ok(Ok(None)) => {
+                    self.update_check_rx = None;
+                }
+                Ok(Err(e)) => {
+                    tracing::debug!(target: "updater", "update check error: {e}");
+                    self.update_check_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.update_check_rx = None;
+                }
+            }
+        }
+
+        // Poll binary replacement result
+        if let Some(rx) = &self.update_apply_rx {
+            match rx.try_recv() {
+                Ok(Ok(())) => {
+                    self.is_updating = false;
+                    self.set_info("✅ Noctune updated successfully! Restart the app to apply.");
+                    self.update_info = None;
+                    self.update_apply_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.is_updating = false;
+                    self.set_error(format!("Update failed: {e}"));
+                    self.update_apply_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.is_updating = false;
+                    self.update_apply_rx = None;
+                }
+            }
+        }
+
         if let Some(err) = self.player.take_stream_error() {
             self.set_info(err);
         }
@@ -1574,6 +1723,16 @@ impl App {
             return;
         }
 
+        if self.show_tag_editor {
+            self.handle_tag_editor_key(key);
+            return;
+        }
+
+        if self.show_radio_browser {
+            self.handle_radio_browser_key(key);
+            return;
+        }
+
         if self.eq_preset_name_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1771,6 +1930,7 @@ impl App {
             }
             Action::Shuffle => {
                 self.shuffle = !self.shuffle;
+                self.update_prefetch_slots();
                 self.set_info(format!(
                     "Shuffle: {}",
                     if self.shuffle { "on" } else { "off" }
@@ -1778,6 +1938,7 @@ impl App {
             }
             Action::Repeat => {
                 self.repeat = self.repeat.cycle();
+                self.update_prefetch_slots();
                 self.set_info(format!("Repeat: {}", self.repeat.label()));
             }
             Action::Sort => {
@@ -1977,6 +2138,9 @@ impl App {
                     });
                 }
             }
+            Action::EditTags => self.open_tag_editor(),
+            Action::RadioBrowser => self.open_radio_browser(),
+            Action::SelfUpdate => self.handle_self_update(),
         }
     }
 
@@ -1989,7 +2153,7 @@ impl App {
         }
     }
 
-    pub const AUDIO_PANEL_ROWS: usize = 7;
+    pub const AUDIO_PANEL_ROWS: usize = 8;
 
     fn handle_audio_panel_key(&mut self, key: KeyEvent) {
         match key.code {
@@ -2051,6 +2215,11 @@ impl App {
             }
             6 => {
                 self.adjust_viz_sensitivity(dir as f32 * crate::visualizer::SENS_STEP);
+            }
+            7 => {
+                let s = (self.player.speed() + dir as f32 * 0.05).clamp(0.5, 2.5);
+                self.player.set_speed(s);
+                self.set_info(format!("Playback speed: {:.2}×", s));
             }
             _ => {}
         }
@@ -2293,6 +2462,237 @@ impl App {
                 }
             }
             Err(e) => self.set_info(format!("Spotify authorize error: {e}")),
+        }
+    }
+
+    fn open_tag_editor(&mut self) {
+        let track = match self.focus {
+            Pane::Library => self.selected_library_track(),
+            Pane::Queue => self
+                .queue_state
+                .selected()
+                .and_then(|i| self.queue.get(i))
+                .cloned(),
+        };
+        let Some(t) = track else {
+            self.set_info("No track selected to edit tags.");
+            return;
+        };
+        if Self::track_is_stream(&t) {
+            self.set_info("Cannot edit tags on stream URLs.");
+            return;
+        }
+
+        self.tag_editor_path = Some(t.path.clone());
+        self.tag_editor_fields = [
+            t.title.clone(),
+            t.artist.unwrap_or_default(),
+            t.album.unwrap_or_default(),
+            t.genre.unwrap_or_default(),
+            t.year.unwrap_or_default(),
+        ];
+        self.tag_editor_row = 0;
+        self.show_tag_editor = true;
+    }
+
+    fn handle_tag_editor_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_tag_editor = false;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                self.tag_editor_row = (self.tag_editor_row + 1) % 5;
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                self.tag_editor_row = if self.tag_editor_row == 0 { 4 } else { self.tag_editor_row - 1 };
+            }
+            KeyCode::Enter => {
+                self.save_tag_editor();
+                self.show_tag_editor = false;
+            }
+            KeyCode::Backspace => {
+                self.tag_editor_fields[self.tag_editor_row].pop();
+            }
+            KeyCode::Char(c) => {
+                self.tag_editor_fields[self.tag_editor_row].push(c);
+            }
+            _ => {}
+        }
+    }
+
+    fn save_tag_editor(&mut self) {
+        let Some(path) = self.tag_editor_path.take() else { return };
+        let title = self.tag_editor_fields[0].trim().to_string();
+        let artist = if self.tag_editor_fields[1].trim().is_empty() { None } else { Some(self.tag_editor_fields[1].trim().to_string()) };
+        let album = if self.tag_editor_fields[2].trim().is_empty() { None } else { Some(self.tag_editor_fields[2].trim().to_string()) };
+        let genre = if self.tag_editor_fields[3].trim().is_empty() { None } else { Some(self.tag_editor_fields[3].trim().to_string()) };
+        let year = if self.tag_editor_fields[4].trim().is_empty() { None } else { Some(self.tag_editor_fields[4].trim().to_string()) };
+
+        // Update in Library
+        for t in &mut self.library {
+            if t.path == path {
+                t.title = if title.is_empty() { t.title.clone() } else { title.clone() };
+                t.artist = artist.clone();
+                t.album = album.clone();
+                t.genre = genre.clone();
+                t.year = year.clone();
+            }
+        }
+        // Update in Queue
+        for t in &mut self.queue {
+            if t.path == path {
+                t.title = if title.is_empty() { t.title.clone() } else { title.clone() };
+                t.artist = artist.clone();
+                t.album = album.clone();
+                t.genre = genre.clone();
+                t.year = year.clone();
+            }
+        }
+        self.library_revision = self.library_revision.wrapping_add(1);
+        self.set_info(format!("Tags updated: {}", title));
+    }
+
+    fn open_radio_browser(&mut self) {
+        self.show_radio_browser = true;
+        self.radio_row = 0;
+        self.radio_search_editing = false;
+        self.set_info("Radio Hub — Tab switch mode · Enter play · a enqueue · / search");
+    }
+
+    fn trigger_radio_search(&mut self) {
+        let q = self.radio_search_query.trim().to_string();
+        if q.is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.radio_search_rx = Some(rx);
+        self.set_info(format!("Searching Radio-Browser for '{q}'…"));
+        std::thread::spawn(move || {
+            let res = crate::radio_browser::search_radio_browser(&q, 50).map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
+    fn handle_radio_browser_key(&mut self, key: KeyEvent) {
+        if self.radio_search_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.radio_search_editing = false;
+                }
+                KeyCode::Enter => {
+                    self.radio_search_editing = false;
+                    self.trigger_radio_search();
+                }
+                KeyCode::Backspace => {
+                    self.radio_search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.radio_search_query.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        let list_len = match self.radio_tab {
+            crate::radio_browser::RadioTab::Curated => self.radio_curated_list.len(),
+            crate::radio_browser::RadioTab::Search => self.radio_search_results.len(),
+        };
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('K') => {
+                self.show_radio_browser = false;
+                self.radio_search_editing = false;
+            }
+            KeyCode::Tab => {
+                self.radio_tab = self.radio_tab.cycle();
+                self.radio_row = 0;
+            }
+            KeyCode::Char('/') => {
+                self.radio_tab = crate::radio_browser::RadioTab::Search;
+                self.radio_search_editing = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.radio_row = self.radio_row.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if list_len > 0 && self.radio_row + 1 < list_len {
+                    self.radio_row += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let station = match self.radio_tab {
+                    crate::radio_browser::RadioTab::Curated => self.radio_curated_list.get(self.radio_row).cloned(),
+                    crate::radio_browser::RadioTab::Search => self.radio_search_results.get(self.radio_row).cloned(),
+                };
+                if let Some(st) = station {
+                    self.play_radio_station(&st, false);
+                }
+            }
+            KeyCode::Char('a') => {
+                let station = match self.radio_tab {
+                    crate::radio_browser::RadioTab::Curated => self.radio_curated_list.get(self.radio_row).cloned(),
+                    crate::radio_browser::RadioTab::Search => self.radio_search_results.get(self.radio_row).cloned(),
+                };
+                if let Some(st) = station {
+                    self.play_radio_station(&st, true);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn play_radio_station(&mut self, station: &crate::radio_browser::RadioStation, enqueue: bool) {
+        let mut track = Track::from_url(station.url.clone());
+        track.title = station.name.clone();
+        track.artist = Some("Radio Stream".into());
+        track.genre = Some(station.tags.clone());
+
+        if enqueue {
+            let name = station.name.clone();
+            self.queue.push(track);
+            self.set_info(format!("Enqueued radio: {name}"));
+        } else {
+            let name = station.name.clone();
+            self.queue.push(track);
+            let idx = self.queue.len() - 1;
+            self.queue_index = Some(idx);
+            self.queue_state.select(Some(idx));
+            self.play_current();
+            self.set_info(format!("Playing radio: {name}"));
+        }
+    }
+
+    fn handle_self_update(&mut self) {
+        if self.is_updating {
+            self.set_info("Update already in progress, please wait…");
+            return;
+        }
+
+        if let Some(info) = &self.update_info {
+            if let Some(url) = info.download_url.clone() {
+                self.is_updating = true;
+                self.set_info(format!("Downloading Noctune v{}…", info.latest_version));
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.update_apply_rx = Some(rx);
+                std::thread::spawn(move || {
+                    let res = crate::updater::apply_update(&url).map_err(|e| e.to_string());
+                    let _ = tx.send(res);
+                });
+            } else {
+                self.set_info(format!(
+                    "No automatic binary available for this platform. Please check GitHub release v{}.",
+                    info.latest_version
+                ));
+            }
+        } else {
+            self.set_info("Checking for new Noctune updates…");
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.update_check_rx = Some(rx);
+            std::thread::spawn(move || {
+                let res = crate::updater::check_for_updates().map_err(|e| e.to_string());
+                let _ = tx.send(res);
+            });
         }
     }
 
@@ -2635,6 +3035,7 @@ impl App {
                     } else {
                         self.queue_state.select(Some(i.min(self.queue.len() - 1)));
                     }
+                    self.update_prefetch_slots();
                 }
             }
         }
@@ -2663,6 +3064,7 @@ impl App {
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
+        self.prefetch.invalidate();
         self.player.stop();
         self.album_art = None;
         self.art_generation = self.art_generation.wrapping_add(1);
@@ -2693,7 +3095,31 @@ impl App {
         } else {
             Some(self.queue_index.unwrap_or(0).min(self.queue.len() - 1))
         });
+        self.update_prefetch_slots();
         self.set_info(format!("Undo: {}", snapshot.label));
+    }
+
+    fn play_instant(&mut self, source: crate::audio::SymphoniaSource, track: Track) {
+        self.current_play_recorded = false;
+        self.lastfm_scrobbled = false;
+        self.lastfm_scrobble_info = None;
+        self.undo_stack.clear();
+        self.load_rx = None;
+        self.loading_track = None;
+        self.pending_seek_offset = None;
+
+        // Apply ReplayGain scaling
+        self.player.rg_scale = rg_scale(&track, self.replaygain_mode);
+
+        match self.player.play_prepared(source, &track, Duration::ZERO) {
+            Ok(_) => {
+                self.on_track_started(track);
+            }
+            Err(e) => {
+                self.set_error(format!("Playback: {e}"));
+                self.play_current();
+            }
+        }
     }
 
     fn play_current(&mut self) {
@@ -2701,6 +3127,7 @@ impl App {
         self.lastfm_scrobbled = false;
         self.lastfm_scrobble_info = None;
         self.undo_stack.clear();
+        self.prefetch.invalidate();
         let Some(i) = self.queue_index else { return };
         let Some(t) = self.queue.get(i).cloned() else {
             return;
@@ -2896,6 +3323,89 @@ impl App {
             });
         }
         self.push_history(t);
+        self.update_prefetch_slots();
+    }
+
+    fn update_prefetch_slots(&mut self) {
+        let Some(cur_idx) = self.queue_index else {
+            self.prefetch.invalidate();
+            return;
+        };
+        if self.queue.is_empty() {
+            self.prefetch.invalidate();
+            return;
+        }
+
+        let next_idx = self.pick_next_index(cur_idx);
+        let prev_idx = if cur_idx == 0 {
+            if self.queue.len() > 1 {
+                Some(self.queue.len() - 1)
+            } else {
+                None
+            }
+        } else {
+            Some(cur_idx - 1)
+        };
+
+        // Prepare Next track slot
+        if let Some(n_idx) = next_idx {
+            if let Some(target) = self.queue.get(n_idx).cloned() {
+                if !Self::track_is_stream(&target) {
+                    let path = target.path.clone();
+                    let already_ready = self.prefetch.next.as_ref().map(|p| &p.path) == Some(&path);
+                    let already_building = self.prefetch.building_next.as_ref() == Some(&path);
+                    if !already_ready && !already_building {
+                        self.prefetch.next = None;
+                        self.prefetch.building_next = Some(path.clone());
+                        if let Some(tx) = &self.prefetch.tx {
+                            let tx = tx.clone();
+                            let stream_err = self.player.stream_err_handle();
+                            std::thread::spawn(move || {
+                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err)
+                                    .map_err(|e| e.to_string());
+                                let _ = tx.send((SlotKind::Next, path, res));
+                            });
+                        }
+                    }
+                } else {
+                    self.prefetch.next = None;
+                    self.prefetch.building_next = None;
+                }
+            }
+        } else {
+            self.prefetch.next = None;
+            self.prefetch.building_next = None;
+        }
+
+        // Prepare Prev track slot
+        if let Some(p_idx) = prev_idx {
+            if let Some(target) = self.queue.get(p_idx).cloned() {
+                if !Self::track_is_stream(&target) {
+                    let path = target.path.clone();
+                    let already_ready = self.prefetch.prev.as_ref().map(|p| &p.path) == Some(&path);
+                    let already_building = self.prefetch.building_prev.as_ref() == Some(&path);
+                    if !already_ready && !already_building {
+                        self.prefetch.prev = None;
+                        self.prefetch.building_prev = Some(path.clone());
+                        if let Some(tx) = &self.prefetch.tx {
+                            let tx = tx.clone();
+                            let stream_err = self.player.stream_err_handle();
+                            std::thread::spawn(move || {
+                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err)
+                                    .map_err(|e| e.to_string());
+                                let _ = tx.send((SlotKind::Prev, path, res));
+                            });
+                        }
+                    }
+                } else {
+                    self.prefetch.prev = None;
+                    self.prefetch.building_prev = None;
+                }
+            }
+        } else {
+            self.prefetch.prev = None;
+            self.prefetch.building_prev = None;
+        }
     }
 
     fn pick_next_index(&self, current: usize) -> Option<usize> {
@@ -2925,6 +3435,15 @@ impl App {
         let new = self.pick_next_index(i).unwrap_or(0);
         self.queue_index = Some(new);
         self.queue_state.select(Some(new));
+
+        if let Some(track) = self.queue.get(new).cloned() {
+            if let Some(preloaded) = self.prefetch.next.take() {
+                if preloaded.path == track.path {
+                    self.play_instant(preloaded.source, track);
+                    return;
+                }
+            }
+        }
         self.play_current();
     }
 
@@ -2933,9 +3452,18 @@ impl App {
             return;
         }
         let i = self.queue_index.unwrap_or(0);
-        let new = if i == 0 { self.queue.len() - 1 } else { i - 1 };
+        let new = if i == 0 { self.queue.len().saturating_sub(1) } else { i - 1 };
         self.queue_index = Some(new);
         self.queue_state.select(Some(new));
+
+        if let Some(track) = self.queue.get(new).cloned() {
+            if let Some(preloaded) = self.prefetch.prev.take() {
+                if preloaded.path == track.path {
+                    self.play_instant(preloaded.source, track);
+                    return;
+                }
+            }
+        }
         self.play_current();
     }
 
@@ -2948,10 +3476,19 @@ impl App {
             if let Some(new) = self.pick_next_index(i) {
                 self.queue_index = Some(new);
                 self.queue_state.select(Some(new));
+                if let Some(track) = self.queue.get(new).cloned() {
+                    if let Some(preloaded) = self.prefetch.next.take() {
+                        if preloaded.path == track.path {
+                            self.play_instant(preloaded.source, track);
+                            return;
+                        }
+                    }
+                }
                 self.play_current();
             } else {
                 self.player.stop();
                 self.queue_index = None;
+                self.prefetch.invalidate();
             }
         }
     }
@@ -3024,7 +3561,11 @@ impl App {
             .into_iter()
             .flatten()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("m3u"))
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()).map(|ext| {
+                    ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8")
+                }).unwrap_or(false)
+            })
             .filter_map(|e| {
                 let path = e.path();
                 let name = path.file_stem()?.to_str()?.to_string();
@@ -3171,7 +3712,12 @@ impl App {
                     dur,
                 ));
             } else {
-                let p = std::path::PathBuf::from(line);
+                let candidate = std::path::Path::new(line);
+                let p = if candidate.is_relative() {
+                    entry.path.parent().map(|dir| dir.join(candidate)).unwrap_or_else(|| std::path::PathBuf::from(line))
+                } else {
+                    std::path::PathBuf::from(line)
+                };
                 if p.exists() {
                     self.queue.push(Track::from_path_with_meta(p));
                 }

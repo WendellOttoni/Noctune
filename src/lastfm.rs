@@ -163,6 +163,16 @@ impl LastfmClient {
     }
 
     pub fn scrobble(&self, artist: &str, title: &str, timestamp: u64) -> Result<()> {
+        let res = self.send_single_scrobble(artist, title, timestamp);
+        if res.is_err() {
+            self.enqueue_scrobble(artist, title, timestamp);
+        } else {
+            let _ = self.flush_queue();
+        }
+        res
+    }
+
+    fn send_single_scrobble(&self, artist: &str, title: &str, timestamp: u64) -> Result<()> {
         let mut p = BTreeMap::new();
         p.insert("method", "track.scrobble".into());
         p.insert("artist[0]", artist.to_string());
@@ -172,6 +182,73 @@ impl LastfmClient {
         self.post(p)?;
         Ok(())
     }
+
+    pub fn enqueue_scrobble(&self, artist: &str, title: &str, timestamp: u64) {
+        if let Some(path) = queue_file_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let mut list: Vec<QueuedScrobble> = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+            list.push(QueuedScrobble {
+                artist: artist.to_string(),
+                title: title.to_string(),
+                timestamp,
+            });
+            if list.len() > 500 {
+                list.drain(0..list.len() - 500);
+            }
+            if let Ok(data) = serde_json::to_string(&list) {
+                let _ = std::fs::write(&path, data);
+            }
+        }
+    }
+
+    pub fn flush_queue(&self) -> Result<usize> {
+        let Some(path) = queue_file_path() else { return Ok(0) };
+        if !path.exists() {
+            return Ok(0);
+        }
+        let list: Vec<QueuedScrobble> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        if list.is_empty() {
+            return Ok(0);
+        }
+
+        let mut remaining = Vec::new();
+        let mut flushed = 0;
+        for item in list {
+            if self.send_single_scrobble(&item.artist, &item.title, item.timestamp).is_ok() {
+                flushed += 1;
+            } else {
+                remaining.push(item);
+            }
+        }
+
+        if remaining.is_empty() {
+            let _ = std::fs::remove_file(&path);
+        } else if let Ok(data) = serde_json::to_string(&remaining) {
+            let _ = std::fs::write(&path, data);
+        }
+
+        Ok(flushed)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueuedScrobble {
+    pub artist: String,
+    pub title: String,
+    pub timestamp: u64,
+}
+
+fn queue_file_path() -> Option<PathBuf> {
+    directories::ProjectDirs::from("dev", "noctune", "noctune")
+        .map(|p| p.cache_dir().join("lastfm_queue.json"))
 }
 
 // --- auth flow ---

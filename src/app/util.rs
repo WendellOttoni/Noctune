@@ -56,26 +56,29 @@ pub fn sort_tracks_with_ratings(
     mode: SortMode,
     ratings: Option<&crate::ratings::Ratings>,
 ) {
+    let cmp_ci = |a: &str, b: &str| {
+        a.chars()
+            .flat_map(|c| c.to_lowercase())
+            .cmp(b.chars().flat_map(|c| c.to_lowercase()))
+    };
+
     match mode {
-        SortMode::Title => tracks.sort_by_key(|a| a.title.to_lowercase()),
+        SortMode::Title => tracks.sort_by(|a, b| cmp_ci(&a.title, &b.title)),
         SortMode::Artist => tracks.sort_by(|a, b| {
-            let aa = a.artist.as_deref().unwrap_or("~").to_lowercase();
-            let bb = b.artist.as_deref().unwrap_or("~").to_lowercase();
-            aa.cmp(&bb)
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            let aa = a.artist.as_deref().unwrap_or("~");
+            let bb = b.artist.as_deref().unwrap_or("~");
+            cmp_ci(aa, bb).then_with(|| cmp_ci(&a.title, &b.title))
         }),
         SortMode::Album => tracks.sort_by(|a, b| {
-            let aa = a.album.as_deref().unwrap_or("~").to_lowercase();
-            let bb = b.album.as_deref().unwrap_or("~").to_lowercase();
-            aa.cmp(&bb)
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            let aa = a.album.as_deref().unwrap_or("~");
+            let bb = b.album.as_deref().unwrap_or("~");
+            cmp_ci(aa, bb).then_with(|| cmp_ci(&a.title, &b.title))
         }),
         SortMode::Rating => {
             tracks.sort_by(|a, b| {
                 let ra = ratings.map(|r| r.get(&a.path)).unwrap_or(0);
                 let rb = ratings.map(|r| r.get(&b.path)).unwrap_or(0);
-                rb.cmp(&ra)
-                    .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                rb.cmp(&ra).then_with(|| cmp_ci(&a.title, &b.title))
             });
         }
     }

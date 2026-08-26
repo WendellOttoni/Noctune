@@ -28,6 +28,8 @@ pub fn render_visualizer(f: &mut Frame, area: Rect, app: &App) {
         crate::app::VizMode::Spectrum => render_viz_spectrum(f, inner, app),
         crate::app::VizMode::Waveform => render_viz_waveform(f, inner, app),
         crate::app::VizMode::VuMeter => render_viz_vu(f, inner, app),
+        crate::app::VizMode::Waterfall => render_viz_waterfall(f, inner, app),
+        crate::app::VizMode::Oscilloscope => render_viz_oscilloscope(f, inner, app),
     }
 }
 
@@ -38,7 +40,7 @@ fn render_viz_spectrum(f: &mut Frame, inner: Rect, app: &App) {
     let n_bars = (inner.width / stride).max(1) as usize;
     let bars = app.tap.compute_bars(n_bars);
 
-    let blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    const BLOCKS: [&str; 8] = ["▁▁", "▂▂", "▃▃", "▄▄", "▅▅", "▆▆", "▇▇", "██"];
     let h = inner.height as usize;
     let primary = parse_color(&app.theme.colors.primary);
     let secondary = parse_color(&app.theme.colors.secondary);
@@ -48,15 +50,15 @@ fn render_viz_spectrum(f: &mut Frame, inner: Rect, app: &App) {
         let mut spans: Vec<Span> = Vec::with_capacity(n_bars * 2);
         let row_from_bottom = h - 1 - row;
         for (i, &val) in bars.iter().enumerate() {
-            let bar_units = (val * (h * blocks.len()) as f32) as usize;
-            let full_rows = bar_units / blocks.len();
-            let rem = bar_units % blocks.len();
-            let ch = if row_from_bottom < full_rows {
-                '█'
+            let bar_units = (val * (h * 8) as f32) as usize;
+            let full_rows = bar_units / 8;
+            let rem = bar_units % 8;
+            let bar_text = if row_from_bottom < full_rows {
+                "██"
             } else if row_from_bottom == full_rows && rem > 0 {
-                blocks[rem.saturating_sub(1)]
+                BLOCKS[rem.saturating_sub(1)]
             } else {
-                ' '
+                "  "
             };
             let color = if val > 0.75 {
                 accent
@@ -65,10 +67,9 @@ fn render_viz_spectrum(f: &mut Frame, inner: Rect, app: &App) {
             } else {
                 secondary
             };
-            let bar_text: String = std::iter::repeat_n(ch, bar_w as usize).collect();
             spans.push(Span::styled(bar_text, Style::default().fg(color)));
             if i + 1 < n_bars {
-                spans.push(Span::raw(" ".repeat(gap as usize)));
+                spans.push(Span::raw(" "));
             }
         }
         let r = Rect {
@@ -99,7 +100,7 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
 
     // sub[k]: fills (k+1)/8 from BOTTOM with foreground color.
     // Inverted (fg=bg, bg=fill): fills (7-k)/8 from TOP with fill color.
-    let sub: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    const SUB: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
     // Virtual pixel grid: h*8 rows total. s=+1 → pixel 0 (top), s=-1 → pixel h*8-1 (bottom).
     let half_px = (h * 4) as f32;
@@ -149,33 +150,33 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
             let span = if row == c.trace_row {
                 if c.above {
                     Span::styled(
-                        sub[7 - c.trace_sub].to_string(),
+                        SUB[7 - c.trace_sub],
                         Style::default().fg(accent),
                     )
                 } else if c.below {
                     if c.trace_sub == 7 {
-                        Span::styled('█'.to_string(), Style::default().fg(accent))
+                        Span::styled("█", Style::default().fg(accent))
                     } else {
                         Span::styled(
-                            sub[6 - c.trace_sub].to_string(),
+                            SUB[6 - c.trace_sub],
                             Style::default().fg(bg).bg(accent),
                         )
                     }
                 } else {
-                    let ch = if col % 3 == 0 { '·' } else { ' ' };
-                    Span::styled(ch.to_string(), Style::default().fg(muted))
+                    let ch = if col % 3 == 0 { "·" } else { " " };
+                    Span::styled(ch, Style::default().fg(muted))
                 }
             } else if row >= c.fill_lo && row < c.fill_hi {
                 let dist = (row as i32 - mid as i32).unsigned_abs() as f32;
                 let max_dist = (c.trace_row as i32 - mid as i32).unsigned_abs() as f32;
                 let t = if max_dist > 0.0 { dist / max_dist } else { 0.0 };
                 let color = if t > 0.55 { primary } else { secondary };
-                Span::styled('█'.to_string(), Style::default().fg(color))
+                Span::styled("█", Style::default().fg(color))
             } else if row == mid {
-                let ch = if col % 3 == 0 { '·' } else { ' ' };
-                Span::styled(ch.to_string(), Style::default().fg(muted))
+                let ch = if col % 3 == 0 { "·" } else { " " };
+                Span::styled(ch, Style::default().fg(muted))
             } else {
-                Span::styled(' '.to_string(), Style::default())
+                Span::raw(" ")
             };
 
             spans.push(span);
@@ -240,4 +241,88 @@ fn render_viz_vu(f: &mut Frame, inner: Rect, app: &App) {
         peak,
         if peak > 0.75 { accent } else { primary },
     );
+}
+
+fn render_viz_waterfall(f: &mut Frame, inner: Rect, app: &App) {
+    let w = inner.width as usize;
+    let h = inner.height as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let bars = app.tap.compute_bars(w);
+    let accent = parse_color(&app.theme.colors.accent);
+    let primary = parse_color(&app.theme.colors.primary);
+    let secondary = parse_color(&app.theme.colors.secondary);
+    let muted = parse_color(&app.theme.colors.muted);
+
+    const SHADES: [&str; 8] = [" ", " ", "▂", "▃", "▅", "▆", "▇", "█"];
+
+    for row in 0..h {
+        let decay = 1.0 - (row as f32 / h as f32) * 0.85;
+        let mut spans = Vec::with_capacity(w);
+        for &val in &bars {
+            let v = (val * decay).clamp(0.0, 1.0);
+            let idx = ((v * 7.0).round() as usize).min(7);
+            let color = if v > 0.75 {
+                accent
+            } else if v > 0.45 {
+                primary
+            } else if v > 0.2 {
+                secondary
+            } else {
+                muted
+            };
+            spans.push(Span::styled(SHADES[idx], Style::default().fg(color)));
+        }
+        let r = Rect {
+            x: inner.x,
+            y: inner.y + row as u16,
+            width: inner.width,
+            height: 1,
+        };
+        f.render_widget(Paragraph::new(Line::from(spans)), r);
+    }
+}
+
+fn render_viz_oscilloscope(f: &mut Frame, inner: Rect, app: &App) {
+    let w = inner.width as usize;
+    let h = inner.height as usize;
+    if w < 4 || h < 2 {
+        return;
+    }
+    let (samples, _) = app.tap.waveform_data(w);
+    let mid = h / 2;
+    let accent = parse_color(&app.theme.colors.accent);
+    let primary = parse_color(&app.theme.colors.primary);
+    let muted = parse_color(&app.theme.colors.muted);
+
+    let half_h = (h as f32) / 2.0;
+
+    for row in 0..h {
+        let mut spans = Vec::with_capacity(w);
+        for col in 0..w {
+            let s = samples[col].clamp(-1.0, 1.0);
+            let target_row = (half_h - s * half_h * 0.85).round() as usize;
+            let target_row = target_row.min(h.saturating_sub(1));
+
+            if row == target_row {
+                let sym = if col % 2 == 0 { "─" } else { "━" };
+                spans.push(Span::styled(sym, Style::default().fg(accent)));
+            } else if row == mid {
+                let sym = if col % 4 == 0 { "·" } else { " " };
+                spans.push(Span::styled(sym, Style::default().fg(muted)));
+            } else if (row as i32 - target_row as i32).abs() == 1 {
+                spans.push(Span::styled("·", Style::default().fg(primary)));
+            } else {
+                spans.push(Span::raw(" "));
+            }
+        }
+        let r = Rect {
+            x: inner.x,
+            y: inner.y + row as u16,
+            width: inner.width,
+            height: 1,
+        };
+        f.render_widget(Paragraph::new(Line::from(spans)), r);
+    }
 }

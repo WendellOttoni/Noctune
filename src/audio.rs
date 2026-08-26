@@ -45,6 +45,7 @@ pub struct SymphoniaSource {
     channels: u16,
     buf: Vec<f32>,
     buf_pos: usize,
+    sample_buf: Option<SampleBuffer<f32>>,
     // Holds the yt-dlp child process so it's killed when the source is dropped.
     _child: Option<Child>,
 }
@@ -89,6 +90,7 @@ impl SymphoniaSource {
             channels,
             buf: Vec::new(),
             buf_pos: 0,
+            sample_buf: None,
             _child: child,
         })
     }
@@ -192,15 +194,32 @@ impl SymphoniaSource {
             match self.decoder.decode(&packet) {
                 Ok(decoded) => {
                     let spec = *decoded.spec();
-                    let mut sbuf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+                    let cap = decoded.capacity() as u64;
+                    let sbuf = match &mut self.sample_buf {
+                        Some(sb) if sb.capacity() >= cap => sb,
+                        _ => {
+                            self.sample_buf = Some(SampleBuffer::<f32>::new(cap, spec));
+                            self.sample_buf.as_mut().unwrap()
+                        }
+                    };
                     sbuf.copy_interleaved_ref(decoded);
-                    self.buf = sbuf.samples().to_vec();
+                    self.buf.clear();
+                    self.buf.extend_from_slice(sbuf.samples());
                     self.buf_pos = 0;
                     return !self.buf.is_empty();
                 }
                 Err(SymphoniaError::DecodeError(_)) => continue,
                 Err(_) => return false,
             }
+        }
+    }
+}
+
+impl Drop for SymphoniaSource {
+    fn drop(&mut self) {
+        if let Some(mut child) = self._child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -263,6 +282,7 @@ pub struct Player {
     eq: EqHandle,
     comp: CompHandle,
     pub rg_scale: f32,
+    pub speed: f32,
     // crossfade state
     fade_sink: Option<Sink>,
     fade_current: Option<Track>,
@@ -366,6 +386,7 @@ impl Player {
             eq: EqHandle::new(),
             comp: CompHandle::new(),
             rg_scale: 1.0,
+            speed: 1.0,
             fade_sink: None,
             fade_current: None,
             fade_started_at: None,
@@ -376,6 +397,18 @@ impl Player {
             gapless_queued: None,
             stream_err: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn speed(&self) -> f32 {
+        self.speed
+    }
+
+    pub fn set_speed(&mut self, speed: f32) {
+        self.speed = speed.clamp(0.5, 2.5);
+        self.sink.set_speed(self.speed);
+        if let Some(f_sink) = &self.fade_sink {
+            f_sink.set_speed(self.speed);
+        }
     }
 
     pub fn tap(&self) -> VizTap {
@@ -462,6 +495,7 @@ impl Player {
         let comp = CompSource::new(eq, self.comp.clone());
         let sink = Sink::try_new(&self.handle)?;
         sink.set_volume(self.volume * self.rg_scale);
+        sink.set_speed(self.speed);
         sink.append(comp);
         self.sink = sink;
         self.current = Some(track.clone());

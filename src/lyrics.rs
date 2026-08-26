@@ -169,8 +169,9 @@ fn parse_stamp(s: &str) -> Option<Duration> {
     let ss: u64 = sec_split.next()?.parse().ok()?;
     let frac_ms = match sec_split.next() {
         Some(f) => {
-            let mut n: u64 = f.parse().ok()?;
-            match f.len() {
+            let f_trimmed = if f.len() > 3 { &f[..3] } else { f };
+            let mut n: u64 = f_trimmed.parse().ok()?;
+            match f_trimmed.len() {
                 1 => n *= 100,
                 2 => n *= 10,
                 _ => {}

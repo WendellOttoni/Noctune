@@ -87,7 +87,7 @@ pub struct LoggingGuard {
 }
 
 fn log_dir() -> PathBuf {
-    directories::ProjectDirs::from("com", "noctune", "noctune")
+    directories::ProjectDirs::from("dev", "noctune", "noctune")
         .map(|p| p.data_local_dir().join("logs"))
         .unwrap_or_else(|| PathBuf::from("noctune-logs"))
 }

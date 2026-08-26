@@ -62,6 +62,12 @@ pub enum Action {
     ShowStats,
     /// Toggle the Last.fm dashboard (#63).
     LastfmPanel,
+    /// Edit track tags / metadata in modal.
+    EditTags,
+    /// Open Online Radio directory & curated stations.
+    RadioBrowser,
+    /// Check and apply in-place app updates from GitHub.
+    SelfUpdate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -235,6 +241,9 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('E')), Action::EqTuner),
             (KeyChord::new(KeyCode::Char('O')), Action::Profiles),
             (KeyChord::new(KeyCode::Char('B')), Action::SpotifyBrowser),
+            (KeyChord::new(KeyCode::Char('T')), Action::EditTags),
+            (KeyChord::new(KeyCode::Char('K')), Action::RadioBrowser),
+            (KeyChord::new(KeyCode::Char('U')), Action::SelfUpdate),
             (
                 KeyChord::with_mods(KeyCode::Char('r'), KeyModifiers::CONTROL),
                 Action::RadioMode,

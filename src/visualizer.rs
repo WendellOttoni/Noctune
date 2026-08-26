@@ -204,7 +204,7 @@ impl VizTap {
         let mut out = Vec::with_capacity(n);
         let step = (FFT_SIZE as f32 / n as f32).max(1.0);
         for i in 0..n {
-            let offset_f = FFT_SIZE as f32 - 1.0 - i as f32 * step;
+            let offset_f = (n.saturating_sub(1 + i)) as f32 * step;
             let offset0 = offset_f.floor() as usize;
             let offset1 = (offset0 + 1).min(FFT_SIZE - 1);
             let t = offset_f - offset_f.floor();
@@ -212,7 +212,6 @@ impl VizTap {
             let idx1 = (ring.write + RING_SIZE - 1 - offset1) % RING_SIZE;
             out.push(ring.buf[idx0] * (1.0 - t) + ring.buf[idx1] * t);
         }
-        out.reverse();
         out
     }
 
