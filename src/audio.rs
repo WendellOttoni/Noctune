@@ -297,6 +297,8 @@ pub struct Player {
     pub gapless_queued: Option<Track>,
     // last error from a streaming source (yt-dlp stderr)
     stream_err: Arc<Mutex<Option<String>>>,
+    // live metadata / song title parsed from ICY streams
+    stream_title: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -396,6 +398,7 @@ impl Player {
             crossfade_pending: None,
             gapless_queued: None,
             stream_err: Arc::new(Mutex::new(None)),
+            stream_title: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -426,6 +429,20 @@ impl Player {
     /// Returns and clears the last error message from a streaming source, if any.
     pub fn take_stream_error(&self) -> Option<String> {
         self.stream_err.lock().unwrap().take()
+    }
+
+    /// Returns and clears the latest dynamic ICY track title update, if any.
+    pub fn take_stream_title(&self) -> Option<String> {
+        self.stream_title.lock().ok()?.take()
+    }
+
+    /// Returns a clone of the stream title slot for background stream decoders.
+    pub fn stream_title_handle(&self) -> Arc<Mutex<Option<String>>> {
+        self.stream_title.clone()
+    }
+
+    pub fn current_mut(&mut self) -> Option<&mut Track> {
+        self.current.as_mut()
     }
 
     pub fn play(&mut self, track: &Track) -> Result<()> {
@@ -469,7 +486,12 @@ impl Player {
     }
 
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
-        let source = build_source(track, offset, self.stream_err.clone())?;
+        let source = build_source(
+            track,
+            offset,
+            self.stream_err.clone(),
+            self.stream_title.clone(),
+        )?;
         self.play_prepared(source, track, offset)
     }
 
@@ -572,10 +594,11 @@ impl Player {
                 return Ok(()); // already preparing
             }
             let stream_err = self.stream_err.clone();
+            let stream_title = self.stream_title.clone();
             let track_owned = track.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
-                let res = build_source(&track_owned, Duration::ZERO, stream_err)
+                let res = build_source(&track_owned, Duration::ZERO, stream_err, stream_title)
                     .map_err(|e| e.to_string());
                 let _ = tx.send(res);
             });
@@ -743,6 +766,7 @@ pub fn build_source(
     track: &Track,
     offset: Duration,
     stream_err: Arc<Mutex<Option<String>>>,
+    stream_title: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
     let path_str = track.path.to_string_lossy().to_string();
     let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
@@ -754,7 +778,7 @@ pub fn build_source(
             crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)?
         } else {
             // Try direct HTTP stream first with proper headers and MIME hints
-            match open_http_stream(&path_str) {
+            match open_http_stream(&path_str, stream_title) {
                 Ok(src) => src,
                 Err(e) => {
                     tracing::warn!(target: "audio", "direct stream failed ({e}), falling back to yt-dlp/ffmpeg");
@@ -791,7 +815,72 @@ pub fn build_source(
     Ok(source)
 }
 
-fn open_http_stream(url: &str) -> Result<SymphoniaSource> {
+struct IcyReader<R> {
+    inner: R,
+    metaint: usize,
+    remaining_audio: usize,
+    stream_title: Arc<Mutex<Option<String>>>,
+    last_title: String,
+}
+
+impl<R: Read> IcyReader<R> {
+    fn new(inner: R, metaint: usize, stream_title: Arc<Mutex<Option<String>>>) -> Self {
+        Self {
+            inner,
+            metaint,
+            remaining_audio: metaint,
+            stream_title,
+            last_title: String::new(),
+        }
+    }
+
+    fn read_metadata(&mut self) -> std::io::Result<()> {
+        let mut len_byte = [0u8; 1];
+        self.inner.read_exact(&mut len_byte)?;
+        let meta_len = (len_byte[0] as usize) * 16;
+        if meta_len > 0 {
+            let mut meta_buf = vec![0u8; meta_len];
+            self.inner.read_exact(&mut meta_buf)?;
+            let meta_str = String::from_utf8_lossy(&meta_buf);
+            if let Some(start) = meta_str.find("StreamTitle='") {
+                let rest = &meta_str[start + 13..];
+                if let Some(end) = rest.find("';") {
+                    let title = rest[..end].trim();
+                    if !title.is_empty() && title != self.last_title {
+                        self.last_title = title.to_string();
+                        if let Ok(mut lock) = self.stream_title.lock() {
+                            *lock = Some(title.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        self.remaining_audio = self.metaint;
+        Ok(())
+    }
+}
+
+impl<R: Read> Read for IcyReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        if self.remaining_audio == 0 {
+            self.read_metadata()?;
+        }
+
+        let max_to_read = buf.len().min(self.remaining_audio);
+        let n = self.inner.read(&mut buf[..max_to_read])?;
+        self.remaining_audio -= n;
+        Ok(n)
+    }
+}
+
+fn open_http_stream(
+    url: &str,
+    stream_title: Arc<Mutex<Option<String>>>,
+) -> Result<SymphoniaSource> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/0.4.5")
@@ -799,7 +888,7 @@ fn open_http_stream(url: &str) -> Result<SymphoniaSource> {
 
     let resp = client
         .get(url)
-        .header("Icy-MetaData", "0")
+        .header("Icy-MetaData", "1")
         .header("Accept", "*/*")
         .send()
         .with_context(|| format!("GET {url}"))?;
@@ -839,6 +928,19 @@ fn open_http_stream(url: &str) -> Result<SymphoniaSource> {
             if ext.len() <= 4 && !ext.contains('/') {
                 hint.with_extension(ext);
             }
+        }
+    }
+
+    let metaint: Option<usize> = resp
+        .headers()
+        .get("icy-metaint")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok());
+
+    if let Some(metaint) = metaint {
+        if metaint > 0 {
+            let reader = IcyReader::new(resp, metaint, stream_title);
+            return SymphoniaSource::from_reader(reader, hint);
         }
     }
 

@@ -1377,6 +1377,42 @@ impl App {
             self.set_info(err);
         }
 
+        if let Some(title) = self.player.take_stream_title() {
+            let (artist, song) = if let Some((a, s)) = title.split_once(" - ") {
+                (Some(a.trim().to_string()), s.trim().to_string())
+            } else {
+                (None, title.clone())
+            };
+
+            if let Some(current) = self.player.current_mut() {
+                if let Some(a) = &artist {
+                    current.artist = Some(a.clone());
+                }
+                current.title = song.clone();
+            }
+
+            if let Some(idx) = self.queue_index {
+                if let Some(track) = self.queue.get_mut(idx) {
+                    if let Some(a) = &artist {
+                        track.artist = Some(a.clone());
+                    }
+                    track.title = song.clone();
+                }
+            }
+
+            if let Some(current) = self.player.current() {
+                if let Some(s) = &mut self.media_session {
+                    s.update_metadata(
+                        &current.title,
+                        current.artist.as_deref().unwrap_or(""),
+                        current.album.as_deref(),
+                        current.duration,
+                    );
+                }
+                self.set_info(format!("Radio: {}", current.display()));
+            }
+        }
+
         // OS media-session events (#54) — play/pause/next/prev pressed on the SMTC,
         // MPRIS, or MediaRemote card. Drain everything queued this tick.
         if let Some(rx) = &self.media_session_rx {
@@ -3353,11 +3389,12 @@ impl App {
         // Local file or HTTP/YouTube stream — build the source off the UI thread so
         // yt-dlp spawn / HTTP connect / symphonia probe don't freeze input (issue #58).
         let stream_err = self.player.stream_err_handle();
+        let stream_title = self.player.stream_title_handle();
         let (tx, rx) = std::sync::mpsc::channel();
         let t_clone = t.clone();
         std::thread::spawn(move || {
             let result =
-                crate::audio::build_source(&t_clone, std::time::Duration::ZERO, stream_err)
+                crate::audio::build_source(&t_clone, std::time::Duration::ZERO, stream_err, stream_title)
                     .map_err(|e| e.to_string());
             let _ = tx.send(result);
         });
@@ -3415,11 +3452,13 @@ impl App {
 
     fn spawn_seek_load(&mut self, track: Track, offset: Duration) {
         let stream_err = self.player.stream_err_handle();
+        let stream_title = self.player.stream_title_handle();
         let (tx, rx) = std::sync::mpsc::channel();
         let t_clone = track.clone();
         std::thread::spawn(move || {
             let result =
-                crate::audio::build_source(&t_clone, offset, stream_err).map_err(|e| e.to_string());
+                crate::audio::build_source(&t_clone, offset, stream_err, stream_title)
+                    .map_err(|e| e.to_string());
             let _ = tx.send(result);
         });
         self.load_rx = Some(rx);
@@ -3556,8 +3595,9 @@ impl App {
                         if let Some(tx) = &self.prefetch.tx {
                             let tx = tx.clone();
                             let stream_err = self.player.stream_err_handle();
+                            let stream_title = self.player.stream_title_handle();
                             std::thread::spawn(move || {
-                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err)
+                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err, stream_title)
                                     .map_err(|e| e.to_string());
                                 let _ = tx.send((SlotKind::Next, path, res));
                             });
@@ -3586,8 +3626,9 @@ impl App {
                         if let Some(tx) = &self.prefetch.tx {
                             let tx = tx.clone();
                             let stream_err = self.player.stream_err_handle();
+                            let stream_title = self.player.stream_title_handle();
                             std::thread::spawn(move || {
-                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err)
+                                let res = crate::audio::build_source(&target, Duration::ZERO, stream_err, stream_title)
                                     .map_err(|e| e.to_string());
                                 let _ = tx.send((SlotKind::Prev, path, res));
                             });
