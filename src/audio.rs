@@ -287,6 +287,7 @@ pub struct Player {
     fade_sink: Option<Sink>,
     fade_current: Option<Track>,
     fade_started_at: Option<Instant>,
+    fade_rg_scale: f32,
     crossfade_start: Option<Instant>,
     pub crossfade_secs: f32,
     // Streams cannot synchronously open during the few seconds before the song ends,
@@ -392,8 +393,9 @@ impl Player {
             fade_sink: None,
             fade_current: None,
             fade_started_at: None,
+            fade_rg_scale: 1.0,
             crossfade_start: None,
-            crossfade_secs: 3.0,
+            crossfade_secs: 2.0,
             crossfade_load_rx: None,
             crossfade_pending: None,
             gapless_queued: None,
@@ -582,7 +584,7 @@ impl Player {
         Some(total.saturating_sub(self.elapsed()))
     }
 
-    pub fn begin_crossfade(&mut self, track: &Track) -> Result<()> {
+    pub fn begin_crossfade(&mut self, track: &Track, rg_scale: f32) -> Result<()> {
         let path_str = track.path.to_string_lossy();
         let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
         if is_url {
@@ -604,6 +606,7 @@ impl Player {
             });
             self.crossfade_load_rx = Some(rx);
             self.crossfade_pending = Some(track.clone());
+            self.fade_rg_scale = rg_scale;
             return Ok(());
         }
 
@@ -611,18 +614,25 @@ impl Player {
             File::open(&track.path).with_context(|| format!("opening {}", track.path.display()))?;
         let source = SymphoniaSource::from_file(file, hint_from_path(&track.path))
             .map_err(|e| anyhow!("decoding {}: {e}", track.path.display()))?;
-        self.attach_fade_source(source, track.clone())
+        self.attach_fade_source(source, track.clone(), rg_scale)
     }
 
-    fn attach_fade_source(&mut self, source: SymphoniaSource, track: Track) -> Result<()> {
+    fn attach_fade_source(
+        &mut self,
+        source: SymphoniaSource,
+        track: Track,
+        rg_scale: f32,
+    ) -> Result<()> {
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
         let comp = CompSource::new(eq, self.comp.clone());
         let new_sink = Sink::try_new(&self.handle)?;
         new_sink.set_volume(0.0);
+        new_sink.set_speed(self.speed);
         new_sink.append(comp);
         self.fade_sink = Some(new_sink);
         self.fade_current = Some(track);
+        self.fade_rg_scale = rg_scale;
         self.fade_started_at = Some(Instant::now());
         self.crossfade_start = Some(Instant::now());
         Ok(())
@@ -636,7 +646,10 @@ impl Player {
                 Ok(Ok(source)) => {
                     self.crossfade_load_rx = None;
                     if let Some(track) = self.crossfade_pending.take() {
-                        if self.attach_fade_source(source, track).is_err() {
+                        if self
+                            .attach_fade_source(source, track, self.fade_rg_scale)
+                            .is_err()
+                        {
                             self.cancel_crossfade();
                             return CrossfadeStatus::None;
                         }
@@ -664,13 +677,14 @@ impl Player {
         self.sink
             .set_volume(self.volume * self.rg_scale * (1.0 - progress));
         if let Some(sink) = &self.fade_sink {
-            sink.set_volume(self.volume * self.rg_scale * progress);
+            sink.set_volume(self.volume * self.fade_rg_scale * progress);
         }
 
         if progress >= 1.0 || self.sink.empty() {
             if let (Some(new_sink), Some(new_track)) =
                 (self.fade_sink.take(), self.fade_current.take())
             {
+                self.rg_scale = self.fade_rg_scale;
                 new_sink.set_volume(self.volume * self.rg_scale);
                 let played = self
                     .fade_started_at

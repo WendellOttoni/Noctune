@@ -207,6 +207,12 @@ pub struct Playback {
     pub default_volume: f32,
     pub shuffle: bool,
     pub repeat: bool,
+    #[serde(default = "default_crossfade_secs")]
+    pub crossfade_secs: f32,
+}
+
+fn default_crossfade_secs() -> f32 {
+    2.0
 }
 
 impl Default for Config {
@@ -243,6 +249,7 @@ impl Default for Config {
                 default_volume: 0.7,
                 shuffle: false,
                 repeat: false,
+                crossfade_secs: 2.0,
             },
             spotify: SpotifyConfig::default(),
             visualizer: VisualizerConfig::default(),

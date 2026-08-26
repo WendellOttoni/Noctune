@@ -463,10 +463,11 @@ impl App {
     pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
         crate::ytdlp::configure_retries(config.ytdlp.clone());
         let history_cfg = config.history.clone();
-        let player = Player::new(
+        let mut player = Player::new(
             config.playback.default_volume,
             config.visualizer.sensitivity,
         )?;
+        player.crossfade_secs = config.playback.crossfade_secs;
         let tap = player.tap();
 
         let config_shuffle = config.playback.shuffle;
@@ -1564,23 +1565,25 @@ impl App {
                     if let Some(t) = self.player.current().cloned() {
                         self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
                         self.set_info(format!("Playing: {}", t.display()));
-                        self.push_history(t);
+                        self.on_track_started(t);
                     }
                 }
             }
-            return Ok(());
         }
 
         // Try to start a crossfade when close to end (not for repeat:one)
-        if !matches!(self.repeat, RepeatMode::One) {
+        if !matches!(self.repeat, RepeatMode::One) && self.player.crossfade_secs > 0.0 {
             if let Some(remaining) = self.player.remaining() {
                 let xfade = Duration::from_secs_f32(self.player.crossfade_secs);
                 if remaining > Duration::ZERO && remaining <= xfade {
                     let cur = self.queue_index.unwrap_or(0);
                     if let Some(next_idx) = self.pick_next_index(cur) {
                         if let Some(track) = self.queue.get(next_idx).cloned() {
-                            if self.player.begin_crossfade(&track).is_ok() {
-                                self.pending_crossfade_idx = Some(next_idx);
+                            if self.pending_crossfade_idx.is_none() {
+                                let scale = rg_scale(&track, self.replaygain_mode);
+                                if self.player.begin_crossfade(&track, scale).is_ok() {
+                                    self.pending_crossfade_idx = Some(next_idx);
+                                }
                             }
                         }
                     }
@@ -2448,6 +2451,8 @@ impl App {
             5 => {
                 let xf = (self.player.crossfade_secs + dir as f32 * 0.5).clamp(0.0, 10.0);
                 self.player.crossfade_secs = xf;
+                self.config.playback.crossfade_secs = xf;
+                let _ = self.config.save();
                 self.set_info(format!("Crossfade: {:.1}s", xf));
             }
             6 => {
