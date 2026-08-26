@@ -794,7 +794,7 @@ pub fn build_source(
 fn open_http_stream(url: &str) -> Result<SymphoniaSource> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/0.4.3")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/0.4.5")
         .build()?;
 
     let resp = client
@@ -810,21 +810,27 @@ fn open_http_stream(url: &str) -> Result<SymphoniaSource> {
 
     let mut hint = Hint::new();
     if let Some(ct) = resp.headers().get("content-type").and_then(|v| v.to_str().ok()) {
-        let mime = ct.split(';').next().unwrap_or(ct).trim();
-        if mime == "audio/mpeg" || mime == "audio/mp3" {
+        let mime = ct.split(';').next().unwrap_or(ct).trim().to_lowercase();
+        if mime == "audio/mpeg" || mime == "audio/mp3" || mime == "audio/x-mpeg" || mime == "audio/x-mp3" {
             hint.with_extension("mp3");
             hint.mime_type("audio/mpeg");
-        } else if mime == "audio/aac" || mime == "audio/aacp" {
+        } else if mime == "audio/aac" || mime == "audio/aacp" || mime == "audio/x-aac" || mime == "audio/x-aacp" {
             hint.with_extension("aac");
             hint.mime_type("audio/aac");
-        } else if mime == "audio/ogg" || mime == "application/ogg" {
+        } else if mime == "audio/ogg" || mime == "application/ogg" || mime == "audio/opus" || mime == "audio/vorbis" {
             hint.with_extension("ogg");
             hint.mime_type("audio/ogg");
-        } else if mime == "audio/flac" {
+        } else if mime == "audio/flac" || mime == "audio/x-flac" {
             hint.with_extension("flac");
             hint.mime_type("audio/flac");
+        } else if mime == "audio/mp4" || mime == "audio/m4a" || mime == "audio/x-m4a" {
+            hint.with_extension("m4a");
+            hint.mime_type("audio/mp4");
+        } else if mime == "audio/wav" || mime == "audio/x-wav" {
+            hint.with_extension("wav");
+            hint.mime_type("audio/wav");
         } else {
-            hint.mime_type(mime);
+            hint.mime_type(&mime);
         }
     }
 

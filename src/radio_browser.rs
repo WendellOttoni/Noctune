@@ -82,7 +82,7 @@ pub fn curated_stations() -> Vec<RadioStation> {
         // Lo-Fi & Chill
         RadioStation {
             name: "Lofi Girl (Chill Beats)".into(),
-            url: "https://play.streamafrica.net/lofigirl".into(),
+            url: "https://play.streamafrica.net/lofiradio".into(),
             homepage: Some("https://lofigirl.com".into()),
             tags: "lofi, chill, instrumental, study".into(),
             country: Some("France".into()),
@@ -115,7 +115,7 @@ pub fn curated_stations() -> Vec<RadioStation> {
         // Synthwave & Cyberpunk
         RadioStation {
             name: "Nightride FM (Synthwave / Retrowave)".into(),
-            url: "https://stream.nightride.fm/nightride.m4a".into(),
+            url: "https://stream.nightride.fm/nightride.mp3".into(),
             homepage: Some("https://nightride.fm".into()),
             tags: "synthwave, retrowave, cyberpunk, 80s".into(),
             country: Some("United States".into()),
@@ -155,11 +155,19 @@ pub fn curated_stations() -> Vec<RadioStation> {
             bitrate: Some(128),
         },
         RadioStation {
-            name: "BBC Radio 3 (Classical)".into(),
-            url: "http://stream.live.vc.bbcmedia.co.uk/bbc_radio_three".into(),
-            homepage: Some("https://www.bbc.co.uk/radio3".into()),
-            tags: "classical, opera, culture".into(),
+            name: "Classic FM (UK)".into(),
+            url: "http://media-ice.musicradio.com/ClassicFMMP3".into(),
+            homepage: Some("https://www.classicfm.com".into()),
+            tags: "classical, orchestral, relax, symphony".into(),
             country: Some("United Kingdom".into()),
+            bitrate: Some(128),
+        },
+        RadioStation {
+            name: "WQXR 105.9 FM (Classical)".into(),
+            url: "https://stream.wqxr.org/wqxr".into(),
+            homepage: Some("https://www.wqxr.org".into()),
+            tags: "classical, opera, orchestral, piano".into(),
+            country: Some("United States".into()),
             bitrate: Some(128),
         },
         // Rock, Metal & Pop
@@ -179,10 +187,18 @@ pub fn curated_stations() -> Vec<RadioStation> {
             country: Some("United States".into()),
             bitrate: Some(128),
         },
+        RadioStation {
+            name: "Kiss FM 92.5 (Brasil)".into(),
+            url: "https://26593.live.streamtheworld.com/RADIO_KISSFM_ADP.aac".into(),
+            homepage: Some("https://kissfm.com.br".into()),
+            tags: "rock, classic rock, hard rock, metal".into(),
+            country: Some("Brazil".into()),
+            bitrate: Some(128),
+        },
         // Brazil Stations
         RadioStation {
-            name: "Antena 1 (Brasil)".into(),
-            url: "https://stream.antena1.com.br/stream".into(),
+            name: "Antena 1 FM 94.7 (Brasil)".into(),
+            url: "http://antena1.newradio.it/stream?ext=.mp3".into(),
             homepage: Some("https://www.antena1.com.br".into()),
             tags: "pop, adult contemporary, international".into(),
             country: Some("Brazil".into()),
@@ -190,7 +206,7 @@ pub fn curated_stations() -> Vec<RadioStation> {
         },
         RadioStation {
             name: "Rádio Eldorado FM (Brasil)".into(),
-            url: "https://ice.fabricahost.com.br/eldoradofmsp".into(),
+            url: "https://cast4.audiostream.com.br:2652/mp3".into(),
             homepage: Some("https://www.eldorado.com.br".into()),
             tags: "mpb, rock, news, culture".into(),
             country: Some("Brazil".into()),
@@ -198,9 +214,17 @@ pub fn curated_stations() -> Vec<RadioStation> {
         },
         RadioStation {
             name: "NovaBrasil FM (Brasil)".into(),
-            url: "https://painel.fabricahost.com.br:8000/stream/novabrasilsp".into(),
+            url: "https://playerservices.streamtheworld.com/api/livestream-redirect/NOVABRASIL_FORAAC.aac".into(),
             homepage: Some("https://novabrasilfm.com.br".into()),
             tags: "mpb, bossa nova, brasil".into(),
+            country: Some("Brazil".into()),
+            bitrate: Some(128),
+        },
+        RadioStation {
+            name: "Rádio Batuta MPB (Brasil)".into(),
+            url: "http://radioims.out.airtime.pro:8000/radioims_a".into(),
+            homepage: Some("https://radiobatuta.ims.com.br".into()),
+            tags: "mpb, samba, bossa nova, brasil".into(),
             country: Some("Brazil".into()),
             bitrate: Some(128),
         },
@@ -216,7 +240,7 @@ pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
-        .user_agent("Noctune/0.4.2 (https://github.com/WendellOttoni/Noctune)")
+        .user_agent("Noctune/0.4.5 (https://github.com/WendellOttoni/Noctune)")
         .build()?;
 
     let encoded_query = urlencoding_simple(query_trimmed);
