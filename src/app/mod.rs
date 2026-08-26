@@ -324,6 +324,9 @@ pub struct App {
     pub tag_editor_fields: [String; 5],
     pub tag_editor_row: usize,
     pub show_radio_browser: bool,
+    pub show_radio_custom_modal: bool,
+    pub radio_custom_fields: [String; 3],
+    pub radio_custom_field_idx: usize,
     pub radio_tab: crate::radio_browser::RadioTab,
     pub radio_curated_list: Vec<crate::radio_browser::RadioStation>,
     pub radio_search_results: Vec<crate::radio_browser::RadioStation>,
@@ -683,8 +686,11 @@ impl App {
             tag_editor_fields: Default::default(),
             tag_editor_row: 0,
             show_radio_browser: false,
+            show_radio_custom_modal: false,
+            radio_custom_fields: [String::new(), String::new(), String::new()],
+            radio_custom_field_idx: 0,
             radio_tab: crate::radio_browser::RadioTab::Curated,
-            radio_curated_list: crate::radio_browser::curated_stations(),
+            radio_curated_list: crate::radio_browser::all_stations(),
             radio_search_results: Vec::new(),
             radio_row: 0,
             radio_category_idx: 0,
@@ -1776,6 +1782,11 @@ impl App {
             return;
         }
 
+        if self.show_radio_custom_modal {
+            self.handle_radio_custom_modal_key(key);
+            return;
+        }
+
         if self.eq_preset_name_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1990,8 +2001,12 @@ impl App {
                     return;
                 }
                 KeyCode::Enter => {
+                    let search_cat_idx = crate::radio_browser::RadioCategory::ALL
+                        .iter()
+                        .position(|c| *c == crate::radio_browser::RadioCategory::Search)
+                        .unwrap_or(9);
                     if self.radio_focus_pane == 0 {
-                        if self.radio_category_idx == 8 {
+                        if self.radio_category_idx == search_cat_idx {
                             // Search category
                             self.radio_search_editing = true;
                         } else {
@@ -2014,6 +2029,12 @@ impl App {
                     }
                     return;
                 }
+                KeyCode::Char('+') | KeyCode::Char('N') | KeyCode::Char('n') => {
+                    self.show_radio_custom_modal = true;
+                    self.radio_custom_fields = [String::new(), String::new(), String::new()];
+                    self.radio_custom_field_idx = 0;
+                    return;
+                }
                 KeyCode::Char('f') => {
                     let stations = self.radio_filtered_stations();
                     if let Some(&st) = stations.get(self.radio_row) {
@@ -2028,7 +2049,11 @@ impl App {
                     return;
                 }
                 KeyCode::Char('/') => {
-                    self.radio_category_idx = 8; // Search
+                    let search_cat_idx = crate::radio_browser::RadioCategory::ALL
+                        .iter()
+                        .position(|c| *c == crate::radio_browser::RadioCategory::Search)
+                        .unwrap_or(9);
+                    self.radio_category_idx = search_cat_idx;
                     self.radio_search_editing = true;
                     return;
                 }
@@ -2803,6 +2828,81 @@ impl App {
                     self.play_radio_station(&st, true);
                 }
             }
+            KeyCode::Char('+') | KeyCode::Char('N') | KeyCode::Char('n') => {
+                self.show_radio_custom_modal = true;
+                self.radio_custom_fields = [String::new(), String::new(), String::new()];
+                self.radio_custom_field_idx = 0;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_radio_custom_modal_key(&mut self, key: crossterm::event::KeyEvent) {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                self.show_radio_custom_modal = false;
+                self.radio_custom_fields = [String::new(), String::new(), String::new()];
+                self.radio_custom_field_idx = 0;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                self.radio_custom_field_idx = (self.radio_custom_field_idx + 1) % 3;
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                if self.radio_custom_field_idx == 0 {
+                    self.radio_custom_field_idx = 2;
+                } else {
+                    self.radio_custom_field_idx -= 1;
+                }
+            }
+            KeyCode::Enter => {
+                if self.radio_custom_field_idx == 0 && self.radio_custom_fields[1].is_empty() {
+                    self.radio_custom_field_idx = 1;
+                    return;
+                }
+                let name = self.radio_custom_fields[0].trim().to_string();
+                let url = self.radio_custom_fields[1].trim().to_string();
+                let tags = self.radio_custom_fields[2].trim().to_string();
+
+                if url.is_empty() {
+                    self.set_error("URL da rádio não pode ficar vazia");
+                    return;
+                }
+
+                let final_name = if name.is_empty() {
+                    url.split('/').last().unwrap_or("Custom Radio").to_string()
+                } else {
+                    name
+                };
+
+                let station = crate::radio_browser::RadioStation {
+                    name: final_name.clone(),
+                    url: url.clone(),
+                    homepage: None,
+                    tags: if tags.is_empty() {
+                        "custom".into()
+                    } else {
+                        tags
+                    },
+                    country: Some("Personalizada".into()),
+                    bitrate: Some(128),
+                };
+
+                let _ = crate::radio_browser::add_custom_station(station.clone());
+                self.radio_curated_list.retain(|s| s.url != url);
+                self.radio_curated_list.insert(0, station);
+
+                self.show_radio_custom_modal = false;
+                self.radio_custom_fields = [String::new(), String::new(), String::new()];
+                self.radio_custom_field_idx = 0;
+                self.set_info(format!("Rádio adicionada: {final_name}"));
+            }
+            KeyCode::Backspace => {
+                self.radio_custom_fields[self.radio_custom_field_idx].pop();
+            }
+            KeyCode::Char(c) => {
+                self.radio_custom_fields[self.radio_custom_field_idx].push(c);
+            }
             _ => {}
         }
     }
@@ -2869,6 +2969,21 @@ impl App {
 
         match cat {
             crate::radio_browser::RadioCategory::All => self.radio_curated_list.iter().collect(),
+            crate::radio_browser::RadioCategory::Custom => {
+                let custom_urls: std::collections::HashSet<String> =
+                    crate::radio_browser::load_custom_stations()
+                        .into_iter()
+                        .map(|s| s.url)
+                        .collect();
+                self.radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        custom_urls.contains(&st.url)
+                            || st.country.as_deref() == Some("Personalizada")
+                            || st.tags.contains("custom")
+                    })
+                    .collect()
+            }
             crate::radio_browser::RadioCategory::Favorites => self
                 .radio_curated_list
                 .iter()

@@ -84,6 +84,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_radio_browser {
         render_radio_browser(f, area, app);
     }
+    if app.show_radio_custom_modal {
+        render_radio_custom_modal(f, area, app);
+    }
 }
 
 fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
@@ -2258,6 +2261,79 @@ fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let w = 64.min(area.width.saturating_sub(4)).max(32);
+    let h = 10.min(area.height.saturating_sub(2));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            " ✨ Adicionar Rádio — Tab/↑↓ campo · Enter salvar · Esc cancelar ",
+            theme.accent(),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let labels = ["Nome da Estação", "URL do Stream", "Gênero / Tags"];
+    let placeholders = [
+        "Ex: Rádio Retrô FM",
+        "Ex: https://stream.exemplo.com/live.mp3",
+        "Ex: synthwave, 80s, instrumental",
+    ];
+    let accent = parse_color(&theme.colors.accent);
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+
+    for (i, label) in labels.iter().enumerate() {
+        let y = inner.y + 1 + (i as u16 * 2);
+        if y >= inner.y + inner.height {
+            break;
+        }
+        let selected = i == app.radio_custom_field_idx;
+        let lbl_style = if selected {
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(muted)
+        };
+
+        let val = &app.radio_custom_fields[i];
+        let (val_display, val_style) = if selected {
+            (
+                format!("{val}█"),
+                Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            )
+        } else if val.is_empty() {
+            (
+                placeholders[i].to_string(),
+                Style::default().fg(muted),
+            )
+        } else {
+            (val.clone(), Style::default().fg(fg))
+        };
+
+        let line = Line::from(vec![
+            Span::styled(format!(" {:<16}: ", label), lbl_style),
+            Span::styled(val_display, val_style),
+        ]);
+        let r = Rect {
+            x: inner.x,
+            y,
+            width: inner.width,
+            height: 1,
+        };
+        f.render_widget(Paragraph::new(line), r);
+    }
+}
+
 fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let w = 80.min(area.width.saturating_sub(2)).max(40);
@@ -2271,7 +2347,7 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Clear, popup);
 
     let title =
-        " 📻 Online Radio Hub — Tab switch tab · Enter play · a enqueue · / search · Esc close ";
+        " 📻 Online Radio Hub — Tab switch tab · Enter play · a enqueue · +/N add · / search · Esc close ";
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
@@ -2692,6 +2768,10 @@ fn render_radio_view(f: &mut Frame, area: Rect, app: &App) {
     info_lines.push(Line::from(Span::styled(
         " a     enfileirar",
         Style::default().fg(fg),
+    )));
+    info_lines.push(Line::from(Span::styled(
+        " +/N   adicionar rádio",
+        Style::default().fg(accent).add_modifier(Modifier::BOLD),
     )));
     info_lines.push(Line::from(Span::styled(
         " f     favoritar (♥)",

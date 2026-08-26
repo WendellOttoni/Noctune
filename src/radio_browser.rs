@@ -23,6 +23,7 @@ pub struct RadioStation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioCategory {
     All,
+    Custom,
     Favorites,
     Lofi,
     Jazz,
@@ -34,8 +35,9 @@ pub enum RadioCategory {
 }
 
 impl RadioCategory {
-    pub const ALL: [RadioCategory; 9] = [
+    pub const ALL: [RadioCategory; 10] = [
         RadioCategory::All,
+        RadioCategory::Custom,
         RadioCategory::Favorites,
         RadioCategory::Lofi,
         RadioCategory::Jazz,
@@ -49,6 +51,7 @@ impl RadioCategory {
     pub fn label(&self) -> &'static str {
         match self {
             RadioCategory::All => "📻 Destaques (Todas)",
+            RadioCategory::Custom => "✨ Minhas Rádios",
             RadioCategory::Favorites => "★ Favoritas",
             RadioCategory::Lofi => "☕ Lo-Fi & Chill",
             RadioCategory::Jazz => "🎷 Jazz & Blues",
@@ -229,6 +232,47 @@ pub fn curated_stations() -> Vec<RadioStation> {
             bitrate: Some(128),
         },
     ]
+}
+
+pub fn custom_stations_path() -> Result<std::path::PathBuf> {
+    Ok(crate::config::project_dirs()?.config_dir().join("custom_radios.json"))
+}
+
+pub fn load_custom_stations() -> Vec<RadioStation> {
+    let Ok(path) = custom_stations_path() else {
+        return Vec::new();
+    };
+    if !path.exists() {
+        return Vec::new();
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_custom_stations(stations: &[RadioStation]) -> Result<()> {
+    let path = custom_stations_path()?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let data = serde_json::to_string_pretty(stations)?;
+    std::fs::write(&path, data)?;
+    Ok(())
+}
+
+pub fn add_custom_station(station: RadioStation) -> Result<()> {
+    let mut current = load_custom_stations();
+    current.retain(|s| s.url != station.url);
+    current.insert(0, station);
+    save_custom_stations(&current)
+}
+
+pub fn all_stations() -> Vec<RadioStation> {
+    let mut list = load_custom_stations();
+    let mut curated = curated_stations();
+    list.append(&mut curated);
+    list
 }
 
 /// Query the Radio-Browser public API for stations matching the query.
