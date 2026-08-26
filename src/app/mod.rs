@@ -2108,9 +2108,9 @@ impl App {
                 KeyCode::Char('f') => {
                     let target_opt = {
                         let stations = self.radio_filtered_stations();
-                        stations.get(self.radio_row).map(|st| {
-                            (st.name.clone(), std::path::PathBuf::from(&st.url))
-                        })
+                        stations
+                            .get(self.radio_row)
+                            .map(|st| (st.name.clone(), std::path::PathBuf::from(&st.url)))
                     };
                     if let Some((name, p)) = target_opt {
                         let fav = self.ratings.toggle_favorite(&p);

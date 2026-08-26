@@ -65,7 +65,9 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from(""),
         Line::from("  EQ & Audio"),
         Line::from("    e            open audio panel (EQ, crossfade, speed, viz sens…)"),
-        Line::from("    0 / Shift+E  cycle EQ presets (Flat, Bass Boost, Vocal, Rock, Electronic…)"),
+        Line::from(
+            "    0 / Shift+E  cycle EQ presets (Flat, Bass Boost, Vocal, Rock, Electronic…)",
+        ),
         Line::from("    Ctrl+S       save custom preset (in EQ tuner)"),
         Line::from("    y            open synced lyrics / Karaoke popup"),
         Line::from("    v            cycle viz mode (spectrum/waveform/vu/waterfall/oscilloscope)"),
