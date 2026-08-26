@@ -149,18 +149,12 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
 
             let span = if row == c.trace_row {
                 if c.above {
-                    Span::styled(
-                        SUB[7 - c.trace_sub],
-                        Style::default().fg(accent),
-                    )
+                    Span::styled(SUB[7 - c.trace_sub], Style::default().fg(accent))
                 } else if c.below {
                     if c.trace_sub == 7 {
                         Span::styled("█", Style::default().fg(accent))
                     } else {
-                        Span::styled(
-                            SUB[6 - c.trace_sub],
-                            Style::default().fg(bg).bg(accent),
-                        )
+                        Span::styled(SUB[6 - c.trace_sub], Style::default().fg(bg).bg(accent))
                     }
                 } else {
                     let ch = if col % 3 == 0 { "·" } else { " " };

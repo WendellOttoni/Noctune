@@ -36,7 +36,10 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>> {
         .build()?;
 
     let url = "https://api.github.com/repos/WendellOttoni/Noctune/releases/latest";
-    let resp = client.get(url).send().context("Failed to query GitHub Releases API")?;
+    let resp = client
+        .get(url)
+        .send()
+        .context("Failed to query GitHub Releases API")?;
 
     if !resp.status().is_success() {
         return Err(anyhow!("GitHub API returned HTTP {}", resp.status()));
@@ -66,13 +69,17 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>> {
 
 /// Downloads and replaces the current running binary in-place.
 pub fn apply_update(download_url: &str) -> Result<()> {
-    let current_exe = std::env::current_exe().context("Could not determine current executable path")?;
+    let current_exe =
+        std::env::current_exe().context("Could not determine current executable path")?;
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
         .user_agent(format!("Noctune/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    let resp = client.get(download_url).send().context("Failed to download release binary")?;
+    let resp = client
+        .get(download_url)
+        .send()
+        .context("Failed to download release binary")?;
     if !resp.status().is_success() {
         return Err(anyhow!("Download failed with HTTP {}", resp.status()));
     }
@@ -138,7 +145,9 @@ fn replace_binary(exe_path: &PathBuf, new_bytes: &[u8]) -> Result<()> {
     #[cfg(not(any(target_os = "windows", unix)))]
     {
         let _ = (exe_path, new_bytes);
-        return Err(anyhow!("Unsupported operating system for in-place self-update"));
+        return Err(anyhow!(
+            "Unsupported operating system for in-place self-update"
+        ));
     }
 
     Ok(())

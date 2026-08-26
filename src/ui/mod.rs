@@ -2385,7 +2385,10 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(prefix, Style::default().fg(accent)),
             Span::styled(format!("{:<28} ", st.name), name_style),
             Span::styled(format!(" {:<14} ", country), Style::default().fg(secondary)),
-            Span::styled(format!(" {:<6} ", bitrate_str), Style::default().fg(primary)),
+            Span::styled(
+                format!(" {:<6} ", bitrate_str),
+                Style::default().fg(primary),
+            ),
             Span::styled(format!(" {}", tags_trimmed), Style::default().fg(muted)),
         ]);
         lines.push(row_line);
