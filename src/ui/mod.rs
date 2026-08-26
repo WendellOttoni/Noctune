@@ -2347,7 +2347,7 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Clear, popup);
 
     let title =
-        " 📻 Online Radio Hub — Tab switch tab · Enter play · a enqueue · +/N add · / search · Esc close ";
+        " 📻 Online Radio Hub — Tab tab · Enter play · a enqueue · f fav (♥) · +/N add · / search · Esc close ";
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
@@ -2474,6 +2474,9 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     {
         let selected = i == app.radio_row;
         let prefix = if selected { "▶ " } else { "  " };
+        let is_fav = app.ratings.is_favorite(&std::path::PathBuf::from(&st.url));
+        let fav_icon = if is_fav { "♥ " } else { "  " };
+
         let name_style = if selected {
             Style::default().fg(accent).add_modifier(Modifier::BOLD)
         } else {
@@ -2493,8 +2496,9 @@ fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
 
         let row_line = Line::from(vec![
             Span::styled(prefix, Style::default().fg(accent)),
-            Span::styled(format!("{:<28} ", st.name), name_style),
-            Span::styled(format!(" {:<14} ", country), Style::default().fg(secondary)),
+            Span::styled(fav_icon, Style::default().fg(accent)),
+            Span::styled(format!("{:<26} ", st.name), name_style),
+            Span::styled(format!(" {:<12} ", country), Style::default().fg(secondary)),
             Span::styled(
                 format!(" {:<6} ", bitrate_str),
                 Style::default().fg(primary),

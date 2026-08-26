@@ -2041,9 +2041,9 @@ impl App {
                         let p = std::path::PathBuf::from(&st.url);
                         let fav = self.ratings.toggle_favorite(&p);
                         self.set_info(if fav {
-                            "Rádio adicionada aos favoritos ♥"
+                            format!("Rádio favoritada: {} ♥", st.name)
                         } else {
-                            "Rádio removida dos favoritos"
+                            format!("Rádio removida dos favoritos: {}", st.name)
                         });
                     }
                     return;
@@ -2832,6 +2832,21 @@ impl App {
                 self.show_radio_custom_modal = true;
                 self.radio_custom_fields = [String::new(), String::new(), String::new()];
                 self.radio_custom_field_idx = 0;
+            }
+            KeyCode::Char('f') => {
+                let station = match self.radio_tab {
+                    crate::radio_browser::RadioTab::Curated => self.radio_curated_list.get(self.radio_row).cloned(),
+                    crate::radio_browser::RadioTab::Search => self.radio_search_results.get(self.radio_row).cloned(),
+                };
+                if let Some(st) = station {
+                    let p = std::path::PathBuf::from(&st.url);
+                    let fav = self.ratings.toggle_favorite(&p);
+                    self.set_info(if fav {
+                        format!("Rádio favoritada: {} ♥", st.name)
+                    } else {
+                        format!("Rádio removida dos favoritos: {}", st.name)
+                    });
+                }
             }
             _ => {}
         }
