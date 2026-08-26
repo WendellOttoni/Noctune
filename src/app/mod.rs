@@ -2925,8 +2925,12 @@ impl App {
             }
             KeyCode::Char('f') => {
                 let station = match self.radio_tab {
-                    crate::radio_browser::RadioTab::Curated => self.radio_curated_list.get(self.radio_row).cloned(),
-                    crate::radio_browser::RadioTab::Search => self.radio_search_results.get(self.radio_row).cloned(),
+                    crate::radio_browser::RadioTab::Curated => {
+                        self.radio_curated_list.get(self.radio_row).cloned()
+                    }
+                    crate::radio_browser::RadioTab::Search => {
+                        self.radio_search_results.get(self.radio_row).cloned()
+                    }
                 };
                 if let Some(st) = station {
                     let p = std::path::PathBuf::from(&st.url);
