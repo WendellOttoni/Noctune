@@ -87,6 +87,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_radio_custom_modal {
         render_radio_custom_modal(f, area, app);
     }
+    if app.show_lyrics {
+        render_lyrics_modal(f, area, app);
+    }
 }
 
 fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
@@ -2791,4 +2794,132 @@ fn render_radio_view(f: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(info_lines).wrap(Wrap { trim: true }),
         hub_inner,
     );
+}
+
+fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
+    let w = 80.min(area.width.saturating_sub(4));
+    let h = 24.min(area.height.saturating_sub(4));
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let primary = parse_color(&app.theme.colors.primary);
+    let accent = parse_color(&app.theme.colors.accent);
+    let muted = parse_color(&app.theme.colors.muted);
+    let fg = parse_color(&app.theme.colors.foreground);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.border(true))
+        .title(Span::styled(
+            " 🎤 Letras Sincronizadas / Karaoke [y/Esc: fechar · Enter: ir ao verso · k/j: rolar · c: auto-scroll · r: buscar] ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let elapsed = app.player.elapsed();
+
+    if let Some(lyrics) = &app.lyrics {
+        if lyrics.lines.is_empty() {
+            let p = Paragraph::new("Letra vazia.").style(Style::default().fg(muted));
+            f.render_widget(p, inner);
+            return;
+        }
+
+        let cur_idx = lyrics.current_index(elapsed);
+        let total_lines = lyrics.lines.len();
+        let visible_lines = inner.height as usize;
+
+        let active_row = if app.lyrics_auto_scroll {
+            if let Some(ci) = cur_idx {
+                app.lyrics_scroll = ci;
+                ci
+            } else {
+                app.lyrics_scroll
+            }
+        } else {
+            app.lyrics_scroll
+        };
+
+        let half = visible_lines / 2;
+        let start_idx = active_row.saturating_sub(half);
+        let end_idx = (start_idx + visible_lines).min(total_lines);
+
+        let mut lines: Vec<Line> = Vec::new();
+        for i in start_idx..end_idx {
+            let line = &lyrics.lines[i];
+            let is_current = Some(i) == cur_idx;
+            let is_cursor = i == app.lyrics_scroll;
+            let time_str = format_duration(line.at);
+
+            let (prefix, text_style, time_style) = if is_current {
+                (
+                    " ▶ ",
+                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
+                    Style::default().fg(primary).add_modifier(Modifier::BOLD),
+                )
+            } else if is_cursor && !app.lyrics_auto_scroll {
+                (
+                    " • ",
+                    Style::default().fg(fg).add_modifier(Modifier::UNDERLINED),
+                    Style::default().fg(muted),
+                )
+            } else if cur_idx.map(|c| i < c).unwrap_or(false) {
+                (
+                    "   ",
+                    Style::default().fg(muted),
+                    Style::default().fg(muted),
+                )
+            } else {
+                (
+                    "   ",
+                    Style::default().fg(fg),
+                    Style::default().fg(muted),
+                )
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(prefix, text_style),
+                Span::styled(format!("[{}] ", time_str), time_style),
+                Span::styled(&line.text, text_style),
+            ]));
+        }
+
+        let p = Paragraph::new(lines);
+        f.render_widget(p, inner);
+    } else {
+        let current_display = app
+            .player
+            .current()
+            .map(|t| t.display())
+            .unwrap_or_else(|| "Nenhuma música tocando".to_string());
+
+        let msg = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Música: ", Style::default().fg(muted)),
+                Span::styled(current_display, Style::default().fg(fg).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Nenhuma letra sincronizada encontrada para esta faixa.",
+                Style::default().fg(muted),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  • Pressione 'r' para buscar novamente no LRCLIB.",
+                Style::default().fg(accent),
+            )),
+            Line::from(Span::styled(
+                "  • Ou coloque um arquivo .lrc com mesmo nome junto ao arquivo de áudio.",
+                Style::default().fg(fg),
+            )),
+        ];
+        f.render_widget(Paragraph::new(msg), inner);
+    }
 }

@@ -76,6 +76,8 @@ pub enum Action {
     ViewRadio,
     /// Switch directly to File Browser view.
     ViewBrowser,
+    /// Toggle the Karaoke / Synced Lyrics modal.
+    ShowLyrics,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -250,6 +252,8 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('B')), Action::SpotifyBrowser),
             (KeyChord::new(KeyCode::Char('T')), Action::EditTags),
             (KeyChord::new(KeyCode::Char('K')), Action::RadioBrowser),
+            (KeyChord::new(KeyCode::Char('y')), Action::ShowLyrics),
+            (KeyChord::new(KeyCode::Char('Y')), Action::ShowLyrics),
             (KeyChord::new(KeyCode::Char('U')), Action::SelfUpdate),
             (
                 KeyChord::with_mods(KeyCode::Char('r'), KeyModifiers::CONTROL),

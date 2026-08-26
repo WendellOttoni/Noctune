@@ -558,6 +558,13 @@ impl Player {
         self.play_from(&track, Duration::from_millis(new_ms as u64))
     }
 
+    pub fn seek_to(&mut self, target: Duration) -> Result<()> {
+        let Some(track) = self.current.clone() else {
+            return Ok(());
+        };
+        self.play_from(&track, target)
+    }
+
     pub fn toggle(&mut self) {
         if self.sink.is_paused() {
             self.sink.play();

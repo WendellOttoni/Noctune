@@ -343,6 +343,9 @@ pub struct App {
         Option<std::sync::mpsc::Receiver<Result<Option<crate::updater::UpdateInfo>, String>>>,
     update_apply_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
     pub stream_reconnect_attempts: u32,
+    pub show_lyrics: bool,
+    pub lyrics_scroll: usize,
+    pub lyrics_auto_scroll: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -707,6 +710,9 @@ impl App {
             update_check_rx: None,
             update_apply_rx: None,
             stream_reconnect_attempts: 0,
+            show_lyrics: false,
+            lyrics_scroll: 0,
+            lyrics_auto_scroll: true,
         };
 
         // Spawn background update check on startup
@@ -1844,6 +1850,11 @@ impl App {
             return;
         }
 
+        if self.show_lyrics {
+            self.handle_lyrics_key(key);
+            return;
+        }
+
         if self.eq_preset_name_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -2395,6 +2406,17 @@ impl App {
                 self.view_mode = ViewMode::Browser;
                 self.focus = Pane::Library;
                 self.set_info("View: Folders Browser (4)");
+            }
+            Action::ShowLyrics => {
+                self.show_lyrics = !self.show_lyrics;
+                self.lyrics_auto_scroll = true;
+                if self.show_lyrics {
+                    if let Some(track) = self.player.current().cloned() {
+                        if self.lyrics.is_none() {
+                            self.spawn_lyrics_fetch(&track);
+                        }
+                    }
+                }
             }
         }
     }
@@ -3715,6 +3737,62 @@ impl App {
         let target_ms = (total.as_millis() as f32 * frac.clamp(0.0, 1.0)) as u64;
         self.spawn_seek_load(track, Duration::from_millis(target_ms));
         Ok(())
+    }
+
+    fn seek_to_async(&mut self, target: Duration) {
+        let Some(track) = self.player.current().cloned() else {
+            return;
+        };
+        if !Self::track_is_stream(&track) {
+            let _ = self.player.seek_to(target);
+            return;
+        }
+        self.spawn_seek_load(track, target);
+    }
+
+    fn handle_lyrics_key(&mut self, key: crossterm::event::KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('y') | KeyCode::Char('q') => {
+                self.show_lyrics = false;
+            }
+            KeyCode::Char(' ') => {
+                self.player.toggle();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.lyrics_scroll = self.lyrics_scroll.saturating_sub(1);
+                self.lyrics_auto_scroll = false;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max_len = self.lyrics.as_ref().map(|l| l.lines.len()).unwrap_or(0);
+                if max_len > 0 && self.lyrics_scroll + 1 < max_len {
+                    self.lyrics_scroll += 1;
+                }
+                self.lyrics_auto_scroll = false;
+            }
+            KeyCode::Char('c') | KeyCode::Char('a') => {
+                self.lyrics_auto_scroll = true;
+                self.set_info("Karaoke: auto-scroll ativado");
+            }
+            KeyCode::Char('r') => {
+                if let Some(track) = self.player.current().cloned() {
+                    self.spawn_lyrics_fetch(&track);
+                    self.set_info("Buscando letras no LRCLIB…");
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(lyrics) = &self.lyrics {
+                    if let Some(line) = lyrics.lines.get(self.lyrics_scroll) {
+                        self.seek_to_async(line.at);
+                        self.lyrics_auto_scroll = true;
+                        self.set_info(format!(
+                            "Letra: saltou para {}",
+                            format_duration(line.at)
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn spawn_seek_load(&mut self, track: Track, offset: Duration) {
