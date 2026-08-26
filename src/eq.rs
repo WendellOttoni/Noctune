@@ -65,7 +65,7 @@ pub const PRESETS: &[(&str, EqState)] = &[
         },
     ),
     (
-        "Bass",
+        "Bass Boost",
         EqState {
             low_db: 6.0,
             mid_db: 0.0,
@@ -73,7 +73,7 @@ pub const PRESETS: &[(&str, EqState)] = &[
         },
     ),
     (
-        "Vocal",
+        "Vocal Boost",
         EqState {
             low_db: -2.0,
             mid_db: 4.0,
@@ -81,7 +81,7 @@ pub const PRESETS: &[(&str, EqState)] = &[
         },
     ),
     (
-        "Treble",
+        "Treble Boost",
         EqState {
             low_db: -2.0,
             mid_db: 0.0,
@@ -89,7 +89,47 @@ pub const PRESETS: &[(&str, EqState)] = &[
         },
     ),
     (
-        "Loud",
+        "Rock",
+        EqState {
+            low_db: 4.0,
+            mid_db: -1.0,
+            high_db: 4.0,
+        },
+    ),
+    (
+        "Electronic",
+        EqState {
+            low_db: 6.0,
+            mid_db: 1.0,
+            high_db: 4.0,
+        },
+    ),
+    (
+        "Hip-Hop",
+        EqState {
+            low_db: 7.0,
+            mid_db: 1.0,
+            high_db: 2.0,
+        },
+    ),
+    (
+        "Jazz",
+        EqState {
+            low_db: 3.0,
+            mid_db: 2.0,
+            high_db: 3.0,
+        },
+    ),
+    (
+        "Acoustic",
+        EqState {
+            low_db: 3.0,
+            mid_db: 3.0,
+            high_db: 2.0,
+        },
+    ),
+    (
+        "Loudness",
         EqState {
             low_db: 5.0,
             mid_db: 1.0,

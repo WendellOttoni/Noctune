@@ -719,6 +719,15 @@ impl App {
 
         // Watch the active theme file so external edits hot-reload (#68).
         app.rearm_theme_watcher();
+
+        // Restore saved EQ preset
+        if let Some(pos) = crate::eq::PRESETS
+            .iter()
+            .position(|(name, _)| *name == app.config.playback.eq_preset)
+        {
+            app.eq_preset_idx = pos;
+            app.player.eq().set(crate::eq::PRESETS[pos].1);
+        }
         // OS media session (#54) — disabled if souvlaki cannot create the controls
         // (e.g. headless Linux without a dbus session). Log the failure so users can
         // tell apart "no SMTC card because the integration is off" from "no SMTC card
@@ -2293,7 +2302,9 @@ impl App {
                 self.eq_preset_idx = (self.eq_preset_idx + 1) % presets.len();
                 let (name, state) = presets[self.eq_preset_idx];
                 self.player.eq().set(state);
-                self.set_info(format!("EQ preset: {name}"));
+                self.config.playback.eq_preset = name.to_string();
+                let _ = self.config.save();
+                self.set_info(format!("EQ Preset: 🎚️ {name}"));
             }
             Action::Rescan => self.start_async_scan(),
             Action::TrackInfo => self.show_info = true,
@@ -2440,7 +2451,9 @@ impl App {
                 };
                 let (name, state) = presets[self.eq_preset_idx];
                 self.player.eq().set(state);
-                self.set_info(format!("EQ preset: {name}"));
+                self.config.playback.eq_preset = name.to_string();
+                let _ = self.config.save();
+                self.set_info(format!("EQ Preset: 🎚️ {name}"));
             }
             4 => {
                 let v = (self.player.volume() + dir as f32 * 0.05).clamp(0.0, 1.5);

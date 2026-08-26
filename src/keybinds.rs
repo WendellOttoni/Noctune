@@ -226,6 +226,7 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('4')), Action::ViewBrowser),
             (KeyChord::new(KeyCode::Char('i')), Action::OpenUrl),
             (KeyChord::new(KeyCode::Char('0')), Action::EqPreset),
+            (KeyChord::new(KeyCode::Char('E')), Action::EqPreset),
             (KeyChord::new(KeyCode::Char('R')), Action::Rescan),
             (KeyChord::new(KeyCode::Char('I')), Action::TrackInfo),
             (KeyChord::new(KeyCode::BackTab), Action::CycleTheme),
