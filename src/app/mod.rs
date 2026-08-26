@@ -3914,9 +3914,11 @@ impl App {
             .flatten()
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()).map(|ext| {
-                    ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8")
-                }).unwrap_or(false)
+                e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8"))
+                    .unwrap_or(false)
             })
             .filter_map(|e| {
                 let path = e.path();

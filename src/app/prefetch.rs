@@ -2,8 +2,8 @@
 //! Prepares initial streaming decoders for adjacent previous and next tracks
 //! in background threads to enable instantaneous (0ms) manual track switching.
 
-use std::path::PathBuf;
 use crate::audio::SymphoniaSource;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotKind {

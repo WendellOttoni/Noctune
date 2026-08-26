@@ -783,8 +783,9 @@ pub fn build_source(
                 Err(e) => {
                     tracing::warn!(target: "audio", "direct stream failed ({e}), falling back to yt-dlp/ffmpeg");
                     // Fallback to yt-dlp/ffmpeg for HLS / complex containers
-                    crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)
-                        .map_err(|e2| anyhow!("stream playback failed: direct: {e} | fallback: {e2}"))?
+                    crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err).map_err(|e2| {
+                        anyhow!("stream playback failed: direct: {e} | fallback: {e2}")
+                    })?
                 }
             }
         }
@@ -898,7 +899,11 @@ fn open_http_stream(
     }
 
     let mut hint = Hint::new();
-    if let Some(ct) = resp.headers().get("content-type").and_then(|v| v.to_str().ok()) {
+    if let Some(ct) = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+    {
         let mime = ct.split(';').next().unwrap_or(ct).trim().to_lowercase();
         if mime == "audio/mpeg"
             || mime == "audio/mp3"
