@@ -32,7 +32,12 @@ pub fn parse_spotify_url(url: &str) -> (String, String) {
 }
 
 pub fn rect_contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
-    r.width > 0 && r.height > 0 && x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
+    r.width > 0
+        && r.height > 0
+        && x >= r.x
+        && x < r.x.saturating_add(r.width)
+        && y >= r.y
+        && y < r.y.saturating_add(r.height)
 }
 
 pub fn pseudo_random(modulo: usize) -> usize {
@@ -56,9 +61,7 @@ pub fn sort_tracks_with_ratings(
     mode: SortMode,
     ratings: Option<&crate::ratings::Ratings>,
 ) {
-    let cmp_ci = |a: &str, b: &str| {
-        a.to_lowercase().cmp(&b.to_lowercase())
-    };
+    let cmp_ci = |a: &str, b: &str| a.to_lowercase().cmp(&b.to_lowercase());
 
     match mode {
         SortMode::Title => tracks.sort_by(|a, b| cmp_ci(&a.title, &b.title)),

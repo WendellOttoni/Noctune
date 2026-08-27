@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use rusqlite::{params, Connection};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
-use parking_lot::Mutex;
 
 use crate::audio::Track;
 

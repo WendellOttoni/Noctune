@@ -1023,7 +1023,10 @@ fn open_http_stream(
 ) -> Result<SymphoniaSource> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent(concat!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()?;
 
     let resp = client

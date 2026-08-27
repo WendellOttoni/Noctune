@@ -677,7 +677,11 @@ impl App {
         self.set_info(format!("Rádio adicionada: {final_name}"));
     }
 
-    pub(crate) fn play_radio_station(&mut self, station: &crate::radio_browser::RadioStation, enqueue: bool) {
+    pub(crate) fn play_radio_station(
+        &mut self,
+        station: &crate::radio_browser::RadioStation,
+        enqueue: bool,
+    ) {
         let mut track = Track::from_url(station.url.clone());
         track.title = station.name.clone();
         track.artist = Some("Radio Stream".into());
