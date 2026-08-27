@@ -757,7 +757,7 @@ impl App {
     }
 
     pub(crate) fn update_command_palette_matches(&mut self) {
-        use crate::app::types::{PaletteCategory, PaletteItem, PaletteAction};
+        use crate::app::types::{PaletteAction, PaletteCategory, PaletteItem};
 
         let raw_query = self.command_palette_input.trim();
         let is_cmd_mode = raw_query.starts_with('>') || raw_query.starts_with(':');
@@ -771,32 +771,162 @@ impl App {
 
         // 1. Built-in Commands
         let cmds = [
-            ("play", "Play / Pause", "Alternar reprodução e pausa", Action::PlayPause),
-            ("next", "Próxima Música", "Avançar para a próxima faixa da fila", Action::Next),
-            ("prev", "Música Anterior", "Voltar para a faixa anterior", Action::Prev),
-            ("stop", "Parar Reprodução", "Parar áudio e descarregar sink", Action::Stop),
-            ("shuffle", "Alternar Shuffle", "Ativar ou desativar modo aleatório", Action::Shuffle),
-            ("repeat", "Alternar Repeat", "Ciclar modos de repetição (off/all/one)", Action::Repeat),
-            ("mini", "Alternar Mini Player", "Alternar modo compacto com capa de álbum", Action::ToggleMini),
-            ("eq", "Equalizador Tuner", "Abrir calibrador de frequências de áudio", Action::EqTuner),
-            ("audio", "Painel de Áudio & Compressor", "Ajustar dinâmica e ganho", Action::ShowAudioPanel),
-            ("viz", "Ciclar Visualizador FFT", "Mudar modo: spectrum, waveform, vu-meter...", Action::CycleVizMode),
-            ("lyrics", "Letras / Karaokê", "Abrir modal de letras sincronizadas (LRC)", Action::ShowLyrics),
-            ("radio", "Rádios Online", "Explorar diretório mundial de web rádios", Action::RadioBrowser),
-            ("spotify", "Spotify Browser", "Buscar e navegar nas playlists do Spotify", Action::SpotifyBrowser),
-            ("subsonic", "Subsonic / Navidrome Cloud", "Streaming pessoal da sua nuvem privada", Action::SubsonicBrowser),
-            ("vault", "Cloud Audio Vault", "Catálogo compartilhado de áudio em nuvem privada", Action::VaultBrowser),
-            ("playlists", "Gerenciador de Playlists", "Salvar e carregar arquivos .m3u", Action::LoadPlaylist),
-            ("share", "Compartilhar Playlist", "Publicar a fila/playlist atual na rede pública", Action::SharePlaylist),
-            ("browse", "Explorar Playlists Públicas", "Buscar e importar playlists da comunidade", Action::BrowsePlaylists),
-            ("rescan", "Reescanear Biblioteca", "Procurar novos arquivos de música no disco", Action::Rescan),
-            ("stats", "Estatísticas de Audição", "Ver artistas e gêneros mais tocados", Action::ShowStats),
-            ("lastfm", "Painel Last.fm", "Ver histórico de scrobbling e tops", Action::LastfmPanel),
-            ("fav", "Favoritar Música Atual (♥)", "Adicionar/remover dos favoritos", Action::ToggleFavorite),
-            ("sleep", "Sleep Timer", "Temporizador de 30min para desligamento", Action::SleepTimer),
-            ("tags", "Editor de Tags ID3", "Editar título, artista e álbum do arquivo", Action::EditTags),
-            ("help", "Ajuda & Atalhos", "Ver lista completa de atalhos do teclado", Action::Help),
-            ("update", "Verificar Atualizações", "Checar nova versão no GitHub", Action::SelfUpdate),
+            (
+                "play",
+                "Play / Pause",
+                "Alternar reprodução e pausa",
+                Action::PlayPause,
+            ),
+            (
+                "next",
+                "Próxima Música",
+                "Avançar para a próxima faixa da fila",
+                Action::Next,
+            ),
+            (
+                "prev",
+                "Música Anterior",
+                "Voltar para a faixa anterior",
+                Action::Prev,
+            ),
+            (
+                "stop",
+                "Parar Reprodução",
+                "Parar áudio e descarregar sink",
+                Action::Stop,
+            ),
+            (
+                "shuffle",
+                "Alternar Shuffle",
+                "Ativar ou desativar modo aleatório",
+                Action::Shuffle,
+            ),
+            (
+                "repeat",
+                "Alternar Repeat",
+                "Ciclar modos de repetição (off/all/one)",
+                Action::Repeat,
+            ),
+            (
+                "mini",
+                "Alternar Mini Player",
+                "Alternar modo compacto com capa de álbum",
+                Action::ToggleMini,
+            ),
+            (
+                "eq",
+                "Equalizador Tuner",
+                "Abrir calibrador de frequências de áudio",
+                Action::EqTuner,
+            ),
+            (
+                "audio",
+                "Painel de Áudio & Compressor",
+                "Ajustar dinâmica e ganho",
+                Action::ShowAudioPanel,
+            ),
+            (
+                "viz",
+                "Ciclar Visualizador FFT",
+                "Mudar modo: spectrum, waveform, vu-meter...",
+                Action::CycleVizMode,
+            ),
+            (
+                "lyrics",
+                "Letras / Karaokê",
+                "Abrir modal de letras sincronizadas (LRC)",
+                Action::ShowLyrics,
+            ),
+            (
+                "radio",
+                "Rádios Online",
+                "Explorar diretório mundial de web rádios",
+                Action::RadioBrowser,
+            ),
+            (
+                "spotify",
+                "Spotify Browser",
+                "Buscar e navegar nas playlists do Spotify",
+                Action::SpotifyBrowser,
+            ),
+            (
+                "subsonic",
+                "Subsonic / Navidrome Cloud",
+                "Streaming pessoal da sua nuvem privada",
+                Action::SubsonicBrowser,
+            ),
+            (
+                "vault",
+                "Cloud Audio Vault",
+                "Catálogo compartilhado de áudio em nuvem privada",
+                Action::VaultBrowser,
+            ),
+            (
+                "playlists",
+                "Gerenciador de Playlists",
+                "Salvar e carregar arquivos .m3u",
+                Action::LoadPlaylist,
+            ),
+            (
+                "share",
+                "Compartilhar Playlist",
+                "Publicar a fila/playlist atual na rede pública",
+                Action::SharePlaylist,
+            ),
+            (
+                "browse",
+                "Explorar Playlists Públicas",
+                "Buscar e importar playlists da comunidade",
+                Action::BrowsePlaylists,
+            ),
+            (
+                "rescan",
+                "Reescanear Biblioteca",
+                "Procurar novos arquivos de música no disco",
+                Action::Rescan,
+            ),
+            (
+                "stats",
+                "Estatísticas de Audição",
+                "Ver artistas e gêneros mais tocados",
+                Action::ShowStats,
+            ),
+            (
+                "lastfm",
+                "Painel Last.fm",
+                "Ver histórico de scrobbling e tops",
+                Action::LastfmPanel,
+            ),
+            (
+                "fav",
+                "Favoritar Música Atual (♥)",
+                "Adicionar/remover dos favoritos",
+                Action::ToggleFavorite,
+            ),
+            (
+                "sleep",
+                "Sleep Timer",
+                "Temporizador de 30min para desligamento",
+                Action::SleepTimer,
+            ),
+            (
+                "tags",
+                "Editor de Tags ID3",
+                "Editar título, artista e álbum do arquivo",
+                Action::EditTags,
+            ),
+            (
+                "help",
+                "Ajuda & Atalhos",
+                "Ver lista completa de atalhos do teclado",
+                Action::Help,
+            ),
+            (
+                "update",
+                "Verificar Atualizações",
+                "Checar nova versão no GitHub",
+                Action::SelfUpdate,
+            ),
             ("quit", "Sair do Noctune", "Fechar o player", Action::Quit),
         ];
 
