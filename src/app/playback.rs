@@ -285,7 +285,7 @@ impl App {
     }
 
     pub(crate) fn enqueue_endless_recommendations(&mut self) -> usize {
-        if self.tracks.is_empty() {
+        if self.library.is_empty() {
             return 0;
         }
 
@@ -302,7 +302,7 @@ impl App {
             self.queue.iter().map(|t| &t.path).collect();
 
         let mut candidates: Vec<_> = self
-            .tracks
+            .library
             .iter()
             .filter(|t| !queued_paths.contains(&t.path))
             .filter(|t| {
@@ -323,7 +323,7 @@ impl App {
 
         if candidates.len() < 3 {
             let other_candidates: Vec<_> = self
-                .tracks
+                .library
                 .iter()
                 .filter(|t| !queued_paths.contains(&t.path))
                 .cloned()
@@ -372,7 +372,7 @@ impl App {
                 }
                 self.play_current();
             } else {
-                if self.endless_mode && !self.tracks.is_empty() {
+                if self.endless_mode && !self.library.is_empty() {
                     let added = self.enqueue_endless_recommendations();
                     if added > 0 {
                         if let Some(new) = self.pick_next_index(i) {

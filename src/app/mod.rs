@@ -292,6 +292,7 @@ impl App {
 
         let config_shuffle = config.playback.shuffle;
         let config_repeat = config.playback.repeat;
+        let config_endless = config.playback.endless_mode;
         let config_keybinds = config.keybinds.clone();
         let spotify_client_id = config.spotify.client_id.clone();
         let spotify_redirect_uri = config.spotify.redirect_uri();
@@ -406,7 +407,7 @@ impl App {
             pending_crossfade_idx: None,
             url_input: String::new(),
             url_editing: false,
-            endless_mode: config.playback.endless_mode,
+            endless_mode: config_endless,
             eq_preset_idx: 0,
             show_info: false,
             theme_names: Vec::new(),
@@ -1275,9 +1276,9 @@ impl App {
                             .ok()
                             .map(|d| d.as_secs()),
                     };
-                    self.tracks.push(track.clone());
+                    self.library.push(track.clone());
                     if let Some(db) = &self.db {
-                        let _ = db.insert_track(&track);
+                        let _ = db.sync_tracks(&[track]);
                     }
                     self.library_revision = self.library_revision.wrapping_add(1);
                     self.set_info(format!("💾 Download concluído e salvo: {file_name}"));
