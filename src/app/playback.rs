@@ -122,16 +122,15 @@ impl App {
                 self.config.theme = name.clone();
                 self.theme = theme;
                 let _ = self.config.save();
-                self.set_info(format!("Theme: {name}"));
-                self.rearm_theme_watcher();
+                self.set_info(format!("Tema: 🎨 {name}"));
             }
-            Err(e) => self.set_info(format!("Theme error: {e}")),
+            Err(e) => self.set_info(format!("Erro no tema: {e}")),
         }
     }
 
-    pub(crate) fn rearm_theme_watcher(&mut self) {
-        let path = match crate::config::themes_dir().map(|d| d.join(format!("{}.toml", self.theme.name))) {
-            Ok(p) => p,
+    pub(crate) fn rearm_config_watcher(&mut self) {
+        let config_dir = match crate::config::project_dirs().map(|p| p.config_dir().to_path_buf()) {
+            Ok(d) => d,
             Err(_) => return,
         };
         let (tx, rx) = std::sync::mpsc::channel();
@@ -141,9 +140,9 @@ impl App {
             Ok(w) => w,
             Err(_) => return,
         };
-        if w.watch(&path, notify::RecursiveMode::NonRecursive).is_ok() {
-            self.theme_watcher_rx = Some(rx);
-            self._theme_watcher = Some(w);
+        if w.watch(&config_dir, notify::RecursiveMode::Recursive).is_ok() {
+            self.config_watcher_rx = Some(rx);
+            self._config_watcher = Some(w);
         }
     }
 

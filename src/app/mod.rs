@@ -84,8 +84,8 @@ pub struct App {
     pub scan_progress: Option<(usize, usize)>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub _fs_watcher: Option<notify::RecommendedWatcher>,
-    pub theme_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
-    pub _theme_watcher: Option<notify::RecommendedWatcher>,
+    pub config_watcher_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    pub _config_watcher: Option<notify::RecommendedWatcher>,
     pub lyrics_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<crate::lyrics::Lyrics>)>>,
     pub art_rx: Option<std::sync::mpsc::Receiver<(PathBuf, Option<Vec<u8>>)>>,
     pub library_revision: u64,
@@ -384,8 +384,8 @@ impl App {
             scan_progress: None,
             fs_event_rx: Some(fs_event_rx),
             _fs_watcher,
-            theme_watcher_rx: None,
-            _theme_watcher: None,
+            config_watcher_rx: None,
+            _config_watcher: None,
             lyrics_rx: None,
             art_rx: None,
             library_revision: 0,
@@ -500,7 +500,7 @@ impl App {
             let _ = update_tx.send(res);
         });
 
-        app.rearm_theme_watcher();
+        app.rearm_config_watcher();
 
         if let Some(pos) = crate::eq::PRESETS
             .iter()
@@ -628,23 +628,76 @@ impl App {
             }
         }
 
-        if let Some(rx) = &self.theme_watcher_rx {
-            let mut reload = false;
-            loop {
-                match rx.try_recv() {
-                    Ok(Ok(_)) => {
-                        reload = true;
+        if let Some(rx) = &self.config_watcher_rx {
+            let mut reload_config = false;
+            let mut reload_theme = false;
+            let mut reload_presets = false;
+
+            while let Ok(res) = rx.try_recv() {
+                if let Ok(event) = res {
+                    for path in event.paths {
+                        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if fname == "config.toml" {
+                            reload_config = true;
+                        } else if fname == "eq_presets.toml" {
+                            reload_presets = true;
+                        } else if fname.ends_with(".toml") {
+                            reload_theme = true;
+                        }
                     }
-                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 }
             }
-            if reload {
+
+            if reload_config {
+                if let Ok((new_cfg, warnings)) = crate::config::Config::load_or_default() {
+                    for w in &warnings {
+                        tracing::warn!(target: "config", "hot-reload warning: {w}");
+                    }
+                    if new_cfg.theme != self.theme.name {
+                        if let Ok(t) = crate::theme::Theme::load(&new_cfg.theme) {
+                            self.theme = t;
+                            self.set_info(format!("Config & Tema: 🎨 {}", new_cfg.theme));
+                        }
+                    } else {
+                        self.set_info("Configuração recarregada (config.toml)");
+                    }
+                    let (bindings, _) = Bindings::from_config(&new_cfg.keybinds);
+                    self.bindings = bindings;
+                    self.player.crossfade_secs = new_cfg.playback.crossfade_secs;
+                    self.config = new_cfg;
+                }
+            } else if reload_theme {
                 let name = self.theme.name.clone();
                 if let Ok(t) = crate::theme::Theme::load(&name) {
                     self.theme = t;
-                    self.set_info(format!("Theme reloaded: {name}"));
+                    self.set_info(format!("Tema recarregado: 🎨 {name}"));
                 }
+                // Refresh cached theme names list
+                if let Ok(dir) = crate::config::themes_dir() {
+                    let mut names: Vec<String> = std::fs::read_dir(&dir)
+                        .ok()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|e| e.ok())
+                        .filter_map(|e| {
+                            let p = e.path();
+                            if p.extension().and_then(|s| s.to_str()) == Some("toml") {
+                                p.file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .map(|s| s.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    names.sort();
+                    if !names.is_empty() {
+                        self.theme_names = names;
+                    }
+                }
+            } else if reload_presets {
+                self.custom_eq_presets = crate::config::EqPresets::load().presets;
+                self.set_info("Presets de equalização recarregados");
             }
         }
 
