@@ -56,10 +56,7 @@ impl VaultClient {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
-        Ok(Self {
-            server_url,
-            client,
-        })
+        Ok(Self { server_url, client })
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<Track>> {

@@ -25,7 +25,9 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     let has_art = app.player.current().is_some()
         && (app.album_art.is_some() || !app.theme.ascii.paused.trim().is_empty());
     let (content_area, art_area) = if has_art && area.width >= 40 && area.height >= 4 {
-        let art_w = (area.height * 2).clamp(8, 16).min(area.width.saturating_sub(25));
+        let art_w = (area.height * 2)
+            .clamp(8, 16)
+            .min(area.width.saturating_sub(25));
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(20), Constraint::Length(art_w)])
@@ -688,7 +690,10 @@ pub fn render_spectrum_art(f: &mut Frame, area: Rect, app: &App) {
         f.render_widget(Paragraph::new(Line::from(spans)), r);
     }
 
-    let vu_label = format!(" {:.0}% ", bars.iter().copied().fold(0.0f32, f32::max) * 100.0);
+    let vu_label = format!(
+        " {:.0}% ",
+        bars.iter().copied().fold(0.0f32, f32::max) * 100.0
+    );
     f.render_widget(
         Paragraph::new(Span::styled(
             vu_label,

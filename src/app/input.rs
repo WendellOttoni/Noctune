@@ -326,11 +326,12 @@ impl App {
                     return;
                 }
                 KeyCode::Char('f') => {
-                    let list = self.radio_filtered_stations();
-                    if let Some(st) = list.get(self.radio_row).copied() {
-                        let p = std::path::PathBuf::from(&st.url);
+                    let maybe_station = self
+                        .radio_filtered_stations()
+                        .get(self.radio_row)
+                        .map(|st| (std::path::PathBuf::from(&st.url), st.name.clone()));
+                    if let Some((p, name)) = maybe_station {
                         let is_now_fav = self.ratings.toggle_favorite(&p);
-                        let name = st.name.clone();
                         self.set_info(if is_now_fav {
                             format!("Rádio favoritada: {} ♥", name)
                         } else {

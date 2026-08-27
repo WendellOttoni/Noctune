@@ -1,6 +1,4 @@
-use anyhow::{anyhow, Result};
-use std::sync::Arc;
-use parking_lot::Mutex;
+use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct NativeSpotifySession {

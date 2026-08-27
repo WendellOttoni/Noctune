@@ -2367,4 +2367,3 @@ pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
         );
     }
 }
-

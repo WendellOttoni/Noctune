@@ -122,12 +122,7 @@ pub fn build_volume_bar(volume: f32, width: usize, theme: &Theme) -> Line<'stati
 /// Split `text` into spans, applying `match_color` to occurrences of `needle`
 /// (case-insensitive) and `base_color` to the rest. Used by the search filter to
 /// highlight matched substrings (#66).
-pub fn highlight_match(
-    text: &str,
-    needle: &str,
-    base: Color,
-    hit: Color,
-) -> Vec<Span<'static>> {
+pub fn highlight_match(text: &str, needle: &str, base: Color, hit: Color) -> Vec<Span<'static>> {
     let lower = text.to_lowercase();
     let needle_l = needle.to_lowercase();
     let mut out: Vec<Span<'static>> = Vec::new();
