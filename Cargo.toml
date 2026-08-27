@@ -38,6 +38,7 @@ url = "2"
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
+md5 = "0.7"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 sysinfo = { version = "0.32", default-features = false, features = ["system", "network"] }
 tiny_http = "0.12"

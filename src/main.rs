@@ -24,6 +24,7 @@ mod share;
 mod single_instance;
 mod spotify;
 mod stats;
+mod subsonic;
 mod theme;
 mod tui;
 mod ui;

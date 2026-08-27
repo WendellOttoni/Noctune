@@ -518,6 +518,304 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
+    use crate::app::types::SubsonicTab;
+    let theme = &app.theme;
+    let w = 78.min(area.width.saturating_sub(4)).max(46);
+    let h = 22.min(area.height.saturating_sub(4)).max(12);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let secondary = parse_color(&theme.colors.secondary);
+    let bg = parse_color(&theme.colors.background);
+
+    let tab_line = Line::from(vec![
+        Span::styled(
+            if app.subsonic_browser_tab == SubsonicTab::Search {
+                " [🔍 Busca] "
+            } else {
+                "  🔍 Busca  "
+            },
+            if app.subsonic_browser_tab == SubsonicTab::Search {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(muted)
+            },
+        ),
+        Span::styled(
+            if app.subsonic_browser_tab == SubsonicTab::RecentAlbums {
+                " [💿 Álbuns Recentes] "
+            } else {
+                "  💿 Álbuns Recentes  "
+            },
+            if app.subsonic_browser_tab == SubsonicTab::RecentAlbums {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(muted)
+            },
+        ),
+        Span::styled(
+            if app.subsonic_browser_tab == SubsonicTab::Playlists {
+                " [📑 Playlists] "
+            } else {
+                "  📑 Playlists  "
+            },
+            if app.subsonic_browser_tab == SubsonicTab::Playlists {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(muted)
+            },
+        ),
+        Span::styled(
+            if app.subsonic_browser_tab == SubsonicTab::Random {
+                " [🎲 Aleatórias] "
+            } else {
+                "  🎲 Aleatórias  "
+            },
+            if app.subsonic_browser_tab == SubsonicTab::Random {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(muted)
+            },
+        ),
+    ]);
+
+    let hint = Line::from(vec![
+        Span::styled(" Tab", Style::default().fg(accent)),
+        Span::styled(" abas  ", Style::default().fg(muted)),
+        Span::styled("/", Style::default().fg(accent)),
+        Span::styled(" buscar  ", Style::default().fg(muted)),
+        Span::styled("Enter", Style::default().fg(accent)),
+        Span::styled(" tocar/abrir  ", Style::default().fg(muted)),
+        Span::styled("a", Style::default().fg(accent)),
+        Span::styled(" fila  ", Style::default().fg(muted)),
+        Span::styled("Esc", Style::default().fg(accent)),
+        Span::styled(" fechar", Style::default().fg(muted)),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            " ☁️ Subsonic / Navidrome Cloud Streaming ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(hint);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    if !app.config.subsonic.is_configured() {
+        let msg = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  ⚠️ Servidor Subsonic / Navidrome não configurado.",
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Configure no seu arquivo config.toml:",
+                Style::default().fg(fg),
+            )),
+            Line::from(Span::styled(
+                "  [subsonic]",
+                Style::default().fg(secondary),
+            )),
+            Line::from(Span::styled(
+                "  server_url = \"http://seu-servidor:4533\"",
+                Style::default().fg(muted),
+            )),
+            Line::from(Span::styled(
+                "  username = \"seu_usuario\"",
+                Style::default().fg(muted),
+            )),
+            Line::from(Span::styled(
+                "  password = \"sua_senha\"",
+                Style::default().fg(muted),
+            )),
+        ];
+        f.render_widget(Paragraph::new(msg), inner);
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(inner);
+
+    // Search bar
+    let query_display = if app.subsonic_browser_query_editing {
+        format!(" 🔍 Busca: {}█", app.subsonic_browser_query)
+    } else if app.subsonic_browser_query.is_empty() {
+        " Pressione / para buscar músicas no seu Navidrome/Subsonic…".to_string()
+    } else {
+        format!(" 🔍 Busca: {}", app.subsonic_browser_query)
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            query_display,
+            Style::default().fg(if app.subsonic_browser_query_editing {
+                fg
+            } else {
+                muted
+            }),
+        )),
+        chunks[0],
+    );
+
+    // Tab bar
+    f.render_widget(Paragraph::new(tab_line), chunks[1]);
+
+    // Results area
+    let list_area = chunks[2];
+    match app.subsonic_browser_tab {
+        SubsonicTab::Search | SubsonicTab::Random => {
+            let results = &app.subsonic_browser_results;
+            if results.is_empty() {
+                let msg = if app.subsonic_browser_tab == SubsonicTab::Random {
+                    "  Carregando músicas aleatórias…"
+                } else {
+                    "  Nenhum resultado. Digite o termo de busca e pressione Enter."
+                };
+                f.render_widget(
+                    Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
+                    list_area,
+                );
+            } else {
+                let items: Vec<ListItem> = results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let selected = i == app.subsonic_browser_row;
+                        let dur = t
+                            .duration
+                            .map(|d| {
+                                let s = d.as_secs();
+                                format!("{:02}:{:02}", s / 60, s % 60)
+                            })
+                            .unwrap_or_default();
+                        let label = format!(
+                            " {} {:<38} {:<24} {}",
+                            if selected { "▶" } else { " " },
+                            t.title.chars().take(36).collect::<String>(),
+                            t.artist
+                                .as_deref()
+                                .unwrap_or("")
+                                .chars()
+                                .take(22)
+                                .collect::<String>(),
+                            dur,
+                        );
+                        let style = if selected {
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(muted)
+                        };
+                        ListItem::new(Line::from(Span::styled(label, style)))
+                    })
+                    .collect();
+                let mut state = ratatui::widgets::ListState::default();
+                state.select(Some(app.subsonic_browser_row));
+                f.render_stateful_widget(
+                    List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+                    list_area,
+                    &mut state,
+                );
+            }
+        }
+        SubsonicTab::RecentAlbums => {
+            if app.subsonic_browser_albums.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        "  Carregando álbuns do servidor…",
+                        Style::default().fg(muted),
+                    )),
+                    list_area,
+                );
+            } else {
+                let items: Vec<ListItem> = app
+                    .subsonic_browser_albums
+                    .iter()
+                    .enumerate()
+                    .map(|(i, album)| {
+                        let selected = i == app.subsonic_browser_row;
+                        let label = format!(
+                            " {} {:<40} {:<24} ({} faixas)",
+                            if selected { "▶" } else { " " },
+                            album.display_title().chars().take(38).collect::<String>(),
+                            album.artist.as_deref().unwrap_or("").chars().take(22).collect::<String>(),
+                            album.song_count.unwrap_or(0),
+                        );
+                        let style = if selected {
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(muted)
+                        };
+                        ListItem::new(Line::from(Span::styled(label, style)))
+                    })
+                    .collect();
+                let mut state = ratatui::widgets::ListState::default();
+                state.select(Some(app.subsonic_browser_row));
+                f.render_stateful_widget(
+                    List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+                    list_area,
+                    &mut state,
+                );
+            }
+        }
+        SubsonicTab::Playlists => {
+            if app.subsonic_browser_playlists.is_empty() {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        "  Carregando playlists do servidor…",
+                        Style::default().fg(muted),
+                    )),
+                    list_area,
+                );
+            } else {
+                let items: Vec<ListItem> = app
+                    .subsonic_browser_playlists
+                    .iter()
+                    .enumerate()
+                    .map(|(i, pl)| {
+                        let selected = i == app.subsonic_browser_row;
+                        let label = format!(
+                            " {} {:<48} ({} faixas)",
+                            if selected { "▶" } else { " " },
+                            pl.name.chars().take(46).collect::<String>(),
+                            pl.song_count.unwrap_or(0),
+                        );
+                        let style = if selected {
+                            Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(muted)
+                        };
+                        ListItem::new(Line::from(Span::styled(label, style)))
+                    })
+                    .collect();
+                let mut state = ratatui::widgets::ListState::default();
+                state.select(Some(app.subsonic_browser_row));
+                f.render_stateful_widget(
+                    List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+                    list_area,
+                    &mut state,
+                );
+            }
+        }
+    }
+}
+
 pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let w = 70.min(area.width.saturating_sub(4));

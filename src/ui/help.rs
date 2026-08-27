@@ -82,6 +82,7 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from(""),
         Line::from("  Online / Streaming"),
         Line::from("    3 / K        open Online Radio Mode (+40k stations & curated)"),
+        Line::from("    Ctrl+N       open Subsonic / Navidrome Cloud browser"),
         Line::from("    Shift+U      check and apply app update in-place"),
         Line::from("    i            open URL prompt"),
         Line::from("                 • YouTube / youtu.be links"),

@@ -287,3 +287,23 @@ pub struct PaletteItem {
     pub action: PaletteAction,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubsonicTab {
+    Search,
+    RecentAlbums,
+    Playlists,
+    Random,
+}
+
+impl SubsonicTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            SubsonicTab::Search => "Busca",
+            SubsonicTab::RecentAlbums => "Álbuns Recentes",
+            SubsonicTab::Playlists => "Playlists",
+            SubsonicTab::Random => "Músicas Aleatórias",
+        }
+    }
+}
+
+

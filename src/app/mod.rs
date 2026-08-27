@@ -194,6 +194,16 @@ pub struct App {
     pub command_palette_input: String,
     pub command_palette_row: usize,
     pub command_palette_matches: Vec<PaletteItem>,
+    pub show_subsonic_browser: bool,
+    pub subsonic_browser_tab: SubsonicTab,
+    pub subsonic_browser_query: String,
+    pub subsonic_browser_query_editing: bool,
+    pub subsonic_browser_results: Vec<crate::audio::Track>,
+    pub subsonic_browser_albums: Vec<crate::subsonic::SubsonicAlbum>,
+    pub subsonic_browser_playlists: Vec<crate::subsonic::SubsonicPlaylist>,
+    pub subsonic_browser_row: usize,
+    pub(crate) subsonic_rx:
+        Option<std::sync::mpsc::Receiver<Result<crate::subsonic::SubsonicFetchResult, String>>>,
 }
 
 impl App {
@@ -491,6 +501,15 @@ impl App {
             command_palette_input: String::new(),
             command_palette_row: 0,
             command_palette_matches: Vec::new(),
+            show_subsonic_browser: false,
+            subsonic_browser_tab: SubsonicTab::Search,
+            subsonic_browser_query: String::new(),
+            subsonic_browser_query_editing: false,
+            subsonic_browser_results: Vec::new(),
+            subsonic_browser_albums: Vec::new(),
+            subsonic_browser_playlists: Vec::new(),
+            subsonic_browser_row: 0,
+            subsonic_rx: None,
         };
 
         let (update_tx, update_rx) = std::sync::mpsc::channel();
@@ -725,6 +744,42 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.spotify_search_rx = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.subsonic_rx {
+            match rx.try_recv() {
+                Ok(Ok(res)) => {
+                    match res {
+                        crate::subsonic::SubsonicFetchResult::Songs(tracks) => {
+                            let n = tracks.len();
+                            self.subsonic_browser_results = tracks;
+                            self.subsonic_browser_row = 0;
+                            self.set_info(format!("Subsonic: {n} faixa(s) encontradas."));
+                        }
+                        crate::subsonic::SubsonicFetchResult::Albums(albums) => {
+                            let n = albums.len();
+                            self.subsonic_browser_albums = albums;
+                            self.subsonic_browser_row = 0;
+                            self.set_info(format!("Subsonic: {n} álbum(ns) carregados."));
+                        }
+                        crate::subsonic::SubsonicFetchResult::Playlists(playlists) => {
+                            let n = playlists.len();
+                            self.subsonic_browser_playlists = playlists;
+                            self.subsonic_browser_row = 0;
+                            self.set_info(format!("Subsonic: {n} playlist(s) carregadas."));
+                        }
+                    }
+                    self.subsonic_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.set_error(format!("Subsonic: erro — {e}"));
+                    self.subsonic_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.subsonic_rx = None;
                 }
             }
         }

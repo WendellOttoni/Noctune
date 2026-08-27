@@ -69,6 +69,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_spotify_browser {
         render_spotify_browser(f, area, app);
     }
+    if app.show_subsonic_browser {
+        render_subsonic_browser(f, area, app);
+    }
     if app.show_device_selector {
         render_device_selector(f, area, app);
     }

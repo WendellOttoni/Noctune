@@ -75,6 +75,11 @@ impl App {
             return;
         }
 
+        if self.show_subsonic_browser {
+            self.handle_subsonic_browser_key(key);
+            return;
+        }
+
         if self.show_tag_editor {
             self.handle_tag_editor_key(key);
             return;
@@ -606,6 +611,10 @@ impl App {
                 self.command_palette_row = 0;
                 self.update_command_palette_matches();
             }
+            Action::SubsonicBrowser => {
+                self.show_subsonic_browser = true;
+                self.subsonic_load_tab(self.subsonic_browser_tab);
+            }
         }
     }
 
@@ -737,6 +746,7 @@ impl App {
             ("lyrics", "Letras / Karaokê", "Abrir modal de letras sincronizadas (LRC)", Action::ShowLyrics),
             ("radio", "Rádios Online", "Explorar diretório mundial de web rádios", Action::RadioBrowser),
             ("spotify", "Spotify Browser", "Buscar e navegar nas playlists do Spotify", Action::SpotifyBrowser),
+            ("subsonic", "Subsonic / Navidrome Cloud", "Streaming pessoal da sua nuvem privada", Action::SubsonicBrowser),
             ("playlists", "Gerenciador de Playlists", "Salvar e carregar arquivos .m3u", Action::LoadPlaylist),
             ("rescan", "Reescanear Biblioteca", "Procurar novos arquivos de música no disco", Action::Rescan),
             ("stats", "Estatísticas de Audição", "Ver artistas e gêneros mais tocados", Action::ShowStats),
@@ -1323,6 +1333,130 @@ impl App {
                         self.set_info("Added to queue.");
                     }
                 }
+            },
+            _ => {}
+        }
+    }
+
+    pub(crate) fn handle_subsonic_browser_key(&mut self, key: KeyEvent) {
+        use crate::app::types::SubsonicTab;
+        if self.subsonic_browser_query_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.subsonic_browser_query_editing = false;
+                    if self.subsonic_browser_query.is_empty()
+                        && self.subsonic_browser_results.is_empty()
+                    {
+                        self.show_subsonic_browser = false;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.subsonic_browser_query_editing = false;
+                    self.subsonic_browser_tab = SubsonicTab::Search;
+                    self.subsonic_search();
+                }
+                KeyCode::Backspace => {
+                    self.subsonic_browser_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.subsonic_browser_query.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_subsonic_browser = false;
+            }
+            KeyCode::Tab => {
+                let next = match self.subsonic_browser_tab {
+                    SubsonicTab::Search => SubsonicTab::RecentAlbums,
+                    SubsonicTab::RecentAlbums => SubsonicTab::Playlists,
+                    SubsonicTab::Playlists => SubsonicTab::Random,
+                    SubsonicTab::Random => SubsonicTab::Search,
+                };
+                self.subsonic_load_tab(next);
+            }
+            KeyCode::BackTab => {
+                let prev = match self.subsonic_browser_tab {
+                    SubsonicTab::Search => SubsonicTab::Random,
+                    SubsonicTab::RecentAlbums => SubsonicTab::Search,
+                    SubsonicTab::Playlists => SubsonicTab::RecentAlbums,
+                    SubsonicTab::Random => SubsonicTab::Playlists,
+                };
+                self.subsonic_load_tab(prev);
+            }
+            KeyCode::Char('/') | KeyCode::Char('s') => {
+                self.subsonic_browser_tab = SubsonicTab::Search;
+                self.subsonic_browser_query_editing = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.subsonic_browser_row > 0 {
+                    self.subsonic_browser_row -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max_len = match self.subsonic_browser_tab {
+                    SubsonicTab::Search | SubsonicTab::Random => {
+                        self.subsonic_browser_results.len()
+                    }
+                    SubsonicTab::RecentAlbums => self.subsonic_browser_albums.len(),
+                    SubsonicTab::Playlists => self.subsonic_browser_playlists.len(),
+                };
+                if self.subsonic_browser_row + 1 < max_len {
+                    self.subsonic_browser_row += 1;
+                }
+            }
+            KeyCode::Enter => match self.subsonic_browser_tab {
+                SubsonicTab::Search | SubsonicTab::Random => {
+                    if let Some(track) = self
+                        .subsonic_browser_results
+                        .get(self.subsonic_browser_row)
+                        .cloned()
+                    {
+                        self.show_subsonic_browser = false;
+                        self.queue.push(track);
+                        let idx = self.queue.len() - 1;
+                        self.queue_index = Some(idx);
+                        self.queue_state.select(Some(idx));
+                        self.play_current();
+                    }
+                }
+                SubsonicTab::RecentAlbums => {
+                    if let Some(album) = self
+                        .subsonic_browser_albums
+                        .get(self.subsonic_browser_row)
+                        .cloned()
+                    {
+                        self.subsonic_load_album_tracks(&album.id);
+                        self.subsonic_browser_tab = SubsonicTab::Search;
+                    }
+                }
+                SubsonicTab::Playlists => {
+                    if let Some(pl) = self
+                        .subsonic_browser_playlists
+                        .get(self.subsonic_browser_row)
+                        .cloned()
+                    {
+                        self.subsonic_load_playlist_tracks(&pl.id);
+                        self.subsonic_browser_tab = SubsonicTab::Search;
+                    }
+                }
+            },
+            KeyCode::Char('a') => match self.subsonic_browser_tab {
+                SubsonicTab::Search | SubsonicTab::Random => {
+                    if let Some(track) = self
+                        .subsonic_browser_results
+                        .get(self.subsonic_browser_row)
+                        .cloned()
+                    {
+                        self.queue.push(track);
+                        self.set_info("Faixa adicionada à fila.");
+                    }
+                }
+                _ => {}
             },
             _ => {}
         }

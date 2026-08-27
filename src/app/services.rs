@@ -251,6 +251,128 @@ impl App {
         });
     }
 
+    pub(crate) fn subsonic_search(&mut self) {
+        let query = self.subsonic_browser_query.trim().to_string();
+        if query.is_empty() {
+            return;
+        }
+        let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Subsonic: {e}"));
+                return;
+            }
+        };
+        self.set_info(format!("Buscando no Subsonic: \"{query}\"…"));
+        self.subsonic_browser_results.clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.subsonic_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client
+                .search(&query)
+                .map(crate::subsonic::SubsonicFetchResult::Songs)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
+    pub(crate) fn subsonic_load_tab(&mut self, tab: crate::app::types::SubsonicTab) {
+        self.subsonic_browser_tab = tab;
+        self.subsonic_browser_row = 0;
+        let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Subsonic: {e}"));
+                return;
+            }
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.subsonic_rx = Some(rx);
+        match tab {
+            crate::app::types::SubsonicTab::Search => {
+                if !self.subsonic_browser_query.is_empty() {
+                    self.subsonic_search();
+                }
+            }
+            crate::app::types::SubsonicTab::RecentAlbums => {
+                self.set_info("Carregando álbuns recentes do Subsonic/Navidrome…");
+                self.subsonic_browser_albums.clear();
+                std::thread::spawn(move || {
+                    let res = client
+                        .get_album_list("recent", 40)
+                        .map(crate::subsonic::SubsonicFetchResult::Albums)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(res);
+                });
+            }
+            crate::app::types::SubsonicTab::Playlists => {
+                self.set_info("Carregando playlists do Subsonic/Navidrome…");
+                self.subsonic_browser_playlists.clear();
+                std::thread::spawn(move || {
+                    let res = client
+                        .get_playlists()
+                        .map(crate::subsonic::SubsonicFetchResult::Playlists)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(res);
+                });
+            }
+            crate::app::types::SubsonicTab::Random => {
+                self.set_info("Obtendo músicas aleatórias do Subsonic/Navidrome…");
+                self.subsonic_browser_results.clear();
+                std::thread::spawn(move || {
+                    let res = client
+                        .get_random_songs(50)
+                        .map(crate::subsonic::SubsonicFetchResult::Songs)
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(res);
+                });
+            }
+        }
+    }
+
+    pub(crate) fn subsonic_load_album_tracks(&mut self, album_id: &str) {
+        let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Subsonic: {e}"));
+                return;
+            }
+        };
+        let album_id = album_id.to_string();
+        self.set_info("Carregando faixas do álbum…");
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.subsonic_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client
+                .get_album_tracks(&album_id)
+                .map(crate::subsonic::SubsonicFetchResult::Songs)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
+    pub(crate) fn subsonic_load_playlist_tracks(&mut self, playlist_id: &str) {
+        let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Subsonic: {e}"));
+                return;
+            }
+        };
+        let playlist_id = playlist_id.to_string();
+        self.set_info("Carregando faixas da playlist…");
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.subsonic_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client
+                .get_playlist_tracks(&playlist_id)
+                .map(crate::subsonic::SubsonicFetchResult::Songs)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
     pub(crate) fn open_tag_editor(&mut self) {
         let track = match self.focus {
             Pane::Library => self.selected_library_track(),

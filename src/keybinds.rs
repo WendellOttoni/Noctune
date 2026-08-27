@@ -80,6 +80,8 @@ pub enum Action {
     ShowLyrics,
     /// Open Unified Command Palette (#123).
     CommandPalette,
+    /// Open Subsonic / Navidrome Cloud Browser (#126).
+    SubsonicBrowser,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -191,6 +193,7 @@ impl Bindings {
             (&kb.open_url, Action::OpenUrl),
             (&kb.toggle_favorite, Action::ToggleFavorite),
             (&kb.command_palette, Action::CommandPalette),
+            (&kb.subsonic_browser, Action::SubsonicBrowser),
         ];
         let mut table: Vec<(KeyChord, Action)> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
@@ -283,6 +286,10 @@ impl Bindings {
             (
                 KeyChord::with_mods(KeyCode::Char('p'), KeyModifiers::CONTROL),
                 Action::CommandPalette,
+            ),
+            (
+                KeyChord::with_mods(KeyCode::Char('n'), KeyModifiers::CONTROL),
+                Action::SubsonicBrowser,
             ),
         ];
         for (c, a) in builtins {
@@ -397,10 +404,15 @@ mod tests {
             open_url: String::new(),
             toggle_favorite: String::new(),
             command_palette: String::new(),
+            subsonic_browser: String::new(),
         });
         assert_eq!(
             bindings.lookup(KeyCode::Char('p'), KeyModifiers::CONTROL),
             Some(Action::CommandPalette)
+        );
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            Some(Action::SubsonicBrowser)
         );
     }
 }

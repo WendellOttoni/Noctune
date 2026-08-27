@@ -25,6 +25,8 @@ pub struct Config {
     pub history: HistoryConfig,
     #[serde(default)]
     pub library: LibraryConfig,
+    #[serde(default)]
+    pub subsonic: SubsonicConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +159,24 @@ impl SpotifyConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubsonicConfig {
+    #[serde(default)]
+    pub server_url: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl SubsonicConfig {
+    pub fn is_configured(&self) -> bool {
+        !self.server_url.is_empty() && !self.username.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Keybinds {
     pub quit: String,
@@ -202,6 +222,8 @@ pub struct Keybinds {
     pub toggle_favorite: String,
     #[serde(default)]
     pub command_palette: String,
+    #[serde(default)]
+    pub subsonic_browser: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +275,7 @@ impl Default for Config {
                 open_url: String::new(),
                 toggle_favorite: String::new(),
                 command_palette: String::new(),
+                subsonic_browser: String::new(),
             },
             playback: Playback {
                 default_volume: 0.7,
@@ -269,6 +292,7 @@ impl Default for Config {
             cache: CacheConfig::default(),
             history: HistoryConfig::default(),
             library: LibraryConfig::default(),
+            subsonic: SubsonicConfig::default(),
         }
     }
 }
@@ -295,6 +319,9 @@ impl Config {
                 }
                 if !on_disk.discord.client_id.is_empty() {
                     merged.discord.client_id = on_disk.discord.client_id;
+                }
+                if !on_disk.subsonic.server_url.is_empty() {
+                    merged.subsonic = on_disk.subsonic;
                 }
             }
         }
