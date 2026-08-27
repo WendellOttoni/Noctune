@@ -1295,129 +1295,134 @@ impl App {
             }
         }
 
+        let mut ipc_requests = Vec::new();
         if let Some(server) = &self.ipc_server {
             while let Ok(req) = server.rx.try_recv() {
-                use crate::ipc::IpcCommand as C;
-                let reply = match req.command {
-                    C::Play => {
-                        if self.player.is_paused() {
-                            self.player.toggle();
-                        }
-                        "OK: Playing".to_string()
-                    }
-                    C::Pause => {
-                        if !self.player.is_paused() {
-                            self.player.toggle();
-                        }
-                        "OK: Paused".to_string()
-                    }
-                    C::Toggle => {
-                        self.player.toggle();
-                        format!(
-                            "OK: {}",
-                            if self.player.is_paused() {
-                                "Paused"
-                            } else {
-                                "Playing"
-                            }
-                        )
-                    }
-                    C::Next => {
-                        self.next();
-                        let title = self
-                            .player
-                            .current()
-                            .map(|t| t.title.clone())
-                            .unwrap_or_else(|| "None".into());
-                        format!("OK: Next track -> {title}")
-                    }
-                    C::Prev => {
-                        self.prev();
-                        let title = self
-                            .player
-                            .current()
-                            .map(|t| t.title.clone())
-                            .unwrap_or_else(|| "None".into());
-                        format!("OK: Prev track -> {title}")
-                    }
-                    C::Stop => {
-                        self.player.stop();
-                        "OK: Stopped".to_string()
-                    }
-                    C::Volume(arg) => {
-                        let cur_vol = self.player.volume();
-                        if arg.is_empty() {
-                            format!("Volume: {:.0}%", cur_vol * 100.0)
-                        } else if let Some(stripped) = arg.strip_prefix('+') {
-                            if let Ok(delta) = stripped.parse::<f32>() {
-                                self.player.set_volume((cur_vol + delta / 100.0).clamp(0.0, 1.5));
-                            }
-                            format!("Volume: {:.0}%", self.player.volume() * 100.0)
-                        } else if let Some(stripped) = arg.strip_prefix('-') {
-                            if let Ok(delta) = stripped.parse::<f32>() {
-                                self.player.set_volume((cur_vol - delta / 100.0).clamp(0.0, 1.5));
-                            }
-                            format!("Volume: {:.0}%", self.player.volume() * 100.0)
-                        } else if let Ok(val) = arg.parse::<f32>() {
-                            let target = (val / 100.0).clamp(0.0, 1.5);
-                            self.player.set_volume(target);
-                            format!("Volume: {:.0}%", self.player.volume() * 100.0)
-                        } else {
-                            "ERROR: Invalid volume argument".to_string()
-                        }
-                    }
-                    C::Status => {
-                        let cur_vol = self.player.volume();
-                        if let Some(t) = self.player.current() {
-                            let state = if self.player.is_paused() {
-                                "⏸ Paused"
-                            } else {
-                                "▶ Playing"
-                            };
-                            let el = self.player.elapsed();
-                            let el_str =
-                                format!("{:02}:{:02}", el.as_secs() / 60, el.as_secs() % 60);
-                            let dur_str = t
-                                .duration
-                                .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
-                                .unwrap_or_else(|| "--:--".into());
-                            let artist = t.artist.as_deref().unwrap_or("Unknown Artist");
-                            format!(
-                                "{state}: {} - {} [{el_str}/{dur_str}] (Vol: {:.0}%)",
-                                artist,
-                                t.title,
-                                cur_vol * 100.0
-                            )
-                        } else {
-                            "⏹ Stopped: No track playing".to_string()
-                        }
-                    }
-                    C::StatusJson => {
-                        let cur_vol = self.player.volume();
-                        if let Some(t) = self.player.current() {
-                            let state = if self.player.is_paused() {
-                                "paused"
-                            } else {
-                                "playing"
-                            };
-                            let el = self.player.elapsed().as_secs();
-                            let dur = t.duration.map(|d| d.as_secs()).unwrap_or(0);
-                            let artist = t.artist.as_deref().unwrap_or("");
-                            let album = t.album.as_deref().unwrap_or("");
-                            format!(
-                                "{{\"status\":\"{state}\",\"title\":\"{}\",\"artist\":\"{}\",\"album\":\"{}\",\"elapsed_secs\":{el},\"duration_secs\":{dur},\"volume\":{:.0}}}",
-                                t.title.replace('"', "\\\""),
-                                artist.replace('"', "\\\""),
-                                album.replace('"', "\\\""),
-                                cur_vol * 100.0
-                            )
-                        } else {
-                            "{\"status\":\"stopped\",\"title\":\"\",\"artist\":\"\",\"album\":\"\",\"elapsed_secs\":0,\"duration_secs\":0,\"volume\":0}".to_string()
-                        }
-                    }
-                };
-                let _ = req.reply_tx.send(reply);
+                ipc_requests.push(req);
             }
+        }
+
+        for req in ipc_requests {
+            use crate::ipc::IpcCommand as C;
+            let reply = match req.command {
+                C::Play => {
+                    if self.player.is_paused() {
+                        self.player.toggle();
+                    }
+                    "OK: Playing".to_string()
+                }
+                C::Pause => {
+                    if !self.player.is_paused() {
+                        self.player.toggle();
+                    }
+                    "OK: Paused".to_string()
+                }
+                C::Toggle => {
+                    self.player.toggle();
+                    format!(
+                        "OK: {}",
+                        if self.player.is_paused() {
+                            "Paused"
+                        } else {
+                            "Playing"
+                        }
+                    )
+                }
+                C::Next => {
+                    self.next();
+                    let title = self
+                        .player
+                        .current()
+                        .map(|t| t.title.clone())
+                        .unwrap_or_else(|| "None".into());
+                    format!("OK: Next track -> {title}")
+                }
+                C::Prev => {
+                    self.prev();
+                    let title = self
+                        .player
+                        .current()
+                        .map(|t| t.title.clone())
+                        .unwrap_or_else(|| "None".into());
+                    format!("OK: Prev track -> {title}")
+                }
+                C::Stop => {
+                    self.player.stop();
+                    "OK: Stopped".to_string()
+                }
+                C::Volume(arg) => {
+                    let cur_vol = self.player.volume();
+                    if arg.is_empty() {
+                        format!("Volume: {:.0}%", cur_vol * 100.0)
+                    } else if let Some(stripped) = arg.strip_prefix('+') {
+                        if let Ok(delta) = stripped.parse::<f32>() {
+                            self.player.set_volume((cur_vol + delta / 100.0).clamp(0.0, 1.5));
+                        }
+                        format!("Volume: {:.0}%", self.player.volume() * 100.0)
+                    } else if let Some(stripped) = arg.strip_prefix('-') {
+                        if let Ok(delta) = stripped.parse::<f32>() {
+                            self.player.set_volume((cur_vol - delta / 100.0).clamp(0.0, 1.5));
+                        }
+                        format!("Volume: {:.0}%", self.player.volume() * 100.0)
+                    } else if let Ok(val) = arg.parse::<f32>() {
+                        let target = (val / 100.0).clamp(0.0, 1.5);
+                        self.player.set_volume(target);
+                        format!("Volume: {:.0}%", self.player.volume() * 100.0)
+                    } else {
+                        "ERROR: Invalid volume argument".to_string()
+                    }
+                }
+                C::Status => {
+                    let cur_vol = self.player.volume();
+                    if let Some(t) = self.player.current() {
+                        let state = if self.player.is_paused() {
+                            "⏸ Paused"
+                        } else {
+                            "▶ Playing"
+                        };
+                        let el = self.player.elapsed();
+                        let el_str =
+                            format!("{:02}:{:02}", el.as_secs() / 60, el.as_secs() % 60);
+                        let dur_str = t
+                            .duration
+                            .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
+                            .unwrap_or_else(|| "--:--".into());
+                        let artist = t.artist.as_deref().unwrap_or("Unknown Artist");
+                        format!(
+                            "{state}: {} - {} [{el_str}/{dur_str}] (Vol: {:.0}%)",
+                            artist,
+                            t.title,
+                            cur_vol * 100.0
+                        )
+                    } else {
+                        "⏹ Stopped: No track playing".to_string()
+                    }
+                }
+                C::StatusJson => {
+                    let cur_vol = self.player.volume();
+                    if let Some(t) = self.player.current() {
+                        let state = if self.player.is_paused() {
+                            "paused"
+                        } else {
+                            "playing"
+                        };
+                        let el = self.player.elapsed().as_secs();
+                        let dur = t.duration.map(|d| d.as_secs()).unwrap_or(0);
+                        let artist = t.artist.as_deref().unwrap_or("");
+                        let album = t.album.as_deref().unwrap_or("");
+                        format!(
+                            "{{\"status\":\"{state}\",\"title\":\"{}\",\"artist\":\"{}\",\"album\":\"{}\",\"elapsed_secs\":{el},\"duration_secs\":{dur},\"volume\":{:.0}}}",
+                            t.title.replace('"', "\\\""),
+                            artist.replace('"', "\\\""),
+                            album.replace('"', "\\\""),
+                            cur_vol * 100.0
+                        )
+                    } else {
+                        "{\"status\":\"stopped\",\"title\":\"\",\"artist\":\"\",\"album\":\"\",\"elapsed_secs\":0,\"duration_secs\":0,\"volume\":0}".to_string()
+                    }
+                }
+            };
+            let _ = req.reply_tx.send(reply);
         }
 
         if let Some(when) = self.sleep_until {

@@ -1154,8 +1154,6 @@ impl Track {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_equal_power_crossfade_energy() {
         // Equal power curve satisfies: out_curve^2 + in_curve^2 ≈ 1.0 at all progress steps
