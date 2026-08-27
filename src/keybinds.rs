@@ -82,6 +82,8 @@ pub enum Action {
     CommandPalette,
     /// Open Subsonic / Navidrome Cloud Browser (#126).
     SubsonicBrowser,
+    /// Open Cloud Audio Vault Browser (#122).
+    VaultBrowser,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -194,6 +196,7 @@ impl Bindings {
             (&kb.toggle_favorite, Action::ToggleFavorite),
             (&kb.command_palette, Action::CommandPalette),
             (&kb.subsonic_browser, Action::SubsonicBrowser),
+            (&kb.vault_browser, Action::VaultBrowser),
         ];
         let mut table: Vec<(KeyChord, Action)> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
@@ -405,6 +408,7 @@ mod tests {
             toggle_favorite: String::new(),
             command_palette: String::new(),
             subsonic_browser: String::new(),
+            vault_browser: String::new(),
         });
         assert_eq!(
             bindings.lookup(KeyCode::Char('p'), KeyModifiers::CONTROL),

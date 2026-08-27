@@ -816,6 +816,126 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let w = 78.min(area.width.saturating_sub(4)).max(46);
+    let h = 22.min(area.height.saturating_sub(4)).max(12);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let secondary = parse_color(&theme.colors.secondary);
+    let bg = parse_color(&theme.colors.background);
+
+    let hint = Line::from(vec![
+        Span::styled(" /", Style::default().fg(accent)),
+        Span::styled(" buscar  ", Style::default().fg(muted)),
+        Span::styled("Enter", Style::default().fg(accent)),
+        Span::styled(" tocar  ", Style::default().fg(muted)),
+        Span::styled("a", Style::default().fg(accent)),
+        Span::styled(" enfileirar  ", Style::default().fg(muted)),
+        Span::styled("Esc", Style::default().fg(accent)),
+        Span::styled(" fechar", Style::default().fg(muted)),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            " ☁️ Cloud Audio Vault — Streaming Comunitário Direto ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(hint);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Search bar
+            Constraint::Min(1),    // Results list
+        ])
+        .split(inner);
+
+    // Search bar
+    let query_display = if app.vault_query_editing {
+        format!(" 🔍 Busca no Vault: {}█", app.vault_query)
+    } else if app.vault_query.is_empty() {
+        " Pressione / para pesquisar no catálogo em nuvem do Vault…".to_string()
+    } else {
+        format!(" 🔍 Busca no Vault: {}", app.vault_query)
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            query_display,
+            Style::default().fg(if app.vault_query_editing {
+                fg
+            } else {
+                muted
+            }),
+        )),
+        chunks[0],
+    );
+
+    // Results
+    let list_area = chunks[1];
+    let results = &app.vault_results;
+    if results.is_empty() {
+        let msg = "  Nenhuma faixa encontrada no catálogo. Digite um termo e tecle Enter.";
+        f.render_widget(
+            Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
+            list_area,
+        );
+    } else {
+        let items: Vec<ListItem> = results
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let selected = i == app.vault_row;
+                let dur = t
+                    .duration
+                    .map(|d| {
+                        let s = d.as_secs();
+                        format!("{:02}:{:02}", s / 60, s % 60)
+                    })
+                    .unwrap_or_default();
+                let label = format!(
+                    " {} {:<38} {:<24} {}",
+                    if selected { "▶" } else { " " },
+                    t.title.chars().take(36).collect::<String>(),
+                    t.artist
+                        .as_deref()
+                        .unwrap_or("")
+                        .chars()
+                        .take(22)
+                        .collect::<String>(),
+                    dur,
+                );
+                let style = if selected {
+                    Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(muted)
+                };
+                ListItem::new(Line::from(Span::styled(label, style)))
+            })
+            .collect();
+        let mut state = ratatui::widgets::ListState::default();
+        state.select(Some(app.vault_row));
+        f.render_stateful_widget(
+            List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+            list_area,
+            &mut state,
+        );
+    }
+}
+
 pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let w = 70.min(area.width.saturating_sub(4));

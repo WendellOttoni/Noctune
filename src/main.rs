@@ -31,6 +31,7 @@ mod theme;
 mod tui;
 mod ui;
 mod updater;
+mod vault;
 mod visualizer;
 mod ytdlp;
 

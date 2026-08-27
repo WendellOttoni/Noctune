@@ -27,6 +27,8 @@ pub struct Config {
     pub library: LibraryConfig,
     #[serde(default)]
     pub subsonic: SubsonicConfig,
+    #[serde(default)]
+    pub vault: VaultConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +180,36 @@ impl SubsonicConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_vault_url")]
+    pub server_url: String,
+    #[serde(default)]
+    pub upload_enabled: bool,
+}
+
+fn default_vault_url() -> String {
+    "https://vault.noctune.dev".into()
+}
+
+impl Default for VaultConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server_url: default_vault_url(),
+            upload_enabled: false,
+        }
+    }
+}
+
+impl VaultConfig {
+    pub fn is_configured(&self) -> bool {
+        !self.server_url.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Keybinds {
     pub quit: String,
     pub play_pause: String,
@@ -224,6 +256,8 @@ pub struct Keybinds {
     pub command_palette: String,
     #[serde(default)]
     pub subsonic_browser: String,
+    #[serde(default)]
+    pub vault_browser: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +310,7 @@ impl Default for Config {
                 toggle_favorite: String::new(),
                 command_palette: String::new(),
                 subsonic_browser: String::new(),
+                vault_browser: String::new(),
             },
             playback: Playback {
                 default_volume: 0.7,
@@ -293,6 +328,7 @@ impl Default for Config {
             history: HistoryConfig::default(),
             library: LibraryConfig::default(),
             subsonic: SubsonicConfig::default(),
+            vault: VaultConfig::default(),
         }
     }
 }
@@ -322,6 +358,9 @@ impl Config {
                 }
                 if !on_disk.subsonic.server_url.is_empty() {
                     merged.subsonic = on_disk.subsonic;
+                }
+                if !on_disk.vault.server_url.is_empty() {
+                    merged.vault = on_disk.vault;
                 }
             }
         }

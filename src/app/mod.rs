@@ -207,6 +207,13 @@ pub struct App {
     pub plugins: Option<crate::plugin::PluginEngine>,
     pub db: Option<crate::db::LibraryDatabase>,
     pub native_spotify: Option<crate::spotify::NativeSpotifySession>,
+    pub show_vault_browser: bool,
+    pub vault_query: String,
+    pub vault_query_editing: bool,
+    pub vault_results: Vec<crate::audio::Track>,
+    pub vault_row: usize,
+    pub(crate) vault_rx:
+        Option<std::sync::mpsc::Receiver<Result<Vec<crate::audio::Track>, String>>>,
 }
 
 impl App {
@@ -516,6 +523,12 @@ impl App {
             plugins: None,
             db: None,
             native_spotify: None,
+            show_vault_browser: false,
+            vault_query: String::new(),
+            vault_query_editing: false,
+            vault_results: Vec::new(),
+            vault_row: 0,
+            vault_rx: None,
         };
 
         if let Some(tokens) = crate::spotify::load_tokens() {
@@ -828,6 +841,26 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.subsonic_rx = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.vault_rx {
+            match rx.try_recv() {
+                Ok(Ok(tracks)) => {
+                    let n = tracks.len();
+                    self.vault_results = tracks;
+                    self.vault_row = 0;
+                    self.set_info(format!("Cloud Vault: {n} faixa(s) encontradas."));
+                    self.vault_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.set_error(format!("Cloud Vault: erro — {e}"));
+                    self.vault_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.vault_rx = None;
                 }
             }
         }

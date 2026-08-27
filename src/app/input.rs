@@ -80,6 +80,11 @@ impl App {
             return;
         }
 
+        if self.show_vault_browser {
+            self.handle_vault_browser_key(key);
+            return;
+        }
+
         if self.show_tag_editor {
             self.handle_tag_editor_key(key);
             return;
@@ -615,6 +620,10 @@ impl App {
                 self.show_subsonic_browser = true;
                 self.subsonic_load_tab(self.subsonic_browser_tab);
             }
+            Action::VaultBrowser => {
+                self.show_vault_browser = true;
+                self.vault_load_recent();
+            }
         }
     }
 
@@ -754,6 +763,7 @@ impl App {
             ("radio", "Rádios Online", "Explorar diretório mundial de web rádios", Action::RadioBrowser),
             ("spotify", "Spotify Browser", "Buscar e navegar nas playlists do Spotify", Action::SpotifyBrowser),
             ("subsonic", "Subsonic / Navidrome Cloud", "Streaming pessoal da sua nuvem privada", Action::SubsonicBrowser),
+            ("vault", "Cloud Audio Vault", "Catálogo compartilhado de áudio em nuvem privada", Action::VaultBrowser),
             ("playlists", "Gerenciador de Playlists", "Salvar e carregar arquivos .m3u", Action::LoadPlaylist),
             ("rescan", "Reescanear Biblioteca", "Procurar novos arquivos de música no disco", Action::Rescan),
             ("stats", "Estatísticas de Audição", "Ver artistas e gêneros mais tocados", Action::ShowStats),
@@ -1374,6 +1384,67 @@ impl App {
                     }
                 }
             },
+            _ => {}
+        }
+    }
+
+    pub(crate) fn handle_vault_browser_key(&mut self, key: KeyEvent) {
+        if self.vault_query_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.vault_query_editing = false;
+                    if self.vault_query.is_empty() && self.vault_results.is_empty() {
+                        self.show_vault_browser = false;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.vault_query_editing = false;
+                    self.vault_search();
+                }
+                KeyCode::Backspace => {
+                    self.vault_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.vault_query.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_vault_browser = false;
+            }
+            KeyCode::Char('/') | KeyCode::Char('s') => {
+                self.vault_query_editing = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.vault_row > 0 {
+                    self.vault_row -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.vault_row + 1 < self.vault_results.len() {
+                    self.vault_row += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(track) = self.vault_results.get(self.vault_row).cloned() {
+                    self.show_vault_browser = false;
+                    self.queue.push(track);
+                    let idx = self.queue.len() - 1;
+                    self.queue_index = Some(idx);
+                    self.queue_state.select(Some(idx));
+                    self.play_current();
+                }
+            }
+            KeyCode::Char('a') => {
+                if let Some(track) = self.vault_results.get(self.vault_row).cloned() {
+                    self.queue.push(track);
+                    self.set_info("Faixa do Vault adicionada à fila.");
+                }
+            }
             _ => {}
         }
     }

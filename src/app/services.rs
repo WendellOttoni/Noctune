@@ -373,6 +373,46 @@ impl App {
         });
     }
 
+    pub(crate) fn vault_search(&mut self) {
+        let query = self.vault_query.trim().to_string();
+        if query.is_empty() {
+            return;
+        }
+        let client = match crate::vault::VaultClient::new(&self.config.vault) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Vault: {e}"));
+                return;
+            }
+        };
+        self.set_info(format!("Buscando no Cloud Vault: \"{query}\"…"));
+        self.vault_results.clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.vault_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client.search(&query).map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
+    pub(crate) fn vault_load_recent(&mut self) {
+        let client = match crate::vault::VaultClient::new(&self.config.vault) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Vault: {e}"));
+                return;
+            }
+        };
+        self.set_info("Carregando catálogo recente do Cloud Vault…");
+        self.vault_results.clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.vault_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client.list_recent(40).map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
     pub(crate) fn open_tag_editor(&mut self) {
         let track = match self.focus {
             Pane::Library => self.selected_library_track(),
