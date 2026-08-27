@@ -829,7 +829,7 @@ pub fn render_radio_view(f: &mut Frame, area: Rect, app: &App) {
     let current_cat = categories
         .get(app.radio_category_idx)
         .copied()
-        .unwrap_or(crate::radio_browser::RadioCategory::All);
+        .unwrap_or(crate::radio_browser::RadioCategory::TopVoted);
     let stations_title = format!(" Estações ({}) ", current_cat.label());
     let stations_block = Block::default()
         .borders(Borders::ALL)

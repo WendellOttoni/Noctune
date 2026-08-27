@@ -442,9 +442,8 @@ pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>
         }
     }
 
-    let tag_path = format!(
-        "/json/stations/bytag/{encoded_query}?limit={limit}&order=votes&reverse=true"
-    );
+    let tag_path =
+        format!("/json/stations/bytag/{encoded_query}?limit={limit}&order=votes&reverse=true");
     query_radio_browser_path(&tag_path)
 }
 

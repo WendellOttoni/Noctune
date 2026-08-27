@@ -668,7 +668,8 @@ impl App {
         self.radio_search_rx = Some(rx);
         self.set_info(format!("Buscando rádios por '{q}'…"));
         std::thread::spawn(move || {
-            let res = crate::radio_browser::search_radio_browser(&q, 100).map_err(|e| e.to_string());
+            let res =
+                crate::radio_browser::search_radio_browser(&q, 100).map_err(|e| e.to_string());
             let _ = tx.send(res);
         });
     }
