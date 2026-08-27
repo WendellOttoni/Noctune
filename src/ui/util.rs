@@ -88,9 +88,9 @@ pub fn build_eq_row(eq: &crate::eq::EqState, theme: &Theme) -> Line<'static> {
         " ≡ EQ  ".to_string(),
         Style::default().fg(muted),
     )];
-    spans.extend(band("L", eq.low_db));
-    spans.extend(band("M", eq.mid_db));
-    spans.extend(band("H", eq.high_db));
+    spans.extend(band("L", eq.low_db()));
+    spans.extend(band("M", eq.mid_db()));
+    spans.extend(band("H", eq.high_db()));
     Line::from(spans)
 }
 

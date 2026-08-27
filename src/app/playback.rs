@@ -26,17 +26,17 @@ impl App {
         match self.audio_panel_row {
             0 => {
                 self.player.eq().adjust_low(dir as f32);
-                let db = self.player.eq().snapshot().low_db;
+                let db = self.player.eq().snapshot().low_db();
                 self.set_info(format!("EQ Low: {:+.0} dB", db));
             }
             1 => {
                 self.player.eq().adjust_mid(dir as f32);
-                let db = self.player.eq().snapshot().mid_db;
+                let db = self.player.eq().snapshot().mid_db();
                 self.set_info(format!("EQ Mid: {:+.0} dB", db));
             }
             2 => {
                 self.player.eq().adjust_high(dir as f32);
-                let db = self.player.eq().snapshot().high_db;
+                let db = self.player.eq().snapshot().high_db();
                 self.set_info(format!("EQ High: {:+.0} dB", db));
             }
             3 => {
@@ -517,9 +517,10 @@ impl App {
         let snap = self.player.eq().snapshot();
         let preset = crate::config::EqPreset {
             name: name.clone(),
-            low_db: snap.low_db,
-            mid_db: snap.mid_db,
-            high_db: snap.high_db,
+            low_db: snap.low_db(),
+            mid_db: snap.mid_db(),
+            high_db: snap.high_db(),
+            bands: Some(snap.bands.to_vec()),
         };
         if let Some(existing) = self.custom_eq_presets.iter_mut().find(|p| p.name == name) {
             *existing = preset;
@@ -546,9 +547,10 @@ impl App {
             volume: self.player.volume(),
             shuffle: self.shuffle,
             repeat: matches!(self.repeat, RepeatMode::All | RepeatMode::One),
-            eq_low_db: snap.low_db,
-            eq_mid_db: snap.mid_db,
-            eq_high_db: snap.high_db,
+            eq_low_db: snap.low_db(),
+            eq_mid_db: snap.mid_db(),
+            eq_high_db: snap.high_db(),
+            eq_bands: Some(snap.bands.to_vec()),
         };
         if let Some(existing) = self.profiles.iter_mut().find(|p| p.name == name) {
             *existing = profile;
@@ -576,11 +578,7 @@ impl App {
         } else {
             RepeatMode::Off
         };
-        self.player.eq().set(crate::eq::EqState {
-            low_db: p.eq_low_db,
-            mid_db: p.eq_mid_db,
-            high_db: p.eq_high_db,
-        });
+        self.player.eq().set(p.to_eq_state());
         if self.config.theme != p.theme {
             if let Ok(theme) = crate::theme::Theme::load(&p.theme) {
                 self.config.theme = p.theme.clone();

@@ -582,10 +582,9 @@ pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
 pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let eq = app.player.eq().snapshot();
-
-    const CURVE_H: usize = 13; // rows for curve (+12 to -12 dB, 2dB per row)
-    let w = 72.min(area.width.saturating_sub(4)).max(44);
-    let h = (CURVE_H as u16 + 11).min(area.height.saturating_sub(2));
+    let curve_h = 7usize;
+    let w = 84.min(area.width.saturating_sub(2)).max(52);
+    let h = 26.min(area.height.saturating_sub(2)).max(18);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -608,11 +607,12 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         ((t * (curve_w - 1) as f32).round() as usize).min(curve_w - 1)
     };
 
-    let low_col = freq_to_col(200.0);
-    let mid_col = freq_to_col(1000.0);
-    let high_col = freq_to_col(5000.0);
+    let node_cols: Vec<usize> = crate::eq::BAND_FREQS
+        .iter()
+        .map(|&freq| freq_to_col(freq))
+        .collect();
 
-    let grid_cols: HashSet<usize> = [50.0f32, 100.0, 500.0, 2000.0, 10000.0]
+    let grid_cols: HashSet<usize> = [31.25f32, 125.0, 500.0, 2000.0, 8000.0, 16000.0]
         .iter()
         .map(|&freq| freq_to_col(freq))
         .collect();
@@ -621,57 +621,29 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         .map(|col| {
             let t = col as f32 / (curve_w - 1).max(1) as f32;
             let freq = 20.0f32 * (1000.0f32).powf(t);
-            let fc_low = 200.0f32;
-            let fc_mid = 1000.0f32;
-            let fc_high = 5000.0f32;
-            let g_low = eq.low_db * fc_low * fc_low / (freq * freq + fc_low * fc_low);
-            let bw = freq / fc_mid - fc_mid / freq;
-            let g_mid = eq.mid_db / (1.0 + (bw * 0.9).powi(2));
-            let g_high = eq.high_db * freq * freq / (freq * freq + fc_high * fc_high);
-            let total = (g_low + g_mid + g_high).clamp(-12.0, 12.0);
-            let row = ((12.0 - total) / 24.0 * (CURVE_H - 1) as f32).round() as usize;
-            row.min(CURVE_H - 1)
+            let mut total = 0.0f32;
+            for i in 0..crate::eq::NUM_BANDS {
+                let fc = crate::eq::BAND_FREQS[i];
+                let g = eq.bands[i];
+                if g.abs() > 0.05 {
+                    let ratio = (freq / fc).ln();
+                    let resp = (-0.5 * (ratio / 0.55).powi(2)).exp();
+                    total += g * resp;
+                }
+            }
+            let total = total.clamp(-12.0, 12.0);
+            let row = ((12.0 - total) / 24.0 * (curve_h - 1) as f32).round() as usize;
+            row.min(curve_h - 1)
         })
         .collect();
 
-    let zero_row = (CURVE_H - 1) / 2; // row 6 = 0 dB
+    let zero_row = (curve_h - 1) / 2;
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // Band selector header
-    {
-        let nodes = [
-            (low_col, "1", app.eq_tuner_band == 0),
-            (mid_col, "2", app.eq_tuner_band == 1),
-            (high_col, "3", app.eq_tuner_band == 2),
-        ];
-        let mut spans = vec![Span::styled("      │", Style::default().fg(muted))];
-        let mut cursor = 0usize;
-        for &(col, sym, selected) in &nodes {
-            if col > cursor {
-                spans.push(Span::raw(" ".repeat(col - cursor)));
-                cursor = col;
-            }
-            let style = if selected {
-                Style::default()
-                    .fg(bg)
-                    .bg(accent)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(muted)
-            };
-            spans.push(Span::styled(sym, style));
-            cursor += 1;
-        }
-        if cursor < curve_w {
-            spans.push(Span::raw(" ".repeat(curve_w - cursor)));
-        }
-        lines.push(Line::from(spans));
-    }
-
-    // Curve rows
-    for row in 0..CURVE_H {
-        let db = 12.0 - row as f32 * 24.0 / (CURVE_H - 1) as f32;
+    // 1. Curve rows
+    for row in 0..curve_h {
+        let db = 12.0 - row as f32 * 24.0 / (curve_h - 1) as f32;
         let label = if (db.round() as i32).abs() % 6 == 0 {
             format!("{:+3.0} ", db)
         } else {
@@ -701,41 +673,23 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
             let in_boost = cr < zr && r > cr && r < zr;
             let in_cut = cr > zr && r > zr && r < cr;
 
-            let is_low_node = col == low_col && is_on_curve;
-            let is_mid_node = col == mid_col && is_on_curve;
-            let is_high_node = col == high_col && is_on_curve;
+            let is_selected_node = node_cols
+                .get(app.eq_tuner_band)
+                .map(|&c| c == col && is_on_curve)
+                .unwrap_or(false);
+
+            let is_any_node = node_cols.iter().position(|&c| c == col && is_on_curve);
             let is_grid_col = grid_cols.contains(&col);
 
-            let span = if is_low_node {
-                let style = if app.eq_tuner_band == 0 {
+            let span = if is_selected_node {
+                Span::styled(
+                    "●",
                     Style::default()
-                        .fg(bg)
-                        .bg(accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(secondary)
-                };
-                Span::styled("1", style)
-            } else if is_mid_node {
-                let style = if app.eq_tuner_band == 1 {
-                    Style::default()
-                        .fg(bg)
-                        .bg(accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(secondary)
-                };
-                Span::styled("2", style)
-            } else if is_high_node {
-                let style = if app.eq_tuner_band == 2 {
-                    Style::default()
-                        .fg(bg)
-                        .bg(accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(secondary)
-                };
-                Span::styled("3", style)
+                        .fg(accent)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if is_any_node.is_some() {
+                Span::styled("•", Style::default().fg(secondary))
             } else if is_on_curve {
                 Span::styled("─", Style::default().fg(accent))
             } else if is_vert {
@@ -760,28 +714,18 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(spans));
     }
 
-    // Frequency axis labels
+    // 2. Frequency axis labels
     {
-        let freq_markers: &[(&str, f32)] = &[
-            ("20", 20.0),
-            ("50", 50.0),
-            ("100", 100.0),
-            ("200", 200.0),
-            ("500", 500.0),
-            ("1k", 1000.0),
-            ("2k", 2000.0),
-            ("5k", 5000.0),
-            ("10k", 10000.0),
-            ("20k", 20000.0),
-        ];
         let mut freq_row = vec![' '; curve_w];
-        for (label, freq) in freq_markers {
-            let t = (freq / 20.0).log10() / (20000.0f32 / 20.0).log10();
-            let col = (t * (curve_w - 1) as f32).round() as usize;
-            let col = col.min(curve_w.saturating_sub(label.len()));
-            for (i, ch) in label.chars().enumerate() {
-                if col + i < curve_w && freq_row[col + i] == ' ' {
-                    freq_row[col + i] = ch;
+        for (i, label) in crate::eq::BAND_LABELS.iter().enumerate() {
+            let col = node_cols[i];
+            let clean_label = label.trim_end_matches("Hz");
+            let col_start = col
+                .saturating_sub(clean_label.len() / 2)
+                .min(curve_w.saturating_sub(clean_label.len()));
+            for (ci, ch) in clean_label.chars().enumerate() {
+                if col_start + ci < curve_w && freq_row[col_start + ci] == ' ' {
+                    freq_row[col_start + ci] = ch;
                 }
             }
         }
@@ -795,58 +739,78 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
 
     lines.push(Line::from(""));
 
-    // Band sliders
-    let bands = [
-        ("Low  200Hz", eq.low_db, app.eq_tuner_band == 0),
-        ("Mid  1kHz ", eq.mid_db, app.eq_tuner_band == 1),
-        ("High 5kHz ", eq.high_db, app.eq_tuner_band == 2),
-    ];
-    let slider_w = inner_w.saturating_sub(26).max(10);
-    for (label, db, selected) in &bands {
-        let cursor = if *selected { "▶" } else { " " };
-        let cursor_style = if *selected {
-            Style::default().fg(accent)
+    // 3. 10 Vertical Faders
+    let fader_height = 5usize;
+    // Row 0: DB Values
+    let mut db_spans: Vec<Span> = vec![Span::styled(" Gain: ", Style::default().fg(muted))];
+    for (i, &gain) in eq.bands.iter().enumerate() {
+        let is_sel = i == app.eq_tuner_band;
+        let style = if is_sel {
+            Style::default().fg(accent).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(muted)
+            Style::default().fg(fg)
         };
-        let pos = ((db + 12.0) / 24.0 * (slider_w - 1) as f32).round() as usize;
-        let pos = pos.min(slider_w - 1);
-        let bar: String = (0..slider_w)
-            .map(|i| if i == pos { '●' } else { '─' })
-            .collect();
-        let db_label = format!("{:+.0} dB", db);
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {} ", cursor), cursor_style),
-            Span::styled(
-                *label,
-                Style::default().fg(if *selected { fg } else { muted }),
-            ),
-            Span::styled("  ├", Style::default().fg(muted)),
-            Span::styled(
-                bar,
-                Style::default().fg(if *selected { accent } else { secondary }),
-            ),
-            Span::styled("┤", Style::default().fg(muted)),
-            Span::styled(
-                format!(" {:<7}", db_label),
-                Style::default().fg(if *selected { accent } else { fg }),
-            ),
-        ]));
+        db_spans.push(Span::styled(format!("{:>5.0}dB ", gain), style));
     }
+    lines.push(Line::from(db_spans));
+
+    // Rows 1..5: Vertical fader tracks
+    for fader_row in 0..fader_height {
+        let mut track_spans: Vec<Span> = vec![Span::styled(
+            if fader_row == fader_height / 2 { "  0dB ├" } else { "      │" },
+            Style::default().fg(muted),
+        )];
+        for (i, &gain) in eq.bands.iter().enumerate() {
+            let is_sel = i == app.eq_tuner_band;
+            let knob_row = (((12.0 - gain) / 24.0) * (fader_height - 1) as f32).round() as usize;
+            let center_row = fader_height / 2;
+
+            let cell = if fader_row == knob_row {
+                "  [●]  "
+            } else if fader_row == center_row {
+                "  ─┼─  "
+            } else {
+                "   │   "
+            };
+
+            let style = if is_sel && fader_row == knob_row {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else if is_sel {
+                Style::default().fg(accent)
+            } else {
+                Style::default().fg(muted)
+            };
+            track_spans.push(Span::styled(cell, style));
+        }
+        track_spans.push(Span::styled("┤", Style::default().fg(muted)));
+        lines.push(Line::from(track_spans));
+    }
+
+    // Row 6: Band frequency labels
+    let mut label_spans: Vec<Span> = vec![Span::styled(" Freq: ", Style::default().fg(muted))];
+    for (i, label) in crate::eq::BAND_LABELS.iter().enumerate() {
+        let is_sel = i == app.eq_tuner_band;
+        let style = if is_sel {
+            Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(secondary)
+        };
+        label_spans.push(Span::styled(format!(" {:^5} ", label), style));
+        label_spans.push(Span::raw(""));
+    }
+    lines.push(Line::from(label_spans));
 
     lines.push(Line::from(""));
 
-    // Preset buttons
+    // 4. Preset buttons
     let current = crate::eq::PRESETS.iter().position(|(_, s)| {
-        (s.low_db - eq.low_db).abs() < 0.1
-            && (s.mid_db - eq.mid_db).abs() < 0.1
-            && (s.high_db - eq.high_db).abs() < 0.1
+        s.bands.iter().zip(eq.bands.iter()).all(|(a, b)| (a - b).abs() < 0.1)
     });
-    let mut preset_spans: Vec<Span> = vec![Span::styled(" ", Style::default())];
-    for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate() {
+    let mut preset_spans: Vec<Span> = vec![Span::styled(" Presets: ", Style::default().fg(muted))];
+    for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate().take(8) {
         let active = current == Some(i);
         let style = if active {
-            Style::default().fg(bg).bg(accent)
+            Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(muted)
         };
@@ -855,15 +819,20 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(preset_spans));
 
+    // 5. Controls hint
     lines.push(Line::from(vec![
-        Span::styled("  ← → ", Style::default().fg(accent)),
-        Span::styled("adjust  ", Style::default().fg(muted)),
+        Span::styled(" ← → ", Style::default().fg(accent)),
+        Span::styled("banda  ", Style::default().fg(muted)),
         Span::styled("↑↓ ", Style::default().fg(accent)),
-        Span::styled("band  ", Style::default().fg(muted)),
+        Span::styled("ganho (±1dB)  ", Style::default().fg(muted)),
         Span::styled("0 ", Style::default().fg(accent)),
         Span::styled("preset  ", Style::default().fg(muted)),
+        Span::styled("r ", Style::default().fg(accent)),
+        Span::styled("flat  ", Style::default().fg(muted)),
+        Span::styled("Ctrl+S ", Style::default().fg(accent)),
+        Span::styled("salvar  ", Style::default().fg(muted)),
         Span::styled("Esc ", Style::default().fg(accent)),
-        Span::styled("close", Style::default().fg(muted)),
+        Span::styled("fechar", Style::default().fg(muted)),
     ]));
 
     let p = Paragraph::new(Text::from(lines))
@@ -872,7 +841,7 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
-                .title(Span::styled(" EQ Tuner ", theme.accent())),
+                .title(Span::styled(" 🎚️ Equalizador Gráfico de 10 Bandas (EQ Tuner) ", theme.accent())),
         );
     f.render_widget(p, popup);
 }
@@ -897,18 +866,18 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
     let rows: &[Row] = &[
         Row {
             label: "EQ Low",
-            value: format!("{:+.0} dB", eq.low_db),
-            bar_pct: ((eq.low_db + 12.0) / 24.0) as f64,
+            value: format!("{:+.0} dB", eq.low_db()),
+            bar_pct: ((eq.low_db() + 12.0) / 24.0) as f64,
         },
         Row {
             label: "EQ Mid",
-            value: format!("{:+.0} dB", eq.mid_db),
-            bar_pct: ((eq.mid_db + 12.0) / 24.0) as f64,
+            value: format!("{:+.0} dB", eq.mid_db()),
+            bar_pct: ((eq.mid_db() + 12.0) / 24.0) as f64,
         },
         Row {
             label: "EQ High",
-            value: format!("{:+.0} dB", eq.high_db),
-            bar_pct: ((eq.high_db + 12.0) / 24.0) as f64,
+            value: format!("{:+.0} dB", eq.high_db()),
+            bar_pct: ((eq.high_db() + 12.0) / 24.0) as f64,
         },
         Row {
             label: "EQ Preset",

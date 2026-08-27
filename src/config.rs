@@ -385,9 +385,28 @@ pub fn profiles_path() -> Result<PathBuf> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EqPreset {
     pub name: String,
+    #[serde(default)]
     pub low_db: f32,
+    #[serde(default)]
     pub mid_db: f32,
+    #[serde(default)]
     pub high_db: f32,
+    #[serde(default)]
+    pub bands: Option<Vec<f32>>,
+}
+
+impl EqPreset {
+    pub fn to_eq_state(&self) -> crate::eq::EqState {
+        if let Some(bands) = &self.bands {
+            let mut arr = [0.0f32; crate::eq::NUM_BANDS];
+            for (i, &v) in bands.iter().take(crate::eq::NUM_BANDS).enumerate() {
+                arr[i] = v;
+            }
+            crate::eq::EqState::from_bands(arr)
+        } else {
+            crate::eq::EqState::from_3band(self.low_db, self.mid_db, self.high_db)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -429,9 +448,28 @@ pub struct Profile {
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: bool,
+    #[serde(default)]
     pub eq_low_db: f32,
+    #[serde(default)]
     pub eq_mid_db: f32,
+    #[serde(default)]
     pub eq_high_db: f32,
+    #[serde(default)]
+    pub eq_bands: Option<Vec<f32>>,
+}
+
+impl Profile {
+    pub fn to_eq_state(&self) -> crate::eq::EqState {
+        if let Some(bands) = &self.eq_bands {
+            let mut arr = [0.0f32; crate::eq::NUM_BANDS];
+            for (i, &v) in bands.iter().take(crate::eq::NUM_BANDS).enumerate() {
+                arr[i] = v;
+            }
+            crate::eq::EqState::from_bands(arr)
+        } else {
+            crate::eq::EqState::from_3band(self.eq_low_db, self.eq_mid_db, self.eq_high_db)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -2,20 +2,65 @@ use parking_lot::Mutex;
 use rodio::Source;
 use std::{sync::Arc, time::Duration};
 
-#[derive(Debug, Clone, Copy)]
+pub const NUM_BANDS: usize = 10;
+
+pub const BAND_FREQS: [f32; NUM_BANDS] = [
+    31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+];
+
+pub const BAND_LABELS: [&str; NUM_BANDS] = [
+    "31Hz", "62Hz", "125Hz", "250Hz", "500Hz", "1kHz", "2kHz", "4kHz", "8kHz", "16kHz",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EqState {
-    pub low_db: f32,
-    pub mid_db: f32,
-    pub high_db: f32,
+    pub bands: [f32; NUM_BANDS],
 }
 
 impl Default for EqState {
     fn default() -> Self {
         Self {
-            low_db: 0.0,
-            mid_db: 0.0,
-            high_db: 0.0,
+            bands: [0.0; NUM_BANDS],
         }
+    }
+}
+
+impl EqState {
+    pub fn from_3band(low: f32, mid: f32, high: f32) -> Self {
+        Self {
+            bands: [
+                low,
+                low * 0.9,
+                low * 0.7,
+                mid * 0.5,
+                mid,
+                mid,
+                mid * 0.5,
+                high * 0.7,
+                high * 0.9,
+                high,
+            ],
+        }
+    }
+
+    pub fn from_bands(bands: [f32; NUM_BANDS]) -> Self {
+        Self { bands }
+    }
+
+    pub fn low_db(&self) -> f32 {
+        (self.bands[0] + self.bands[1] + self.bands[2]) / 3.0
+    }
+
+    pub fn mid_db(&self) -> f32 {
+        (self.bands[3] + self.bands[4] + self.bands[5] + self.bands[6]) / 4.0
+    }
+
+    pub fn high_db(&self) -> f32 {
+        (self.bands[7] + self.bands[8] + self.bands[9]) / 3.0
+    }
+
+    pub fn is_flat(&self) -> bool {
+        self.bands.iter().all(|b| b.abs() < f32::EPSILON)
     }
 }
 
@@ -35,19 +80,39 @@ impl EqHandle {
         *self.inner.lock()
     }
 
+    pub fn adjust_band(&self, band: usize, delta: f32) {
+        let mut s = self.inner.lock();
+        if band < NUM_BANDS {
+            s.bands[band] = (s.bands[band] + delta).clamp(-12.0, 12.0);
+        }
+    }
+
+    pub fn set_band(&self, band: usize, gain_db: f32) {
+        let mut s = self.inner.lock();
+        if band < NUM_BANDS {
+            s.bands[band] = gain_db.clamp(-12.0, 12.0);
+        }
+    }
+
     pub fn adjust_low(&self, delta: f32) {
         let mut s = self.inner.lock();
-        s.low_db = (s.low_db + delta).clamp(-12.0, 12.0);
+        for i in 0..3 {
+            s.bands[i] = (s.bands[i] + delta).clamp(-12.0, 12.0);
+        }
     }
 
     pub fn adjust_mid(&self, delta: f32) {
         let mut s = self.inner.lock();
-        s.mid_db = (s.mid_db + delta).clamp(-12.0, 12.0);
+        for i in 3..7 {
+            s.bands[i] = (s.bands[i] + delta).clamp(-12.0, 12.0);
+        }
     }
 
     pub fn adjust_high(&self, delta: f32) {
         let mut s = self.inner.lock();
-        s.high_db = (s.high_db + delta).clamp(-12.0, 12.0);
+        for i in 7..10 {
+            s.bands[i] = (s.bands[i] + delta).clamp(-12.0, 12.0);
+        }
     }
 
     pub fn set(&self, state: EqState) {
@@ -59,89 +124,73 @@ pub const PRESETS: &[(&str, EqState)] = &[
     (
         "Flat",
         EqState {
-            low_db: 0.0,
-            mid_db: 0.0,
-            high_db: 0.0,
+            bands: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         },
     ),
     (
         "Bass Boost",
         EqState {
-            low_db: 6.0,
-            mid_db: 0.0,
-            high_db: 2.0,
+            bands: [7.0, 6.0, 5.0, 3.0, 1.0, 0.0, 0.0, 1.0, 2.0, 2.0],
         },
     ),
     (
         "Vocal Boost",
         EqState {
-            low_db: -2.0,
-            mid_db: 4.0,
-            high_db: 1.0,
+            bands: [-2.0, -2.0, -1.0, 1.0, 3.0, 4.0, 3.0, 2.0, 1.0, 0.0],
         },
     ),
     (
         "Treble Boost",
         EqState {
-            low_db: -2.0,
-            mid_db: 0.0,
-            high_db: 6.0,
+            bands: [-2.0, -2.0, -1.0, 0.0, 0.0, 1.0, 3.0, 5.0, 7.0, 8.0],
         },
     ),
     (
         "Rock",
         EqState {
-            low_db: 4.0,
-            mid_db: -1.0,
-            high_db: 4.0,
+            bands: [5.0, 4.0, 3.0, 1.0, -1.0, -1.0, 1.0, 3.0, 4.0, 5.0],
         },
     ),
     (
         "Electronic",
         EqState {
-            low_db: 6.0,
-            mid_db: 1.0,
-            high_db: 4.0,
+            bands: [6.0, 5.0, 4.0, 1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
         },
     ),
     (
         "Hip-Hop",
         EqState {
-            low_db: 7.0,
-            mid_db: 1.0,
-            high_db: 2.0,
+            bands: [7.0, 6.5, 5.0, 2.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0],
         },
     ),
     (
         "Jazz",
         EqState {
-            low_db: 3.0,
-            mid_db: 2.0,
-            high_db: 3.0,
+            bands: [3.0, 3.0, 2.0, 1.0, 2.0, 2.0, 1.0, 2.0, 3.0, 3.0],
+        },
+    ),
+    (
+        "Classical",
+        EqState {
+            bands: [4.0, 3.0, 2.5, 2.0, -1.0, -1.0, 0.0, 2.0, 3.0, 4.0],
         },
     ),
     (
         "Acoustic",
         EqState {
-            low_db: 3.0,
-            mid_db: 3.0,
-            high_db: 2.0,
+            bands: [3.5, 3.0, 2.5, 1.5, 2.0, 2.5, 3.0, 3.5, 3.0, 2.5],
         },
     ),
     (
         "Loudness",
         EqState {
-            low_db: 5.0,
-            mid_db: 1.0,
-            high_db: 5.0,
+            bands: [6.0, 5.0, 3.0, 0.0, -1.0, 0.0, 1.0, 3.0, 5.0, 6.0],
         },
     ),
     (
         "V-Shape",
         EqState {
-            low_db: 8.0,
-            mid_db: -6.0,
-            high_db: 8.0,
+            bands: [8.0, 6.0, 4.0, 0.0, -4.0, -4.0, 0.0, 4.0, 6.0, 8.0],
         },
     ),
 ];
@@ -265,7 +314,7 @@ pub struct EqSource<S: Source<Item = f32>> {
     chan_idx: u16,
     state: EqState,
     refresh_in: u32,
-    filters: Vec<[Biquad; 3]>,
+    filters: Vec<[Biquad; NUM_BANDS]>,
 }
 
 impl<S: Source<Item = f32>> EqSource<S> {
@@ -288,39 +337,32 @@ impl<S: Source<Item = f32>> EqSource<S> {
         }
     }
 
-    fn build_filters(rate: f32, s: &EqState) -> [Biquad; 3] {
-        [
-            Biquad::low_shelf(rate, 200.0, s.low_db),
-            Biquad::peaking(rate, 1000.0, 0.9, s.mid_db),
-            Biquad::high_shelf(rate, 5000.0, s.high_db),
-        ]
+    fn build_filters(rate: f32, s: &EqState) -> [Biquad; NUM_BANDS] {
+        let q = 1.414;
+        let mut filters = [Biquad::default(); NUM_BANDS];
+        filters[0] = Biquad::low_shelf(rate, BAND_FREQS[0] * 1.5, s.bands[0]);
+        for i in 1..NUM_BANDS - 1 {
+            filters[i] = Biquad::peaking(rate, BAND_FREQS[i], q, s.bands[i]);
+        }
+        filters[NUM_BANDS - 1] =
+            Biquad::high_shelf(rate, BAND_FREQS[NUM_BANDS - 1] / 1.5, s.bands[NUM_BANDS - 1]);
+        filters
     }
 
     fn maybe_refresh(&mut self) {
         if self.refresh_in == 0 {
             let snap = self.handle.snapshot();
-            if snap.low_db != self.state.low_db
-                || snap.mid_db != self.state.mid_db
-                || snap.high_db != self.state.high_db
-            {
+            if snap.bands != self.state.bands {
                 self.state = snap;
                 for ch in self.filters.iter_mut() {
                     let coeffs = Self::build_filters(self.sample_rate, &self.state);
-                    ch[0].b0 = coeffs[0].b0;
-                    ch[0].b1 = coeffs[0].b1;
-                    ch[0].b2 = coeffs[0].b2;
-                    ch[0].a1 = coeffs[0].a1;
-                    ch[0].a2 = coeffs[0].a2;
-                    ch[1].b0 = coeffs[1].b0;
-                    ch[1].b1 = coeffs[1].b1;
-                    ch[1].b2 = coeffs[1].b2;
-                    ch[1].a1 = coeffs[1].a1;
-                    ch[1].a2 = coeffs[1].a2;
-                    ch[2].b0 = coeffs[2].b0;
-                    ch[2].b1 = coeffs[2].b1;
-                    ch[2].b2 = coeffs[2].b2;
-                    ch[2].a1 = coeffs[2].a1;
-                    ch[2].a2 = coeffs[2].a2;
+                    for i in 0..NUM_BANDS {
+                        ch[i].b0 = coeffs[i].b0;
+                        ch[i].b1 = coeffs[i].b1;
+                        ch[i].b2 = coeffs[i].b2;
+                        ch[i].a1 = coeffs[i].a1;
+                        ch[i].a2 = coeffs[i].a2;
+                    }
                 }
             }
             self.refresh_in = 4096;
@@ -335,19 +377,16 @@ impl<S: Source<Item = f32>> Iterator for EqSource<S> {
     fn next(&mut self) -> Option<f32> {
         self.maybe_refresh();
         let s = self.inner.next()?;
-        let bypass =
-            self.state.low_db.abs() < f32::EPSILON
-                && self.state.mid_db.abs() < f32::EPSILON
-                && self.state.high_db.abs() < f32::EPSILON;
-        if bypass {
+        if self.state.is_flat() {
             self.chan_idx = (self.chan_idx + 1) % self.channels.max(1);
             return Some(s);
         }
         let ch = self.chan_idx as usize;
         let chain = &mut self.filters[ch];
-        let mut out = chain[0].process(s);
-        out = chain[1].process(out);
-        out = chain[2].process(out);
+        let mut out = s;
+        for f in chain.iter_mut() {
+            out = f.process(out);
+        }
         self.chan_idx = (self.chan_idx + 1) % self.channels.max(1);
         Some(out.clamp(-1.0, 1.0))
     }
@@ -375,41 +414,38 @@ mod tests {
     #[test]
     fn handle_adjusts_within_clamp() {
         let h = EqHandle::new();
-        assert_eq!(h.snapshot().low_db, 0.0);
-        h.adjust_low(3.0);
-        assert!((h.snapshot().low_db - 3.0).abs() < f32::EPSILON);
+        assert_eq!(h.snapshot().bands[0], 0.0);
+        h.adjust_band(0, 3.0);
+        assert!((h.snapshot().bands[0] - 3.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn handle_clamps_at_extremes() {
         let h = EqHandle::new();
-        h.adjust_low(100.0);
-        assert_eq!(h.snapshot().low_db, 12.0);
-        h.adjust_low(-100.0);
-        assert_eq!(h.snapshot().low_db, -12.0);
+        h.adjust_band(0, 100.0);
+        assert_eq!(h.snapshot().bands[0], 12.0);
+        h.adjust_band(0, -100.0);
+        assert_eq!(h.snapshot().bands[0], -12.0);
     }
 
     #[test]
     fn handle_set_replaces_state() {
         let h = EqHandle::new();
         h.set(EqState {
-            low_db: 1.0,
-            mid_db: 2.0,
-            high_db: 3.0,
+            bands: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
         });
         let s = h.snapshot();
-        assert_eq!(s.low_db, 1.0);
-        assert_eq!(s.mid_db, 2.0);
-        assert_eq!(s.high_db, 3.0);
+        assert_eq!(s.bands[0], 1.0);
+        assert_eq!(s.bands[9], 10.0);
     }
 
     #[test]
     fn presets_are_named_and_in_range() {
         assert!(PRESETS.iter().any(|(name, _)| *name == "Flat"));
         for (_, st) in PRESETS {
-            assert!(st.low_db >= -12.0 && st.low_db <= 12.0);
-            assert!(st.mid_db >= -12.0 && st.mid_db <= 12.0);
-            assert!(st.high_db >= -12.0 && st.high_db <= 12.0);
+            for &b in &st.bands {
+                assert!(b >= -12.0 && b <= 12.0);
+            }
         }
     }
 }

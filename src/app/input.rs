@@ -798,7 +798,7 @@ impl App {
             items.push(PaletteItem {
                 id: format!("eq-{name}"),
                 title: format!("EQ Preset: {name}"),
-                description: format!("Graves {:+.0}dB · Médios {:+.0}dB · Agudos {:+.0}dB", st.low_db, st.mid_db, st.high_db),
+                description: format!("Graves {:+.0}dB · Médios {:+.0}dB · Agudos {:+.0}dB", st.low_db(), st.mid_db(), st.high_db()),
                 category: PaletteCategory::EqPreset,
                 action: PaletteAction::SetEqPreset(i),
             });
@@ -1069,21 +1069,25 @@ impl App {
             KeyCode::Esc | KeyCode::Char('E') => {
                 self.show_eq_tuner = false;
             }
-            KeyCode::Left | KeyCode::Char('h') => match self.eq_tuner_band {
-                0 => eq.adjust_low(-1.0),
-                1 => eq.adjust_mid(-1.0),
-                _ => eq.adjust_high(-1.0),
-            },
-            KeyCode::Right | KeyCode::Char('l') => match self.eq_tuner_band {
-                0 => eq.adjust_low(1.0),
-                1 => eq.adjust_mid(1.0),
-                _ => eq.adjust_high(1.0),
-            },
-            KeyCode::Up | KeyCode::Char('k') if self.eq_tuner_band > 0 => {
-                self.eq_tuner_band -= 1;
+            KeyCode::Left | KeyCode::Char('h') | KeyCode::BackTab => {
+                self.eq_tuner_band = if self.eq_tuner_band == 0 {
+                    crate::eq::NUM_BANDS - 1
+                } else {
+                    self.eq_tuner_band - 1
+                };
             }
-            KeyCode::Down | KeyCode::Char('j') if self.eq_tuner_band < 2 => {
-                self.eq_tuner_band += 1;
+            KeyCode::Right | KeyCode::Char('l') | KeyCode::Tab => {
+                self.eq_tuner_band = (self.eq_tuner_band + 1) % crate::eq::NUM_BANDS;
+            }
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('+') | KeyCode::Char('=') => {
+                eq.adjust_band(self.eq_tuner_band, 1.0);
+            }
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('-') => {
+                eq.adjust_band(self.eq_tuner_band, -1.0);
+            }
+            KeyCode::Char('r') => {
+                eq.set(crate::eq::EqState::default());
+                self.set_info("Equalizador: Flat (0 dB)");
             }
             KeyCode::Char('0') => {
                 let snap = eq.snapshot();
@@ -1092,27 +1096,18 @@ impl App {
                     .iter()
                     .map(|(n, s)| (*n, *s))
                     .chain(self.custom_eq_presets.iter().map(|p| {
-                        (
-                            p.name.as_str(),
-                            crate::eq::EqState {
-                                low_db: p.low_db,
-                                mid_db: p.mid_db,
-                                high_db: p.high_db,
-                            },
-                        )
+                        (p.name.as_str(), p.to_eq_state())
                     }))
                     .collect();
                 let next = all
                     .iter()
                     .position(|(_, s)| {
-                        (s.low_db - snap.low_db).abs() < 0.1
-                            && (s.mid_db - snap.mid_db).abs() < 0.1
-                            && (s.high_db - snap.high_db).abs() < 0.1
+                        s.bands.iter().zip(snap.bands.iter()).all(|(a, b)| (a - b).abs() < 0.1)
                     })
                     .map(|i| (i + 1) % all.len())
                     .unwrap_or(0);
                 eq.set(all[next].1);
-                self.set_info(format!("EQ Preset: {}", all[next].0));
+                self.set_info(format!("EQ Preset: 🎚️ {}", all[next].0));
             }
             _ => {}
         }
