@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::{
     app::{
-        types::{Pane, SpotifyTab, ViewMode},
+        types::{LibraryRow, Pane, SpotifyTab, ViewMode},
         util::{rect_contains, sort_tracks_with_ratings},
         App,
     },

@@ -324,6 +324,10 @@ impl Bindings {
                     .map(|(_, a)| *a)
             })
     }
+
+    pub fn resolve(&self, key: &crossterm::event::KeyEvent) -> Option<Action> {
+        self.lookup(key.code, key.modifiers)
+    }
 }
 
 #[cfg(test)]

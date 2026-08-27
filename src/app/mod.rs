@@ -17,7 +17,7 @@ use notify::Watcher as _;
 
 // Re-exports of submodules and types
 pub use self::types::*;
-use self::prefetch::PrefetchSlots;
+use self::prefetch::{PrefetchSlots, PreloadedTrack, SlotKind};
 use self::scan::scan_library_with_progress;
 use self::util::{rg_scale, sort_tracks};
 
@@ -324,7 +324,7 @@ impl App {
         std::thread::spawn(move || {
             let cache_file = cache_path();
             let mut cache = cache_file
-                .as_ref()
+                .as_deref()
                 .map(MetadataCache::load)
                 .unwrap_or_default();
             cache.prune(cache_cfg.expire_days, cache_cfg.max_size_mb);

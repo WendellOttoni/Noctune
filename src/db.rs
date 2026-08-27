@@ -38,8 +38,7 @@ impl LibraryDatabase {
                 album TEXT,
                 duration_secs INTEGER,
                 genre TEXT,
-                year INTEGER,
-                track_number INTEGER
+                year TEXT
             );
 
             CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
@@ -62,16 +61,15 @@ impl LibraryDatabase {
         let tx = conn.transaction()?;
         {
             let mut insert_track = tx.prepare_cached(
-                "INSERT INTO tracks (path, title, artist, album, duration_secs, genre, year, track_number)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "INSERT INTO tracks (path, title, artist, album, duration_secs, genre, year)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(path) DO UPDATE SET
                     title=excluded.title,
                     artist=excluded.artist,
                     album=excluded.album,
                     duration_secs=excluded.duration_secs,
                     genre=excluded.genre,
-                    year=excluded.year,
-                    track_number=excluded.track_number",
+                    year=excluded.year",
             )?;
 
             let mut insert_fts = tx.prepare_cached(
@@ -94,7 +92,6 @@ impl LibraryDatabase {
                     dur_secs,
                     t.genre,
                     t.year,
-                    t.track_number
                 ])?;
 
                 insert_fts.execute(params![
@@ -128,7 +125,7 @@ impl LibraryDatabase {
 
         let conn = self.conn.lock();
         let mut stmt = conn.prepare_cached(
-            "SELECT t.path, t.title, t.artist, t.album, t.duration_secs, t.genre, t.year, t.track_number
+            "SELECT t.path, t.title, t.artist, t.album, t.duration_secs, t.genre, t.year
              FROM tracks_fts f
              JOIN tracks t ON t.path = f.path
              WHERE tracks_fts MATCH ?1
@@ -143,18 +140,20 @@ impl LibraryDatabase {
             let album: Option<String> = row.get(3)?;
             let dur_secs: Option<i64> = row.get(4)?;
             let genre: Option<String> = row.get(5)?;
-            let year: Option<i32> = row.get(6)?;
-            let track_number: Option<u32> = row.get(7)?;
+            let year: Option<String> = row.get(6)?;
 
             Ok(Track {
                 path: PathBuf::from(path_str),
                 title,
                 artist,
                 album,
-                duration: dur_secs.map(|s| Duration::from_secs(s as u64)),
                 genre,
                 year,
-                track_number,
+                duration: dur_secs.map(|s| Duration::from_secs(s as u64)),
+                replaygain_track_db: None,
+                replaygain_album_db: None,
+                cover_url: None,
+                added_at: None,
             })
         })?;
 
@@ -170,9 +169,9 @@ impl LibraryDatabase {
     pub fn load_all(&self) -> Result<Vec<Track>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare_cached(
-            "SELECT path, title, artist, album, duration_secs, genre, year, track_number
+            "SELECT path, title, artist, album, duration_secs, genre, year
              FROM tracks
-             ORDER BY artist, album, track_number, title",
+             ORDER BY artist, album, title",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -182,18 +181,20 @@ impl LibraryDatabase {
             let album: Option<String> = row.get(3)?;
             let dur_secs: Option<i64> = row.get(4)?;
             let genre: Option<String> = row.get(5)?;
-            let year: Option<i32> = row.get(6)?;
-            let track_number: Option<u32> = row.get(7)?;
+            let year: Option<String> = row.get(6)?;
 
             Ok(Track {
                 path: PathBuf::from(path_str),
                 title,
                 artist,
                 album,
-                duration: dur_secs.map(|s| Duration::from_secs(s as u64)),
                 genre,
                 year,
-                track_number,
+                duration: dur_secs.map(|s| Duration::from_secs(s as u64)),
+                replaygain_track_db: None,
+                replaygain_album_db: None,
+                cover_url: None,
+                added_at: None,
             })
         })?;
 

@@ -3,12 +3,13 @@ use std::{path::PathBuf, time::Duration};
 use crate::{
     app::{
         prefetch::SlotKind,
-        scan::{cache_path, scan_library_with_progress, MetadataCache},
+        scan::scan_library_with_progress,
         types::Pane,
         util::parse_spotify_url,
         App,
     },
     audio::Track,
+    cache::{cache_path, MetadataCache},
 };
 
 impl App {
@@ -27,7 +28,7 @@ impl App {
         std::thread::spawn(move || {
             let cache_file = cache_path();
             let mut cache = cache_file
-                .as_ref()
+                .as_deref()
                 .map(MetadataCache::load)
                 .unwrap_or_default();
             let tracks = scan_library_with_progress(&dirs, &mut cache, Some(ptx));
@@ -425,57 +426,15 @@ impl App {
             return;
         }
 
-        let shared_tracks: Vec<crate::share::SharedTrack> = self
-            .queue
-            .iter()
-            .map(|t| {
-                let p = t.path.to_string_lossy();
-                if p.starts_with("http://") || p.starts_with("https://") {
-                    crate::share::SharedTrack::Stream {
-                        url: p.to_string(),
-                        title: t.title.clone(),
-                        artist: t.artist.clone(),
-                        duration_ms: t.duration.map(|d| d.as_millis() as u64),
-                        source: None,
-                    }
-                } else {
-                    crate::share::SharedTrack::Local {
-                        title: t.title.clone(),
-                        artist: t.artist.clone(),
-                        album: t.album.clone(),
-                        duration_ms: t.duration.map(|d| d.as_millis() as u64),
-                        content_hash: None,
-                    }
-                }
-            })
-            .collect();
-
-        let tags: Vec<String> = self
-            .share_playlist_tags
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let pl = crate::share::SharedPlaylist {
-            version: crate::share::SCHEMA_VERSION,
-            id: String::new(),
-            title,
-            description: if self.share_playlist_desc.trim().is_empty() {
-                None
-            } else {
-                Some(self.share_playlist_desc.trim().to_string())
-            },
-            author: crate::share::Author {
-                id: "noctune_user".into(),
-                display_name: "Noctune User".into(),
-            },
-            created_at_unix: crate::lastfm::now_unix(),
-            updated_at_unix: crate::lastfm::now_unix(),
-            visibility: self.share_playlist_visibility.clone(),
-            tags,
-            tracks: shared_tracks,
+        let mut pl = crate::share::SharedPlaylist::from_tracks(title, &self.queue);
+        pl.description = self.share_playlist_desc.trim().to_string();
+        pl.visibility = self.share_playlist_visibility.clone();
+        pl.author = crate::share::Author {
+            id: "noctune_user".into(),
+            display_name: "Noctune User".into(),
         };
+        pl.created_at = crate::lastfm::now_unix().to_string();
+        pl.updated_at = crate::lastfm::now_unix().to_string();
 
         let client = match crate::share::api::ShareClient::new(None) {
             Ok(c) => c,
@@ -527,12 +486,42 @@ impl App {
             }
         };
 
-        self.set_info(format!("Importando playlist \"{}\"…", summary.title));
+        self.set_info(format!("Importando playlist \"{}\"…", summary.name));
         match client.get(&summary.id) {
             Ok(pl) => {
-                let resolved = crate::share::resolve_tracks(&pl.tracks, &self.library);
-                let count = resolved.len();
-                self.queue.extend(resolved);
+                let resolved_items = pl.resolve(&self.library);
+                let mut tracks = Vec::new();
+                for item in resolved_items {
+                    match item {
+                        crate::share::ResolvedItem::Resolved(t) => tracks.push(t),
+                        crate::share::ResolvedItem::Missing(st) => {
+                            if let crate::share::SharedTrack::Stream {
+                                url,
+                                title,
+                                artist,
+                                duration_ms,
+                                ..
+                            } = st
+                            {
+                                tracks.push(crate::audio::Track {
+                                    path: std::path::PathBuf::from(url),
+                                    title,
+                                    artist,
+                                    album: None,
+                                    genre: None,
+                                    year: None,
+                                    duration: duration_ms.map(std::time::Duration::from_millis),
+                                    replaygain_track_db: None,
+                                    replaygain_album_db: None,
+                                    cover_url: None,
+                                    added_at: None,
+                                });
+                            }
+                        }
+                    }
+                }
+                let count = tracks.len();
+                self.queue.extend(tracks);
                 self.set_info(format!("Importadas {count} faixas para a fila!"));
                 self.show_browse_modal = false;
             }

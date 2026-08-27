@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use mlua::{Function, Lua, LuaSerdeExt, RegistryKey, Table, Value};
+use mlua::{Function, Lua, RegistryKey, Table, Value};
 use parking_lot::Mutex;
 use std::{
     path::{Path, PathBuf},
@@ -159,7 +159,6 @@ impl PluginEngine {
 
         // Environment for this plugin
         let globals = self.lua.globals();
-        let noctune_table: Table = globals.get("noctune")?;
 
         // Helper closures to register events and commands during script execution
         let chunk = self.lua.load(&code).set_name(&name);

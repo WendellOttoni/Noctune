@@ -2344,7 +2344,7 @@ pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
                 let label = format!(
                     " {} {:<32} by {:<16} ({} faixas) ♥ {}{}",
                     if selected { "▶" } else { " " },
-                    pl.title.chars().take(30).collect::<String>(),
+                    pl.name.chars().take(30).collect::<String>(),
                     pl.author.display_name.chars().take(14).collect::<String>(),
                     pl.track_count,
                     pl.likes,

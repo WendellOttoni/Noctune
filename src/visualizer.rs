@@ -1,8 +1,8 @@
 use parking_lot::Mutex;
 use rodio::Source;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
-use std::{sync::Arc, time::Duration};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{sync::Arc, time::Duration};
 
 const RING_SIZE: usize = 4096;
 const FFT_SIZE: usize = 2048;

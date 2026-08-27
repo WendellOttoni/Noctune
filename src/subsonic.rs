@@ -274,10 +274,13 @@ impl SubsonicClient {
             title: song.title.clone(),
             artist: song.artist.clone(),
             album: song.album.clone(),
-            duration: song.duration.map(Duration::from_secs),
             genre: None,
-            year: song.year,
-            track_number: song.track,
+            year: song.year.map(|y| y.to_string()),
+            duration: song.duration.map(Duration::from_secs),
+            replaygain_track_db: None,
+            replaygain_album_db: None,
+            cover_url: None,
+            added_at: None,
         }
     }
 }

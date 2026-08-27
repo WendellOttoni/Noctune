@@ -9,15 +9,17 @@ pub const DEFAULT_SHARE_API_URL: &str = "https://share.noctune.dev";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedPlaylistSummary {
     pub id: String,
-    pub title: String,
+    pub name: String,
     pub description: Option<String>,
     pub author: Author,
     pub track_count: usize,
     pub duration_secs: Option<u64>,
     pub visibility: Visibility,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub likes: u64,
-    pub updated_at_unix: u64,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Clone)]

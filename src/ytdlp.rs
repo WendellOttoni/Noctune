@@ -350,16 +350,18 @@ fn pick_thumbnail(info: &YtInfo) -> Option<String> {
 /// Stores the watch-page URL in `path`; stream URL is resolved at play time.
 pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
     // Expand bare search prefixes to top 5 results
-    let resolved =
-        if url.starts_with("ytsearch:") && !url[9..].starts_with(|c: char| c.is_ascii_digit()) {
-            format!("ytsearch5:{}", &url[9..])
-        } else if url.starts_with("ytmsearch:") && !url[10..].starts_with(|c: char| c.is_ascii_digit()) {
-            format!("ytmsearch5:{}", &url[10..])
-        } else if url.starts_with("scsearch:") && !url[9..].starts_with(|c: char| c.is_ascii_digit()) {
-            format!("scsearch5:{}", &url[9..])
-        } else {
-            url.to_string()
-        };
+    let resolved = if url.starts_with("ytsearch:")
+        && !url[9..].starts_with(|c: char| c.is_ascii_digit())
+    {
+        format!("ytsearch5:{}", &url[9..])
+    } else if url.starts_with("ytmsearch:") && !url[10..].starts_with(|c: char| c.is_ascii_digit())
+    {
+        format!("ytmsearch5:{}", &url[10..])
+    } else if url.starts_with("scsearch:") && !url[9..].starts_with(|c: char| c.is_ascii_digit()) {
+        format!("scsearch5:{}", &url[9..])
+    } else {
+        url.to_string()
+    };
 
     // #69: retry transient failures (network blip, temporary 5xx) before giving up.
     let json_str = with_retry(|| {
@@ -393,7 +395,11 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
     // borrows `&info`, so this has to happen before the `.or(info.url)` move.
     // Flat-playlist entries (`--flat-playlist`) usually omit thumbnails; fall
     // back to the canonical i.ytimg.com URL derived from the video id for YouTube.
-    let is_yt = info.webpage_url.as_deref().unwrap_or("").contains("youtube")
+    let is_yt = info
+        .webpage_url
+        .as_deref()
+        .unwrap_or("")
+        .contains("youtube")
         || info.url.as_deref().unwrap_or("").contains("youtube");
     let cover_url = pick_thumbnail(&info).or_else(|| {
         if is_yt {

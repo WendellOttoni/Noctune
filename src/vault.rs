@@ -18,19 +18,25 @@ pub struct VaultTrack {
 
 impl VaultTrack {
     pub fn to_track(&self, server_url: &str) -> Track {
-        let stream_url = self
-            .direct_stream_url
-            .clone()
-            .unwrap_or_else(|| format!("{}/api/vault/stream/{}", server_url.trim_end_matches('/'), self.id));
+        let stream_url = self.direct_stream_url.clone().unwrap_or_else(|| {
+            format!(
+                "{}/api/vault/stream/{}",
+                server_url.trim_end_matches('/'),
+                self.id
+            )
+        });
         Track {
             path: PathBuf::from(stream_url),
             title: self.title.clone(),
             artist: self.artist.clone(),
             album: self.album.clone().or_else(|| Some("Cloud Vault".into())),
-            duration: self.duration_secs.map(Duration::from_secs),
             genre: None,
             year: None,
-            track_number: None,
+            duration: self.duration_secs.map(Duration::from_secs),
+            replaygain_track_db: None,
+            replaygain_album_db: None,
+            cover_url: self.cover_url.clone(),
+            added_at: None,
         }
     }
 }
@@ -59,7 +65,11 @@ impl VaultClient {
     pub fn search(&self, query: &str) -> Result<Vec<Track>> {
         let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
         let url = format!("{}/api/vault/tracks?q={}&limit=50", self.server_url, q);
-        let res = self.client.get(&url).send().context("Erro ao consultar catálogo do Vault")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao consultar catálogo do Vault")?;
         if !res.status().is_success() {
             return Err(anyhow!("Vault retornou status {}", res.status()));
         }
@@ -69,7 +79,11 @@ impl VaultClient {
 
     pub fn list_recent(&self, limit: usize) -> Result<Vec<Track>> {
         let url = format!("{}/api/vault/tracks/recent?limit={limit}", self.server_url);
-        let res = self.client.get(&url).send().context("Erro ao obter faixas recentes do Vault")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao obter faixas recentes do Vault")?;
         if !res.status().is_success() {
             return Err(anyhow!("Vault retornou status {}", res.status()));
         }
