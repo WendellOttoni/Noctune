@@ -1,6 +1,4 @@
-use crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::time::Duration;
 
 use crate::{
@@ -290,7 +288,9 @@ impl App {
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if self.radio_focus_pane == 0 {
-                        let max = crate::radio_browser::RadioCategory::ALL.len().saturating_sub(1);
+                        let max = crate::radio_browser::RadioCategory::ALL
+                            .len()
+                            .saturating_sub(1);
                         if self.radio_category_idx < max {
                             self.radio_category_idx += 1;
                             self.radio_row = 0;
