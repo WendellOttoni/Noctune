@@ -139,7 +139,17 @@ pub fn parse_chord(s: &str) -> Option<KeyChord> {
         "_" => KeyCode::Char('_'),
         "/" => KeyCode::Char('/'),
         "?" => KeyCode::Char('?'),
-        single if single.chars().count() == 1 => KeyCode::Char(single.chars().next().unwrap()),
+        single if single.chars().count() == 1 => {
+            // crossterm emits uppercase letters as (Char('A'), SHIFT). To match,
+            // store the original case and infer SHIFT from uppercase input (#67).
+            let ch = key.chars().next().unwrap();
+            if ch.is_ascii_uppercase() {
+                mods |= KeyModifiers::SHIFT;
+                KeyCode::Char(ch.to_ascii_lowercase())
+            } else {
+                KeyCode::Char(ch)
+            }
+        }
         _ => return None,
     };
     Some(KeyChord { code, mods })

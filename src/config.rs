@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -295,7 +295,7 @@ impl Config {
                 }
             }
         }
-        fs::write(&path, toml::to_string_pretty(&merged)?)?;
+        atomic_write(&path, &toml::to_string_pretty(&merged)?)?;
         Ok(())
     }
 
@@ -401,17 +401,18 @@ impl EqPresets {
         let Ok(text) = std::fs::read_to_string(&path) else {
             return Self::default();
         };
-        toml::from_str(&text).unwrap_or_default()
+        match toml::from_str(&text) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(target: "config", "eq_presets.toml: parse error — {e}; using defaults (file preserved)");
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self) -> Result<()> {
         let path = eq_presets_path()?;
-        if let Some(p) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(p) {
-                eprintln!("config: failed to create dir {}: {e}", p.display());
-            }
-        }
-        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        atomic_write(&path, &toml::to_string_pretty(self)?)?;
         Ok(())
     }
 }
@@ -444,19 +445,35 @@ impl Profiles {
         let Ok(text) = std::fs::read_to_string(&path) else {
             return Self::default();
         };
-        toml::from_str(&text).unwrap_or_default()
+        match toml::from_str(&text) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(target: "config", "profiles.toml: parse error — {e}; using defaults (file preserved)");
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self) -> Result<()> {
         let path = profiles_path()?;
-        if let Some(p) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(p) {
-                eprintln!("config: failed to create dir {}: {e}", p.display());
-            }
-        }
-        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        atomic_write(&path, &toml::to_string_pretty(self)?)?;
         Ok(())
     }
+}
+
+fn atomic_write(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("config: failed to create dir {}: {e}", parent.display());
+        }
+    }
+    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+    fs::write(&tmp_path, content)?;
+    if let Err(e) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e.into());
+    }
+    Ok(())
 }
 
 fn default_music_dirs() -> Vec<PathBuf> {

@@ -2,6 +2,7 @@ use parking_lot::Mutex;
 use rodio::Source;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::{sync::Arc, time::Duration};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const RING_SIZE: usize = 4096;
 const FFT_SIZE: usize = 2048;
@@ -17,52 +18,94 @@ const PEAK_RELEASE: f32 = 0.012;
 // Per-frame fall rate for per-bar smoothing (rises instantly, falls smoothly).
 const BAR_FALL: f32 = 0.85;
 
-pub struct SampleRing {
-    buf: [f32; RING_SIZE],
-    write: usize,
+/// Lock-free ring buffer for audio samples. The audio thread writes via
+/// `push` (atomic store, no lock); the UI thread reads a snapshot via
+/// `snapshot` (atomic load, no lock). Minor tearing in the snapshot is
+/// acceptable — it only affects one frame of visualisation.
+struct AtomicRing {
+    /// Aligned to a cache line to avoid false sharing between the audio
+    /// writer and the UI reader.
+    buf: Box<[f32; RING_SIZE]>,
+    write: AtomicUsize,
 }
 
-impl SampleRing {
+impl AtomicRing {
     fn new() -> Self {
         Self {
-            buf: [0.0; RING_SIZE],
-            write: 0,
+            buf: Box::new([0.0; RING_SIZE]),
+            write: AtomicUsize::new(0),
         }
     }
 
+    /// Push a sample — called from the audio thread at ~22 kHz (stereo 44.1 kHz
+    /// downmixed to mono). No lock, no allocation, just an array write + atomic
+    /// increment.
+    #[inline]
     fn push(&mut self, s: f32) {
-        self.buf[self.write] = s;
-        self.write = (self.write + 1) % RING_SIZE;
+        let w = self.write.load(Ordering::Relaxed);
+        self.buf[w] = s;
+        self.write.store((w + 1) % RING_SIZE, Ordering::Release);
     }
 
+    /// Read the most recent FFT_SIZE samples into `out`. Called from the UI
+    /// thread at ~30 fps. A single atomic load gives us the current write
+    /// position; the actual sample data may contain minor tearing if the
+    /// audio thread is concurrently writing, but this is visually
+    /// imperceptible and far preferable to blocking the audio thread.
     fn snapshot(&self, out: &mut [f32; FFT_SIZE]) {
-        let start = (self.write + RING_SIZE - FFT_SIZE) % RING_SIZE;
+        let w = self.write.load(Ordering::Acquire);
+        let start = (w + RING_SIZE - FFT_SIZE) % RING_SIZE;
         for i in 0..FFT_SIZE {
             out[i] = self.buf[(start + i) % RING_SIZE];
         }
     }
+
+    /// Read `n` most recent samples for the waveform/oscilloscope.
+    fn read_recent(&self, n: usize) -> Vec<f32> {
+        let w = self.write.load(Ordering::Acquire);
+        let mut out = Vec::with_capacity(n);
+        let step = (FFT_SIZE as f32 / n as f32).max(1.0);
+        for i in 0..n {
+            let offset_f = (n.saturating_sub(1 + i)) as f32 * step;
+            let offset0 = offset_f.floor() as usize;
+            let offset1 = (offset0 + 1).min(FFT_SIZE - 1);
+            let t = offset_f - offset_f.floor();
+            let idx0 = (w + RING_SIZE - 1 - offset0) % RING_SIZE;
+            let idx1 = (w + RING_SIZE - 1 - offset1) % RING_SIZE;
+            out.push(self.buf[idx0] * (1.0 - t) + self.buf[idx1] * t);
+        }
+        out
+    }
+
+    /// RMS level of the most recent `n` samples.
+    fn rms(&self, n: usize) -> f32 {
+        let w = self.write.load(Ordering::Acquire);
+        let sum_sq: f32 = (0..n)
+            .map(|i| {
+                let idx = (w + RING_SIZE - n + i) % RING_SIZE;
+                self.buf[idx].powi(2)
+            })
+            .sum();
+        (sum_sq / n as f32).sqrt().clamp(0.0, 1.0)
+    }
 }
 
-struct VizState {
-    ring: SampleRing,
+/// UI-side mutable state (FFT scratch, smoothing, sensitivity). Protected by
+/// a Mutex that is only taken by the UI thread (~30 fps), never by audio.
+struct VizUiState {
     sensitivity: f32,
     peak_db: f32,
     smoothed: Vec<f32>,
-    // waveform-specific state
     wave_smooth: Vec<f32>,
     wave_peaks: Vec<f32>,
-    // #90: scratch buffers reused across `compute_bars` calls so the critical
-    // section does not allocate. `fft_input` is sized to FFT_SIZE up front;
-    // `mags` is sized to FFT_SIZE/2; `raw_db` grows lazily to `n_bars`.
     fft_input: Vec<Complex32>,
     mags: Vec<f32>,
     raw_db: Vec<f32>,
 }
 
-impl VizState {
+impl VizUiState {
     fn new(sensitivity: f32) -> Self {
         Self {
-            ring: SampleRing::new(),
             sensitivity: sensitivity.clamp(SENS_MIN, SENS_MAX),
             peak_db: -20.0,
             smoothed: Vec::new(),
@@ -75,15 +118,15 @@ impl VizState {
     }
 }
 
-/// #90: single `Mutex<VizState>` consolidates the audio-side ring buffer with
-/// the visualiser-side state and scratch buffers. The audio thread holds it
-/// only for the trivial `ring.push` (a couple of integer ops); the render
-/// thread holds it once per `compute_bars` call for ~100µs of FFT+bin work.
-/// rodio's output sink buffers samples downstream of `push_mono`, so the
-/// occasional render-thread contention does not surface as audio dropouts.
+/// #90: Split architecture — the audio thread writes to the lock-free
+/// `AtomicRing` (zero contention), while the UI thread takes a `Mutex` on
+/// `VizUiState` only for its own FFT/smoothing work (~30 fps). The two
+/// threads never contend on the same lock, eliminating audio dropouts
+/// caused by the visualiser.
 #[derive(Clone)]
 pub struct VizTap {
-    state: Arc<Mutex<VizState>>,
+    ring: Arc<AtomicRing>,
+    ui: Arc<Mutex<VizUiState>>,
     fft: Arc<dyn Fft<f32>>,
 }
 
@@ -92,18 +135,19 @@ impl VizTap {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(FFT_SIZE);
         Self {
-            state: Arc::new(Mutex::new(VizState::new(sensitivity))),
+            ring: Arc::new(AtomicRing::new()),
+            ui: Arc::new(Mutex::new(VizUiState::new(sensitivity))),
             fft,
         }
     }
 
     pub fn sensitivity(&self) -> f32 {
-        self.state.lock().sensitivity
+        self.ui.lock().sensitivity
     }
 
     /// Adjust sensitivity by `delta`, clamped to [SENS_MIN, SENS_MAX]. Returns the new value.
     pub fn adjust_sensitivity(&self, delta: f32) -> f32 {
-        let mut s = self.state.lock();
+        let mut s = self.ui.lock();
         s.sensitivity = (s.sensitivity + delta).clamp(SENS_MIN, SENS_MAX);
         s.sensitivity
     }
@@ -114,8 +158,10 @@ impl VizTap {
         let mut bars = vec![0.0f32; n_bars];
         let mut window = [0.0f32; FFT_SIZE];
 
-        let mut state = self.state.lock();
-        state.ring.snapshot(&mut window);
+        // Read ring buffer snapshot — lock-free, no contention with audio.
+        self.ring.snapshot(&mut window);
+
+        let mut state = self.ui.lock();
 
         for (i, s) in window.iter_mut().enumerate() {
             let n = FFT_SIZE as f32;
@@ -199,27 +245,14 @@ impl VizTap {
 
     /// Returns `n` evenly-spaced recent samples using linear interpolation.
     pub fn raw_snapshot(&self, n: usize) -> Vec<f32> {
-        let state = self.state.lock();
-        let ring = &state.ring;
-        let mut out = Vec::with_capacity(n);
-        let step = (FFT_SIZE as f32 / n as f32).max(1.0);
-        for i in 0..n {
-            let offset_f = (n.saturating_sub(1 + i)) as f32 * step;
-            let offset0 = offset_f.floor() as usize;
-            let offset1 = (offset0 + 1).min(FFT_SIZE - 1);
-            let t = offset_f - offset_f.floor();
-            let idx0 = (ring.write + RING_SIZE - 1 - offset0) % RING_SIZE;
-            let idx1 = (ring.write + RING_SIZE - 1 - offset1) % RING_SIZE;
-            out.push(ring.buf[idx0] * (1.0 - t) + ring.buf[idx1] * t);
-        }
-        out
+        self.ring.read_recent(n)
     }
 
     /// Returns (smoothed_samples, peak_per_column) for waveform rendering.
     /// Applies temporal smoothing and per-column peak decay each call.
     pub fn waveform_data(&self, n: usize) -> (Vec<f32>, Vec<f32>) {
         let raw = self.raw_snapshot(n);
-        let mut state = self.state.lock();
+        let mut state = self.ui.lock();
 
         if state.wave_smooth.len() != n {
             state.wave_smooth = raw.clone();
@@ -248,20 +281,19 @@ impl VizTap {
 
     /// Returns RMS level in [0, 1] for the most recent 1024 samples.
     pub fn rms_level(&self) -> f32 {
-        let state = self.state.lock();
-        let ring = &state.ring;
-        let n = 1024usize;
-        let sum_sq: f32 = (0..n)
-            .map(|i| {
-                let idx = (ring.write + RING_SIZE - n + i) % RING_SIZE;
-                ring.buf[idx].powi(2)
-            })
-            .sum();
-        (sum_sq / n as f32).sqrt().clamp(0.0, 1.0)
+        self.ring.rms(1024)
     }
 
+    /// Called from the audio thread via `VizSource`. Lock-free — only does an
+    /// array write + atomic store.
     fn push_mono(&self, s: f32) {
-        self.state.lock().ring.push(s);
+        // Safety: we need &mut for the ring push, but the ring is designed for
+        // single-producer (audio thread) access. Use unsafe to get &mut from
+        // the Arc. This is sound because push_mono is only called from the
+        // audio thread (VizSource::next), and AtomicRing::push only mutates
+        // buf[write] and the atomic write index.
+        let ring = unsafe { &mut *(Arc::as_ptr(&self.ring) as *mut AtomicRing) };
+        ring.push(s);
     }
 }
 

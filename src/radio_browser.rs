@@ -286,7 +286,7 @@ pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
-        .user_agent("Noctune/0.4.5 (https://github.com/WendellOttoni/Noctune)")
+        .user_agent(concat!("Noctune/", env!("CARGO_PKG_VERSION"), " (https://github.com/WendellOttoni/Noctune)"))
         .build()?;
 
     let encoded_query = urlencoding_simple(query_trimmed);

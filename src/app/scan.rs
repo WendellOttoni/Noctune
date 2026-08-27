@@ -113,11 +113,6 @@ pub fn scan_library_with_progress(
         .collect();
 
     cache.entries = cache_mtx.into_inner();
-    out.sort_by(|a, b| {
-        a.title
-            .chars()
-            .flat_map(|c| c.to_lowercase())
-            .cmp(b.title.chars().flat_map(|c| c.to_lowercase()))
-    });
+    out.sort_by_cached_key(|t| t.title.to_lowercase());
     out
 }

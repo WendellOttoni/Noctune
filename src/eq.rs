@@ -336,7 +336,9 @@ impl<S: Source<Item = f32>> Iterator for EqSource<S> {
         self.maybe_refresh();
         let s = self.inner.next()?;
         let bypass =
-            self.state.low_db == 0.0 && self.state.mid_db == 0.0 && self.state.high_db == 0.0;
+            self.state.low_db.abs() < f32::EPSILON
+                && self.state.mid_db.abs() < f32::EPSILON
+                && self.state.high_db.abs() < f32::EPSILON;
         if bypass {
             self.chan_idx = (self.chan_idx + 1) % self.channels.max(1);
             return Some(s);

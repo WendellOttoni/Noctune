@@ -116,7 +116,7 @@ fn render_viz_waveform(f: &mut Frame, inner: Rect, app: &App) {
 
     let cols: Vec<Col> = (0..w)
         .map(|c| {
-            let s = samples[c].clamp(-1.0, 1.0);
+            let s = samples.get(c).copied().unwrap_or(0.0).clamp(-1.0, 1.0);
             let px = ((half_px - s * half_px).max(0.0).round() as usize).min(h * 8 - 1);
             let trace_row = px / 8;
             let trace_sub = px % 8;
@@ -295,7 +295,7 @@ fn render_viz_oscilloscope(f: &mut Frame, inner: Rect, app: &App) {
     for row in 0..h {
         let mut spans = Vec::with_capacity(w);
         for col in 0..w {
-            let s = samples[col].clamp(-1.0, 1.0);
+            let s = samples.get(col).copied().unwrap_or(0.0).clamp(-1.0, 1.0);
             let target_row = (half_h - s * half_h * 0.85).round() as usize;
             let target_row = target_row.min(h.saturating_sub(1));
 

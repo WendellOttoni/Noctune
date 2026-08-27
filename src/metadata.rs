@@ -163,6 +163,7 @@ pub fn probe_picture(path: &Path) -> Option<Vec<u8>> {
 /// thread — uses reqwest's blocking client with a tight timeout so a slow
 /// thumbnail server cannot wedge the spawned worker forever (#105).
 pub fn fetch_remote_picture(url: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -173,11 +174,19 @@ pub fn fetch_remote_picture(url: &str) -> Option<Vec<u8>> {
     }
     // Cap at ~5MB to defend against pathological responses.
     const MAX: usize = 5 * 1024 * 1024;
-    let bytes = resp.bytes().ok()?;
-    if bytes.len() > MAX {
+    // Check Content-Length header first to avoid even starting the read.
+    if let Some(cl) = resp.content_length() {
+        if cl as usize > MAX {
+            return None;
+        }
+    }
+    // Read at most MAX+1 bytes — if we get more than MAX, the response is too large.
+    let mut buf = Vec::with_capacity(MAX.min(1024 * 64));
+    resp.take(MAX as u64 + 1).read_to_end(&mut buf).ok()?;
+    if buf.len() > MAX {
         return None;
     }
-    Some(bytes.to_vec())
+    Some(buf)
 }
 
 pub fn probe(path: &Path) -> TrackMeta {

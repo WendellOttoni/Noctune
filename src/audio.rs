@@ -136,7 +136,9 @@ impl SymphoniaSource {
                     }
                 }
                 if !last.is_empty() {
-                    *stream_err.lock().unwrap() = Some(format!("yt-dlp: {last}"));
+                    if let Ok(mut guard) = stream_err.lock() {
+                        *guard = Some(format!("yt-dlp: {last}"));
+                    }
                 }
             });
         }
@@ -430,7 +432,7 @@ impl Player {
 
     /// Returns and clears the last error message from a streaming source, if any.
     pub fn take_stream_error(&self) -> Option<String> {
-        self.stream_err.lock().unwrap().take()
+        self.stream_err.lock().ok()?.take()
     }
 
     /// Returns and clears the latest dynamic ICY track title update, if any.
@@ -485,6 +487,17 @@ impl Player {
 
     pub fn sink_queue_len(&self) -> usize {
         self.sink.len()
+    }
+
+    /// Notify the player that a gapless transition has occurred: the previously
+    /// enqueued track is now the active source. Updates `current`, resets the
+    /// elapsed-time bookkeeping, and clears `gapless_queued` so the UI and
+    /// `elapsed()`/`remaining()` report the correct state (#7).
+    pub fn advance_gapless(&mut self, track: Track) {
+        self.current = Some(track);
+        self.started_at = Some(Instant::now());
+        self.paused_offset = Duration::ZERO;
+        self.gapless_queued = None;
     }
 
     pub fn play_from(&mut self, track: &Track, offset: Duration) -> Result<()> {
@@ -1010,7 +1023,7 @@ fn open_http_stream(
 ) -> Result<SymphoniaSource> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/0.4.5")
+        .user_agent(concat!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Noctune/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let resp = client
