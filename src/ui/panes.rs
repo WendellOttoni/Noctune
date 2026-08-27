@@ -22,6 +22,46 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     let accent = parse_color(&theme.colors.accent);
     let muted = parse_color(&theme.colors.muted);
 
+    let has_art = app.player.current().is_some()
+        && (app.album_art.is_some() || !app.theme.ascii.paused.trim().is_empty());
+    let (content_area, art_area) = if has_art && area.width >= 40 && area.height >= 4 {
+        let art_w = (area.height * 2).clamp(8, 16).min(area.width.saturating_sub(25));
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(art_w)])
+            .split(area);
+        (cols[0], cols[1])
+    } else {
+        (area, Rect::default())
+    };
+
+    app.layout.art_area = art_area;
+
+    if art_area.width > 0 && art_area.height > 0 && app.player.current().is_some() {
+        if let Some(img) = &app.album_art {
+            if app.art_picker.protocol == crate::album_art::Protocol::Blocks {
+                album_art::render_blocks(f, art_area, img);
+            }
+        } else if app.player.is_paused() {
+            let art_text = app.theme.ascii.paused.clone();
+            if !art_text.trim().is_empty() {
+                let lines: Vec<Line> = art_text
+                    .lines()
+                    .map(|l| {
+                        Line::from(Span::styled(
+                            l.to_string(),
+                            Style::default().fg(parse_color(&app.theme.colors.primary)),
+                        ))
+                    })
+                    .collect();
+                f.render_widget(
+                    Paragraph::new(Text::from(lines)).alignment(Alignment::Center),
+                    art_area,
+                );
+            }
+        }
+    }
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -31,7 +71,7 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(1), // eq row
             Constraint::Length(1), // status
         ])
-        .split(area);
+        .split(content_area);
 
     // Row 0: play state + title
     let state_sym = if app.player.current().is_none() {
