@@ -812,12 +812,42 @@ impl App {
 
         // 2. Views
         let views = [
-            ("view-library", "Visão: Biblioteca Flat", "Ver lista completa de músicas", ViewMode::Flat),
-            ("view-albums", "Visão: Por Álbuns", "Ver biblioteca agrupada por álbum", ViewMode::Albums),
-            ("view-smart", "Visão: Playlists Inteligentes", "Mais tocadas, favoritas e recentes", ViewMode::Smart),
-            ("view-browser", "Visão: Explorador de Pastas", "Navegar no sistema de arquivos", ViewMode::Browser),
-            ("view-radio", "Visão: Hub de Rádios", "Painel dedicado para estações online", ViewMode::Radio),
-            ("view-recent", "Visão: Tocadas Recentemente", "Histórico de reprodução", ViewMode::RecentlyPlayed),
+            (
+                "view-library",
+                "Visão: Biblioteca Flat",
+                "Ver lista completa de músicas",
+                ViewMode::Flat,
+            ),
+            (
+                "view-albums",
+                "Visão: Por Álbuns",
+                "Ver biblioteca agrupada por álbum",
+                ViewMode::Albums,
+            ),
+            (
+                "view-smart",
+                "Visão: Playlists Inteligentes",
+                "Mais tocadas, favoritas e recentes",
+                ViewMode::Smart,
+            ),
+            (
+                "view-browser",
+                "Visão: Explorador de Pastas",
+                "Navegar no sistema de arquivos",
+                ViewMode::Browser,
+            ),
+            (
+                "view-radio",
+                "Visão: Hub de Rádios",
+                "Painel dedicado para estações online",
+                ViewMode::Radio,
+            ),
+            (
+                "view-recent",
+                "Visão: Tocadas Recentemente",
+                "Histórico de reprodução",
+                ViewMode::RecentlyPlayed,
+            ),
         ];
         for (id, title, desc, mode) in views {
             items.push(PaletteItem {
@@ -831,8 +861,18 @@ impl App {
 
         // 3. Themes
         let available_themes = [
-            "default", "catppuccin", "dracula", "nord", "tokyonight",
-            "gruvbox", "monokai", "solarized-dark", "cyberpunk", "rose-pine", "synthwave", "amoled"
+            "default",
+            "catppuccin",
+            "dracula",
+            "nord",
+            "tokyonight",
+            "gruvbox",
+            "monokai",
+            "solarized-dark",
+            "cyberpunk",
+            "rose-pine",
+            "synthwave",
+            "amoled",
         ];
         for t in available_themes {
             items.push(PaletteItem {
@@ -849,7 +889,12 @@ impl App {
             items.push(PaletteItem {
                 id: format!("eq-{name}"),
                 title: format!("EQ Preset: {name}"),
-                description: format!("Graves {:+.0}dB · Médios {:+.0}dB · Agudos {:+.0}dB", st.low_db(), st.mid_db(), st.high_db()),
+                description: format!(
+                    "Graves {:+.0}dB · Médios {:+.0}dB · Agudos {:+.0}dB",
+                    st.low_db(),
+                    st.mid_db(),
+                    st.high_db()
+                ),
                 category: PaletteCategory::EqPreset,
                 action: PaletteAction::SetEqPreset(i),
             });
