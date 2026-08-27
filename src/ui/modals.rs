@@ -754,7 +754,13 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
                             " {} {:<40} {:<24} ({} faixas)",
                             if selected { "▶" } else { " " },
                             album.display_title().chars().take(38).collect::<String>(),
-                            album.artist.as_deref().unwrap_or("").chars().take(22).collect::<String>(),
+                            album
+                                .artist
+                                .as_deref()
+                                .unwrap_or("")
+                                .chars()
+                                .take(22)
+                                .collect::<String>(),
                             album.song_count.unwrap_or(0),
                         );
                         let style = if selected {
@@ -875,11 +881,7 @@ pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(
         Paragraph::new(Span::styled(
             query_display,
-            Style::default().fg(if app.vault_query_editing {
-                fg
-            } else {
-                muted
-            }),
+            Style::default().fg(if app.vault_query_editing { fg } else { muted }),
         )),
         chunks[0],
     );
@@ -1102,9 +1104,7 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
             let span = if is_selected_node {
                 Span::styled(
                     "●",
-                    Style::default()
-                        .fg(accent)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
                 )
             } else if is_any_node.is_some() {
                 Span::styled("•", Style::default().fg(secondary))
@@ -1123,7 +1123,7 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
                     Span::styled("─", Style::default().fg(muted))
                 }
             } else if is_grid_col {
-                Span::styled("╎", Style::default().fg(muted))
+                Span::styled("┆", Style::default().fg(muted))
             } else {
                 Span::raw(" ")
             };
@@ -1175,7 +1175,11 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     // Rows 1..5: Vertical fader tracks
     for fader_row in 0..fader_height {
         let mut track_spans: Vec<Span> = vec![Span::styled(
-            if fader_row == fader_height / 2 { "  0dB ├" } else { "      │" },
+            if fader_row == fader_height / 2 {
+                "  0dB ├"
+            } else {
+                "      │"
+            },
             Style::default().fg(muted),
         )];
         for (i, &gain) in eq.bands.iter().enumerate() {
@@ -1209,7 +1213,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     for (i, label) in crate::eq::BAND_LABELS.iter().enumerate() {
         let is_sel = i == app.eq_tuner_band;
         let style = if is_sel {
-            Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(bg)
+                .bg(accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(secondary)
         };
@@ -1222,7 +1229,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
 
     // 4. Preset buttons
     let current = crate::eq::PRESETS.iter().position(|(_, s)| {
-        s.bands.iter().zip(eq.bands.iter()).all(|(a, b)| (a - b).abs() < 0.1)
+        s.bands
+            .iter()
+            .zip(eq.bands.iter())
+            .all(|(a, b)| (a - b).abs() < 0.1)
     });
     let mut preset_spans: Vec<Span> = vec![Span::styled(" Presets: ", Style::default().fg(muted))];
     for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate().take(8) {
