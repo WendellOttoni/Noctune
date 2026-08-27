@@ -204,6 +204,7 @@ pub struct App {
     pub subsonic_browser_row: usize,
     pub(crate) subsonic_rx:
         Option<std::sync::mpsc::Receiver<Result<crate::subsonic::SubsonicFetchResult, String>>>,
+    pub plugins: Option<crate::plugin::PluginEngine>,
 }
 
 impl App {
@@ -510,7 +511,18 @@ impl App {
             subsonic_browser_playlists: Vec::new(),
             subsonic_browser_row: 0,
             subsonic_rx: None,
+            plugins: None,
         };
+
+        if let Ok(mut engine) = crate::plugin::PluginEngine::new() {
+            if let Ok(p_dir) = crate::config::plugins_dir() {
+                let loaded = engine.load_plugins_dir(&p_dir);
+                if !loaded.is_empty() {
+                    tracing::info!(target: "plugins", "Loaded {} Lua plugin(s): {:?}", loaded.len(), loaded);
+                }
+            }
+            app.plugins = Some(engine);
+        }
 
         let (update_tx, update_rx) = std::sync::mpsc::channel();
         app.update_check_rx = Some(update_rx);
@@ -566,6 +578,19 @@ impl App {
         self.tick_count = self.tick_count.wrapping_add(1);
 
         crate::media_session::pump_messages();
+
+        let (p_msgs, p_acts) = if let Some(engine) = &self.plugins {
+            engine.set_state(self.player.current(), self.player.volume());
+            (engine.drain_messages(), engine.drain_actions())
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        for msg in p_msgs {
+            self.set_info(msg);
+        }
+        for act in p_acts {
+            self.run_action(act);
+        }
 
         if self.tick_count.is_multiple_of(30) {
             self.sys_stats.refresh();

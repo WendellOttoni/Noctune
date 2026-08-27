@@ -243,6 +243,7 @@ pub enum PaletteCategory {
     Track,
     Radio,
     View,
+    Plugin,
 }
 
 impl PaletteCategory {
@@ -254,6 +255,7 @@ impl PaletteCategory {
             PaletteCategory::Track => "Música",
             PaletteCategory::Radio => "Rádio",
             PaletteCategory::View => "Visão",
+            PaletteCategory::Plugin => "Extensão",
         }
     }
 
@@ -265,6 +267,7 @@ impl PaletteCategory {
             PaletteCategory::Track => "🎵",
             PaletteCategory::Radio => "📻",
             PaletteCategory::View => "👁️",
+            PaletteCategory::Plugin => "🧩",
         }
     }
 }
@@ -276,6 +279,7 @@ pub enum PaletteAction {
     SetEqPreset(usize),
     PlayTrack(PathBuf),
     SetViewMode(ViewMode),
+    PluginCommand(String),
 }
 
 #[derive(Debug, Clone)]

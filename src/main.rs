@@ -15,6 +15,7 @@ mod logging;
 mod lyrics;
 mod media_session;
 mod metadata;
+mod plugin;
 mod radio;
 mod radio_browser;
 mod radio_mode;

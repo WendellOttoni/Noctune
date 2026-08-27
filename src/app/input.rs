@@ -678,6 +678,13 @@ impl App {
                 self.focus = Pane::Library;
                 self.set_info(format!("View: {}", mode.label()));
             }
+            PaletteAction::PluginCommand(id) => {
+                if let Some(engine) = &self.plugins {
+                    if let Err(e) = engine.run_command(&id) {
+                        self.set_error(format!("Plugin: {e}"));
+                    }
+                }
+            }
         }
     }
 
@@ -837,6 +844,19 @@ impl App {
                     });
                     count += 1;
                 }
+            }
+        }
+
+        // Custom plugin commands
+        if let Some(engine) = &self.plugins {
+            for cmd in engine.commands() {
+                items.push(PaletteItem {
+                    id: format!("plugin-{}", cmd.id),
+                    title: cmd.title,
+                    description: cmd.description,
+                    category: PaletteCategory::Plugin,
+                    action: PaletteAction::PluginCommand(cmd.id),
+                });
             }
         }
 

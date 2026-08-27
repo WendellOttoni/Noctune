@@ -399,6 +399,10 @@ pub fn playlists_dir() -> Result<PathBuf> {
     Ok(project_dirs()?.config_dir().join("playlists"))
 }
 
+pub fn plugins_dir() -> Result<PathBuf> {
+    Ok(project_dirs()?.config_dir().join("plugins"))
+}
+
 pub fn eq_presets_path() -> Result<PathBuf> {
     Ok(project_dirs()?.config_dir().join("eq_presets.toml"))
 }

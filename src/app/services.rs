@@ -802,6 +802,9 @@ impl App {
                 start_secs: ts as i64,
             });
         }
+        if let Some(engine) = &self.plugins {
+            engine.trigger_track_start(&t);
+        }
         self.push_history(t);
         self.update_prefetch_slots();
     }
