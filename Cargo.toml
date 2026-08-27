@@ -45,6 +45,7 @@ tiny_http = "0.12"
 webbrowser = "1"
 discord-rich-presence = "1"
 mlua = { version = "0.9", features = ["lua54", "vendored"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # OS media-session integration (#54). souvlaki abstracts SMTC / MPRIS / MediaRemote.
 souvlaki = "0.7"

@@ -821,29 +821,49 @@ impl App {
             });
         }
 
-        // 5. If query is not command-mode, also search library tracks
+        // 5. If query is not command-mode, also search library tracks (using SQLite FTS5 if available)
         if !is_cmd_mode && !query.is_empty() {
-            let q_lower = query.to_lowercase();
-            let mut count = 0;
-            for t in &self.library {
-                if count >= 30 {
-                    break;
+            let matched_tracks = if let Some(db) = &self.db {
+                let res = db.search_fts(query).unwrap_or_default();
+                if res.is_empty() {
+                    let q_lower = query.to_lowercase();
+                    self.library
+                        .iter()
+                        .filter(|t| {
+                            t.title.to_lowercase().contains(&q_lower)
+                                || t.artist.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                                || t.album.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                        })
+                        .take(40)
+                        .cloned()
+                        .collect()
+                } else {
+                    res
                 }
-                if t.title.to_lowercase().contains(&q_lower)
-                    || t.artist.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
-                    || t.album.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
-                {
-                    let dur_str = t.duration.map(format_duration).unwrap_or_else(|| "--:--".into());
-                    let desc = format!("{} • {}", t.album.as_deref().unwrap_or("Sem Álbum"), dur_str);
-                    items.push(PaletteItem {
-                        id: format!("track-{}", t.path.display()),
-                        title: t.display(),
-                        description: desc,
-                        category: PaletteCategory::Track,
-                        action: PaletteAction::PlayTrack(t.path.clone()),
-                    });
-                    count += 1;
-                }
+            } else {
+                let q_lower = query.to_lowercase();
+                self.library
+                    .iter()
+                    .filter(|t| {
+                        t.title.to_lowercase().contains(&q_lower)
+                            || t.artist.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                            || t.album.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                    })
+                    .take(40)
+                    .cloned()
+                    .collect()
+            };
+
+            for t in matched_tracks.into_iter().take(40) {
+                let dur_str = t.duration.map(format_duration).unwrap_or_else(|| "--:--".into());
+                let desc = format!("{} • {}", t.album.as_deref().unwrap_or("Sem Álbum"), dur_str);
+                items.push(PaletteItem {
+                    id: format!("track-{}", t.path.display()),
+                    title: t.display(),
+                    description: desc,
+                    category: PaletteCategory::Track,
+                    action: PaletteAction::PlayTrack(t.path.clone()),
+                });
             }
         }
 

@@ -205,6 +205,7 @@ pub struct App {
     pub(crate) subsonic_rx:
         Option<std::sync::mpsc::Receiver<Result<crate::subsonic::SubsonicFetchResult, String>>>,
     pub plugins: Option<crate::plugin::PluginEngine>,
+    pub db: Option<crate::db::LibraryDatabase>,
 }
 
 impl App {
@@ -512,7 +513,14 @@ impl App {
             subsonic_browser_row: 0,
             subsonic_rx: None,
             plugins: None,
+            db: None,
         };
+
+        if let Ok(p) = crate::config::db_path() {
+            if let Ok(database) = crate::db::LibraryDatabase::open(&p) {
+                app.db = Some(database);
+            }
+        }
 
         if let Ok(mut engine) = crate::plugin::PluginEngine::new() {
             if let Ok(p_dir) = crate::config::plugins_dir() {
@@ -636,6 +644,13 @@ impl App {
                     self.scan_rx = None;
                     self.scan_progress_rx = None;
                     self.scan_progress = None;
+                    if let Some(db) = &self.db {
+                        let tracks_clone = self.library.clone();
+                        let db_clone = db.clone();
+                        std::thread::spawn(move || {
+                            let _ = db_clone.sync_tracks(&tracks_clone);
+                        });
+                    }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {

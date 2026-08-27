@@ -6,6 +6,7 @@ mod audio;
 mod cache;
 mod compressor;
 mod config;
+mod db;
 mod discord;
 mod eq;
 mod history;
