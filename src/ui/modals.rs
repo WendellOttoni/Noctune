@@ -2142,3 +2142,229 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
+pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let w = 70.min(area.width.saturating_sub(4)).max(44);
+    let h = 18.min(area.height.saturating_sub(4)).max(12);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let secondary = parse_color(&theme.colors.secondary);
+
+    let hint = Line::from(vec![
+        Span::styled("Tab", Style::default().fg(accent)),
+        Span::styled(" campo  ", Style::default().fg(muted)),
+        Span::styled("Enter", Style::default().fg(accent)),
+        Span::styled(" publicar  ", Style::default().fg(muted)),
+        Span::styled("Esc", Style::default().fg(accent)),
+        Span::styled(" cancelar", Style::default().fg(muted)),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            " 🌐 Compartilhar & Publicar Playlist ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(hint);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Description
+            Constraint::Length(3), // Visibility
+            Constraint::Length(3), // Tags
+        ])
+        .split(inner);
+
+    // 1. Title
+    let title_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if app.share_modal_field == 0 {
+            Style::default().fg(accent)
+        } else {
+            Style::default().fg(muted)
+        })
+        .title(" Título da Playlist ");
+    let title_text = if app.share_playlist_title.is_empty() && app.share_modal_field != 0 {
+        Span::styled(" (Sem título - usará nome da fila) ", Style::default().fg(muted))
+    } else {
+        Span::styled(
+            format!(" {}", if app.share_modal_field == 0 { format!("{}█", app.share_playlist_title) } else { app.share_playlist_title.clone() }),
+            Style::default().fg(fg),
+        )
+    };
+    f.render_widget(Paragraph::new(title_text).block(title_block), chunks[0]);
+
+    // 2. Description
+    let desc_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if app.share_modal_field == 1 {
+            Style::default().fg(accent)
+        } else {
+            Style::default().fg(muted)
+        })
+        .title(" Descrição (opcional) ");
+    let desc_text = Span::styled(
+        format!(" {}", if app.share_modal_field == 1 { format!("{}█", app.share_playlist_desc) } else { app.share_playlist_desc.clone() }),
+        Style::default().fg(fg),
+    );
+    f.render_widget(Paragraph::new(desc_text).block(desc_block), chunks[1]);
+
+    // 3. Visibility Toggle
+    let vis_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if app.share_modal_field == 2 {
+            Style::default().fg(accent)
+        } else {
+            Style::default().fg(muted)
+        })
+        .title(" Visibilidade (Espaço para alternar) ");
+    let (vis_label, vis_icon) = match app.share_playlist_visibility {
+        crate::share::Visibility::Public => ("Pública (visível no catálogo de descoberta)", "🌍"),
+        crate::share::Visibility::Unlisted => ("Não Listada (apenas quem tem o link/ID)", "🔗"),
+        crate::share::Visibility::Private => ("Privada (somente você)", "🔒"),
+    };
+    let vis_text = Span::styled(
+        format!(" {vis_icon} {vis_label}"),
+        Style::default().fg(if app.share_modal_field == 2 { secondary } else { fg }).add_modifier(Modifier::BOLD),
+    );
+    f.render_widget(Paragraph::new(vis_text).block(vis_block), chunks[2]);
+
+    // 4. Tags
+    let tags_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if app.share_modal_field == 3 {
+            Style::default().fg(accent)
+        } else {
+            Style::default().fg(muted)
+        })
+        .title(" Tags (separadas por vírgula) ");
+    let tags_text = Span::styled(
+        format!(" {}", if app.share_modal_field == 3 { format!("{}█", app.share_playlist_tags) } else { app.share_playlist_tags.clone() }),
+        Style::default().fg(fg),
+    );
+    f.render_widget(Paragraph::new(tags_text).block(tags_block), chunks[3]);
+}
+
+pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let w = 82.min(area.width.saturating_sub(4)).max(46);
+    let h = 22.min(area.height.saturating_sub(4)).max(12);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let fg = parse_color(&theme.colors.foreground);
+    let muted = parse_color(&theme.colors.muted);
+    let accent = parse_color(&theme.colors.accent);
+    let secondary = parse_color(&theme.colors.secondary);
+    let bg = parse_color(&theme.colors.background);
+
+    let hint = Line::from(vec![
+        Span::styled(" /", Style::default().fg(accent)),
+        Span::styled(" buscar  ", Style::default().fg(muted)),
+        Span::styled("Enter / i", Style::default().fg(accent)),
+        Span::styled(" importar para fila  ", Style::default().fg(muted)),
+        Span::styled("Esc", Style::default().fg(accent)),
+        Span::styled(" fechar", Style::default().fg(muted)),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            " 🌐 Descoberta de Playlists Públicas ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(hint);
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // Search bar
+            Constraint::Min(1),    // Results list
+        ])
+        .split(inner);
+
+    // Search bar
+    let query_display = if app.browse_search_editing {
+        format!(" 🔍 Buscar playlists: {}█", app.browse_search_query)
+    } else if app.browse_search_query.is_empty() {
+        " Pressione / para pesquisar playlists da comunidade…".to_string()
+    } else {
+        format!(" 🔍 Buscar playlists: {}", app.browse_search_query)
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            query_display,
+            Style::default().fg(if app.browse_search_editing { fg } else { muted }),
+        )),
+        chunks[0],
+    );
+
+    // Results
+    let list_area = chunks[1];
+    let results = &app.browse_results;
+    if results.is_empty() {
+        let msg = "  Nenhuma playlist encontrada. Digite um termo de busca e tecle Enter.";
+        f.render_widget(
+            Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
+            list_area,
+        );
+    } else {
+        let items: Vec<ListItem> = results
+            .iter()
+            .enumerate()
+            .map(|(i, pl)| {
+                let selected = i == app.browse_row;
+                let tags_str = if pl.tags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", pl.tags.join(", "))
+                };
+                let label = format!(
+                    " {} {:<32} by {:<16} ({} faixas) ♥ {}{}",
+                    if selected { "▶" } else { " " },
+                    pl.title.chars().take(30).collect::<String>(),
+                    pl.author.display_name.chars().take(14).collect::<String>(),
+                    pl.track_count,
+                    pl.likes,
+                    tags_str,
+                );
+                let style = if selected {
+                    Style::default().fg(fg).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(muted)
+                };
+                ListItem::new(Line::from(Span::styled(label, style)))
+            })
+            .collect();
+        let mut state = ratatui::widgets::ListState::default();
+        state.select(Some(app.browse_row));
+        f.render_stateful_widget(
+            List::new(items).highlight_style(Style::default().bg(secondary).fg(bg)),
+            list_area,
+            &mut state,
+        );
+    }
+}
+

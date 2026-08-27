@@ -49,6 +49,8 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from("    T            edit track tags / metadata"),
         Line::from("    w            save queue as .m3u / .m3u8"),
         Line::from("    L            load / browse saved playlists (.m3u/.m3u8)"),
+        Line::from("    X            share / publish playlist to public catalog"),
+        Line::from("    C            browse & import community public playlists"),
         Line::from("    O            open profiles browser (save/load settings)"),
         Line::from(""),
         Line::from("  Quick Views"),

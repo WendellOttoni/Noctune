@@ -214,6 +214,20 @@ pub struct App {
     pub vault_row: usize,
     pub(crate) vault_rx:
         Option<std::sync::mpsc::Receiver<Result<Vec<crate::audio::Track>, String>>>,
+    pub show_share_modal: bool,
+    pub share_playlist_title: String,
+    pub share_playlist_desc: String,
+    pub share_playlist_visibility: crate::share::Visibility,
+    pub share_playlist_tags: String,
+    pub share_modal_field: usize,
+    pub show_browse_modal: bool,
+    pub browse_search_query: String,
+    pub browse_search_editing: bool,
+    pub browse_results: Vec<crate::share::api::SharedPlaylistSummary>,
+    pub browse_row: usize,
+    pub(crate) browse_rx:
+        Option<std::sync::mpsc::Receiver<Result<Vec<crate::share::api::SharedPlaylistSummary>, String>>>,
+    pub(crate) share_publish_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
 }
 
 impl App {
@@ -529,6 +543,19 @@ impl App {
             vault_results: Vec::new(),
             vault_row: 0,
             vault_rx: None,
+            show_share_modal: false,
+            share_playlist_title: String::new(),
+            share_playlist_desc: String::new(),
+            share_playlist_visibility: crate::share::Visibility::Public,
+            share_playlist_tags: String::new(),
+            share_modal_field: 0,
+            show_browse_modal: false,
+            browse_search_query: String::new(),
+            browse_search_editing: false,
+            browse_results: Vec::new(),
+            browse_row: 0,
+            browse_rx: None,
+            share_publish_rx: None,
         };
 
         if let Some(tokens) = crate::spotify::load_tokens() {
@@ -861,6 +888,44 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.vault_rx = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.browse_rx {
+            match rx.try_recv() {
+                Ok(Ok(items)) => {
+                    let n = items.len();
+                    self.browse_results = items;
+                    self.browse_row = 0;
+                    self.set_info(format!("Descoberta: {n} playlist(s) públicas encontradas."));
+                    self.browse_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.set_error(format!("Descoberta: erro — {e}"));
+                    self.browse_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.browse_rx = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.share_publish_rx {
+            match rx.try_recv() {
+                Ok(Ok(id)) => {
+                    self.set_info(format!("Playlist publicada com sucesso! ID: {id}"));
+                    self.show_share_modal = false;
+                    self.share_publish_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.set_error(format!("Publicação: erro — {e}"));
+                    self.share_publish_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.share_publish_rx = None;
                 }
             }
         }

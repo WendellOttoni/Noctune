@@ -85,6 +85,16 @@ impl App {
             return;
         }
 
+        if self.show_share_modal {
+            self.handle_share_modal_key(key);
+            return;
+        }
+
+        if self.show_browse_modal {
+            self.handle_browse_modal_key(key);
+            return;
+        }
+
         if self.show_tag_editor {
             self.handle_tag_editor_key(key);
             return;
@@ -624,6 +634,17 @@ impl App {
                 self.show_vault_browser = true;
                 self.vault_load_recent();
             }
+            Action::SharePlaylist => {
+                self.show_share_modal = true;
+                self.share_playlist_title = self.active_playlist_name.clone().unwrap_or_default();
+                self.share_playlist_desc.clear();
+                self.share_playlist_tags.clear();
+                self.share_modal_field = 0;
+            }
+            Action::BrowsePlaylists => {
+                self.show_browse_modal = true;
+                self.browse_search_playlists();
+            }
         }
     }
 
@@ -765,6 +786,8 @@ impl App {
             ("subsonic", "Subsonic / Navidrome Cloud", "Streaming pessoal da sua nuvem privada", Action::SubsonicBrowser),
             ("vault", "Cloud Audio Vault", "Catálogo compartilhado de áudio em nuvem privada", Action::VaultBrowser),
             ("playlists", "Gerenciador de Playlists", "Salvar e carregar arquivos .m3u", Action::LoadPlaylist),
+            ("share", "Compartilhar Playlist", "Publicar a fila/playlist atual na rede pública", Action::SharePlaylist),
+            ("browse", "Explorar Playlists Públicas", "Buscar e importar playlists da comunidade", Action::BrowsePlaylists),
             ("rescan", "Reescanear Biblioteca", "Procurar novos arquivos de música no disco", Action::Rescan),
             ("stats", "Estatísticas de Audição", "Ver artistas e gêneros mais tocados", Action::ShowStats),
             ("lastfm", "Painel Last.fm", "Ver histórico de scrobbling e tops", Action::LastfmPanel),
@@ -1444,6 +1467,109 @@ impl App {
                     self.queue.push(track);
                     self.set_info("Faixa do Vault adicionada à fila.");
                 }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn handle_share_modal_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_share_modal = false;
+            }
+            KeyCode::Tab => {
+                self.share_modal_field = (self.share_modal_field + 1) % 4;
+            }
+            KeyCode::BackTab => {
+                self.share_modal_field = (self.share_modal_field + 3) % 4;
+            }
+            KeyCode::Enter => {
+                self.share_publish_current();
+            }
+            KeyCode::Backspace => match self.share_modal_field {
+                0 => {
+                    self.share_playlist_title.pop();
+                }
+                1 => {
+                    self.share_playlist_desc.pop();
+                }
+                2 => {
+                    self.share_playlist_visibility = match self.share_playlist_visibility {
+                        crate::share::Visibility::Public => crate::share::Visibility::Private,
+                        crate::share::Visibility::Unlisted => crate::share::Visibility::Public,
+                        crate::share::Visibility::Private => crate::share::Visibility::Unlisted,
+                    };
+                }
+                3 => {
+                    self.share_playlist_tags.pop();
+                }
+                _ => {}
+            },
+            KeyCode::Char(c) => match self.share_modal_field {
+                0 => {
+                    self.share_playlist_title.push(c);
+                }
+                1 => {
+                    self.share_playlist_desc.push(c);
+                }
+                2 => {
+                    if c == ' ' || c == '\t' {
+                        self.share_playlist_visibility = match self.share_playlist_visibility {
+                            crate::share::Visibility::Public => crate::share::Visibility::Unlisted,
+                            crate::share::Visibility::Unlisted => crate::share::Visibility::Private,
+                            crate::share::Visibility::Private => crate::share::Visibility::Public,
+                        };
+                    }
+                }
+                3 => {
+                    self.share_playlist_tags.push(c);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    pub(crate) fn handle_browse_modal_key(&mut self, key: KeyEvent) {
+        if self.browse_search_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.browse_search_editing = false;
+                }
+                KeyCode::Enter => {
+                    self.browse_search_editing = false;
+                    self.browse_search_playlists();
+                }
+                KeyCode::Backspace => {
+                    self.browse_search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.browse_search_query.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.show_browse_modal = false;
+            }
+            KeyCode::Char('/') | KeyCode::Char('s') => {
+                self.browse_search_editing = true;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.browse_row > 0 {
+                    self.browse_row -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.browse_row + 1 < self.browse_results.len() {
+                    self.browse_row += 1;
+                }
+            }
+            KeyCode::Enter | KeyCode::Char('i') => {
+                self.browse_import_selected();
             }
             _ => {}
         }

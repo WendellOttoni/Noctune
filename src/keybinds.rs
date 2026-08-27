@@ -84,6 +84,10 @@ pub enum Action {
     SubsonicBrowser,
     /// Open Cloud Audio Vault Browser (#122).
     VaultBrowser,
+    /// Open Share & Publish Playlist Modal (#82).
+    SharePlaylist,
+    /// Open Browse Public Playlists Modal (#83).
+    BrowsePlaylists,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -294,6 +298,8 @@ impl Bindings {
                 KeyChord::with_mods(KeyCode::Char('n'), KeyModifiers::CONTROL),
                 Action::SubsonicBrowser,
             ),
+            (KeyChord::new(KeyCode::Char('X')), Action::SharePlaylist),
+            (KeyChord::new(KeyCode::Char('C')), Action::BrowsePlaylists),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {

@@ -11,6 +11,9 @@
 //! `Track`s. The HTTP/UI layers live in their own modules and depend on this
 //! one.
 
+pub mod api;
+pub mod auth;
+
 use serde::{Deserialize, Serialize};
 
 use crate::audio::Track;

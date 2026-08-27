@@ -75,6 +75,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_vault_browser {
         render_vault_browser(f, area, app);
     }
+    if app.show_share_modal {
+        render_share_modal(f, area, app);
+    }
+    if app.show_browse_modal {
+        render_browse_modal(f, area, app);
+    }
     if app.show_device_selector {
         render_device_selector(f, area, app);
     }

@@ -413,6 +413,135 @@ impl App {
         });
     }
 
+    pub(crate) fn share_publish_current(&mut self) {
+        let title = if self.share_playlist_title.trim().is_empty() {
+            self.active_playlist_name.clone().unwrap_or_else(|| "Minha Playlist".into())
+        } else {
+            self.share_playlist_title.trim().to_string()
+        };
+
+        if self.queue.is_empty() {
+            self.set_error("A fila está vazia. Adicione músicas antes de compartilhar.");
+            return;
+        }
+
+        let shared_tracks: Vec<crate::share::SharedTrack> = self
+            .queue
+            .iter()
+            .map(|t| {
+                let p = t.path.to_string_lossy();
+                if p.starts_with("http://") || p.starts_with("https://") {
+                    crate::share::SharedTrack::Stream {
+                        url: p.to_string(),
+                        title: t.title.clone(),
+                        artist: t.artist.clone(),
+                        duration_ms: t.duration.map(|d| d.as_millis() as u64),
+                        source: None,
+                    }
+                } else {
+                    crate::share::SharedTrack::Local {
+                        title: t.title.clone(),
+                        artist: t.artist.clone(),
+                        album: t.album.clone(),
+                        duration_ms: t.duration.map(|d| d.as_millis() as u64),
+                        content_hash: None,
+                    }
+                }
+            })
+            .collect();
+
+        let tags: Vec<String> = self
+            .share_playlist_tags
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let pl = crate::share::SharedPlaylist {
+            version: crate::share::SCHEMA_VERSION,
+            id: String::new(),
+            title,
+            description: if self.share_playlist_desc.trim().is_empty() {
+                None
+            } else {
+                Some(self.share_playlist_desc.trim().to_string())
+            },
+            author: crate::share::Author {
+                id: "noctune_user".into(),
+                display_name: "Noctune User".into(),
+            },
+            created_at_unix: crate::lastfm::now_unix(),
+            updated_at_unix: crate::lastfm::now_unix(),
+            visibility: self.share_playlist_visibility.clone(),
+            tags,
+            tracks: shared_tracks,
+        };
+
+        let client = match crate::share::api::ShareClient::new(None) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Share: {e}"));
+                return;
+            }
+        };
+
+        self.set_info("Publicando playlist no servidor de descoberta…");
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.share_publish_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client.publish(&pl, None).map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
+    pub(crate) fn browse_search_playlists(&mut self) {
+        let query = self.browse_search_query.trim().to_string();
+        let client = match crate::share::api::ShareClient::new(None) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Share: {e}"));
+                return;
+            }
+        };
+
+        self.set_info(format!("Buscando playlists públicas: \"{query}\"…"));
+        self.browse_results.clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.browse_rx = Some(rx);
+        std::thread::spawn(move || {
+            let res = client.search(&query, None, 40).map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
+    }
+
+    pub(crate) fn browse_import_selected(&mut self) {
+        let Some(summary) = self.browse_results.get(self.browse_row).cloned() else {
+            return;
+        };
+
+        let client = match crate::share::api::ShareClient::new(None) {
+            Ok(c) => c,
+            Err(e) => {
+                self.set_error(format!("Share: {e}"));
+                return;
+            }
+        };
+
+        self.set_info(format!("Importando playlist \"{}\"…", summary.title));
+        match client.get(&summary.id) {
+            Ok(pl) => {
+                let resolved = crate::share::resolve_tracks(&pl.tracks, &self.library);
+                let count = resolved.len();
+                self.queue.extend(resolved);
+                self.set_info(format!("Importadas {count} faixas para a fila!"));
+                self.show_browse_modal = false;
+            }
+            Err(e) => {
+                self.set_error(format!("Erro ao importar playlist: {e}"));
+            }
+        }
+    }
+
     pub(crate) fn open_tag_editor(&mut self) {
         let track = match self.focus {
             Pane::Library => self.selected_library_track(),
