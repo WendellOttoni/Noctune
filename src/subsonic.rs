@@ -146,7 +146,11 @@ impl SubsonicClient {
             size,
             self.auth_query()
         );
-        let res = self.client.get(&url).send().context("Erro ao obter álbuns")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao obter álbuns")?;
         let json: serde_json::Value = res.json()?;
         let albums_json = json
             .pointer("/subsonic-response/albumList2/album")
@@ -170,7 +174,11 @@ impl SubsonicClient {
             album_id,
             self.auth_query()
         );
-        let res = self.client.get(&url).send().context("Erro ao obter faixas do álbum")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao obter faixas do álbum")?;
         let json: serde_json::Value = res.json()?;
         let songs_json = json
             .pointer("/subsonic-response/album/song")
@@ -193,7 +201,11 @@ impl SubsonicClient {
             self.server_url,
             self.auth_query()
         );
-        let res = self.client.get(&url).send().context("Erro ao obter playlists")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao obter playlists")?;
         let json: serde_json::Value = res.json()?;
         let playlists_json = json
             .pointer("/subsonic-response/playlists/playlist")
@@ -217,7 +229,11 @@ impl SubsonicClient {
             playlist_id,
             self.auth_query()
         );
-        let res = self.client.get(&url).send().context("Erro ao obter faixas da playlist")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao obter faixas da playlist")?;
         let json: serde_json::Value = res.json()?;
         let songs_json = json
             .pointer("/subsonic-response/playlist/entry")
@@ -241,7 +257,11 @@ impl SubsonicClient {
             size,
             self.auth_query()
         );
-        let res = self.client.get(&url).send().context("Erro ao obter músicas aleatórias")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro ao obter músicas aleatórias")?;
         let json: serde_json::Value = res.json()?;
         let songs_json = json
             .pointer("/subsonic-response/randomSongs/song")

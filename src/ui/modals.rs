@@ -624,10 +624,7 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
                 "  Configure no seu arquivo config.toml:",
                 Style::default().fg(fg),
             )),
-            Line::from(Span::styled(
-                "  [subsonic]",
-                Style::default().fg(secondary),
-            )),
+            Line::from(Span::styled("  [subsonic]", Style::default().fg(secondary))),
             Line::from(Span::styled(
                 "  server_url = \"http://seu-servidor:4533\"",
                 Style::default().fg(muted),
