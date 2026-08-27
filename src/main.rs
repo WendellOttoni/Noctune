@@ -11,6 +11,7 @@ mod discord;
 mod downloader;
 mod eq;
 mod history;
+mod ipc;
 mod keybinds;
 mod lastfm;
 mod logging;
@@ -37,6 +38,68 @@ mod visualizer;
 mod ytdlp;
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        let first = args[1].as_str();
+        match first {
+            "play" | "pause" | "toggle" | "play-pause" | "next" | "prev" | "previous" | "stop"
+            | "status" | "status-json" => {
+                let cmd = if first == "status-json" {
+                    "status --json"
+                } else {
+                    first
+                };
+                match ipc::IpcClient::send_command(cmd) {
+                    Ok(resp) => {
+                        println!("{resp}");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "volume" => {
+                let arg = if args.len() > 2 {
+                    format!("volume {}", args[2])
+                } else {
+                    "volume".to_string()
+                };
+                match ipc::IpcClient::send_command(&arg) {
+                    Ok(resp) => {
+                        println!("{resp}");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "--help" | "-h" => {
+                println!(
+                    "Noctune — Modern Terminal Music Player (v{})",
+                    env!("CARGO_PKG_VERSION")
+                );
+                println!("\nUsage:");
+                println!("  noctune                  Launch interactive TUI player");
+                println!("  noctune play             Resume playback");
+                println!("  noctune pause            Pause playback");
+                println!("  noctune toggle           Toggle play / pause");
+                println!("  noctune next             Skip to next track");
+                println!("  noctune prev             Skip to previous track");
+                println!("  noctune stop             Stop playback");
+                println!("  noctune volume [val]     Get / adjust volume (e.g. +10, -10, 80)");
+                println!("  noctune status           Show currently playing track info");
+                println!("  noctune status --json    Show status formatted as JSON for polybar/waybar");
+                println!("  noctune --help           Show this help");
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     let log_opts = logging::parse_cli_flags();
     let _log_guard = logging::init(&log_opts)?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "noctune starting");
