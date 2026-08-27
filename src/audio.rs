@@ -692,12 +692,16 @@ impl Player {
         let Some(start) = self.crossfade_start else {
             return CrossfadeStatus::None;
         };
-        let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs).clamp(0.0, 1.0);
+        let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs.max(0.05)).clamp(0.0, 1.0);
+        // Equal-power crossfade curve (quarter-sine / quarter-cosine):
+        // Keeps acoustic energy constant across transitions without center volume dip
+        let out_curve = ((1.0 - progress) * std::f32::consts::FRAC_PI_2).sin();
+        let in_curve = (progress * std::f32::consts::FRAC_PI_2).sin();
 
         self.sink
-            .set_volume(self.volume * self.rg_scale * (1.0 - progress));
+            .set_volume(self.volume * self.rg_scale * out_curve);
         if let Some(sink) = &self.fade_sink {
-            sink.set_volume(self.volume * self.fade_rg_scale * progress);
+            sink.set_volume(self.volume * self.fade_rg_scale * in_curve);
         }
 
         if progress >= 1.0 || self.sink.empty() {
@@ -1144,5 +1148,22 @@ impl Track {
         t.artist = artist;
         t.duration = duration;
         t
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_equal_power_crossfade_energy() {
+        // Equal power curve satisfies: out_curve^2 + in_curve^2 ≈ 1.0 at all progress steps
+        for step in 0..=100 {
+            let progress = step as f32 / 100.0;
+            let out_curve = ((1.0 - progress) * std::f32::consts::FRAC_PI_2).sin();
+            let in_curve = (progress * std::f32::consts::FRAC_PI_2).sin();
+            let total_energy = out_curve * out_curve + in_curve * in_curve;
+            assert!((total_energy - 1.0).abs() < 1e-4);
+        }
     }
 }
