@@ -93,6 +93,7 @@ const RIGHT_SECTIONS: &[ShortcutSection] = &[
             ("X", "Publicar playlist na comunidade"),
             ("C", "Explorar & importar playlists públicas"),
             ("T", "Editor de tags ID3 e metadados"),
+            (":endless", "Alternar Auto-Play Infinito (♾️)"),
             ("R", "Reescanear diretórios de música"),
             ("U / Shift+U", "Verificar atualizações no GitHub"),
             ("q / Esc", "Fechar este modal de ajuda"),

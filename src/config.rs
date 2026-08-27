@@ -272,6 +272,8 @@ pub struct Playback {
     pub crossfade_secs: f32,
     #[serde(default = "default_eq_preset")]
     pub eq_preset: String,
+    #[serde(default)]
+    pub endless_mode: bool,
 }
 
 fn default_crossfade_secs() -> f32 {
@@ -321,6 +323,7 @@ impl Default for Config {
                 repeat: false,
                 crossfade_secs: 2.0,
                 eq_preset: "Flat".to_string(),
+                endless_mode: false,
             },
             spotify: SpotifyConfig::default(),
             visualizer: VisualizerConfig::default(),

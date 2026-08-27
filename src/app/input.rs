@@ -655,6 +655,17 @@ impl App {
                 self.show_browse_modal = true;
                 self.browse_search_playlists();
             }
+            Action::ToggleEndlessMode => {
+                self.endless_mode = !self.endless_mode;
+                self.set_info(format!(
+                    "Modo Infinito (Auto-Play): {}",
+                    if self.endless_mode {
+                        "Ativado (♾️)"
+                    } else {
+                        "Desativado"
+                    }
+                ));
+            }
         }
     }
 
@@ -887,6 +898,12 @@ impl App {
                 "Explorar Playlists Públicas",
                 "Buscar e importar playlists da comunidade",
                 Action::BrowsePlaylists,
+            ),
+            (
+                "endless",
+                "Alternar Modo Infinito (Auto-Play)",
+                "Tocar músicas similares ao fim da fila",
+                Action::ToggleEndlessMode,
             ),
             (
                 "rescan",

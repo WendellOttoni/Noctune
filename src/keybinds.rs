@@ -88,6 +88,8 @@ pub enum Action {
     SharePlaylist,
     /// Open Browse Public Playlists Modal (#83).
     BrowsePlaylists,
+    /// Toggle Endless Mode / Smart Auto-Play (#133).
+    ToggleEndlessMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

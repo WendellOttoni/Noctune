@@ -284,6 +284,75 @@ impl App {
         self.play_current();
     }
 
+    pub(crate) fn enqueue_endless_recommendations(&mut self) -> usize {
+        if self.tracks.is_empty() {
+            return 0;
+        }
+
+        let last_track = self
+            .queue_index
+            .and_then(|i| self.queue.get(i))
+            .or_else(|| self.player.current())
+            .or_else(|| self.queue.last());
+
+        let target_artist = last_track.and_then(|t| t.artist.as_ref()).map(|s| s.to_lowercase());
+        let target_genre = last_track.and_then(|t| t.genre.as_ref()).map(|s| s.to_lowercase());
+
+        let queued_paths: std::collections::HashSet<_> =
+            self.queue.iter().map(|t| &t.path).collect();
+
+        let mut candidates: Vec<_> = self
+            .tracks
+            .iter()
+            .filter(|t| !queued_paths.contains(&t.path))
+            .filter(|t| {
+                let matches_artist = target_artist.as_ref().is_some_and(|a| {
+                    t.artist
+                        .as_ref()
+                        .is_some_and(|ta| ta.to_lowercase().contains(a))
+                });
+                let matches_genre = target_genre.as_ref().is_some_and(|g| {
+                    t.genre
+                        .as_ref()
+                        .is_some_and(|tg| tg.to_lowercase().contains(g))
+                });
+                matches_artist || matches_genre
+            })
+            .cloned()
+            .collect();
+
+        if candidates.len() < 3 {
+            let other_candidates: Vec<_> = self
+                .tracks
+                .iter()
+                .filter(|t| !queued_paths.contains(&t.path))
+                .cloned()
+                .collect();
+            candidates.extend(other_candidates);
+        }
+
+        if candidates.is_empty() {
+            return 0;
+        }
+
+        let count = 4.min(candidates.len());
+        let mut added = 0;
+        for _ in 0..count {
+            if candidates.is_empty() {
+                break;
+            }
+            let idx = pseudo_random(candidates.len());
+            let track = candidates.swap_remove(idx);
+            self.queue.push(track);
+            added += 1;
+        }
+
+        if added > 0 {
+            self.set_info("♾️ Auto-Play: faixas similares adicionadas à fila.");
+        }
+        added
+    }
+
     pub(crate) fn advance(&mut self) {
         if matches!(self.repeat, RepeatMode::One) {
             self.play_current();
@@ -303,6 +372,17 @@ impl App {
                 }
                 self.play_current();
             } else {
+                if self.endless_mode && !self.tracks.is_empty() {
+                    let added = self.enqueue_endless_recommendations();
+                    if added > 0 {
+                        if let Some(new) = self.pick_next_index(i) {
+                            self.queue_index = Some(new);
+                            self.queue_state.select(Some(new));
+                            self.play_current();
+                            return;
+                        }
+                    }
+                }
                 self.player.stop();
                 self.queue_index = None;
                 self.prefetch.invalidate();

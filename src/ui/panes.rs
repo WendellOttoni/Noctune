@@ -413,10 +413,15 @@ pub fn render_queue(f: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
 
-    let title = if let Some(name) = &app.active_playlist_name {
-        format!(" Queue ({}) — {} ", app.queue.len(), name)
+    let endless_badge = if app.endless_mode {
+        " [♾️ Auto-Play]"
     } else {
-        format!(" Queue ({}) ", app.queue.len())
+        ""
+    };
+    let title = if let Some(name) = &app.active_playlist_name {
+        format!(" Queue ({}){} — {} ", app.queue.len(), endless_badge, name)
+    } else {
+        format!(" Queue ({}){} ", app.queue.len(), endless_badge)
     };
     let list = List::new(items)
         .block(
