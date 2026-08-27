@@ -1703,8 +1703,8 @@ pub fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 80.min(area.width.saturating_sub(2)).max(40);
-    let h = 24.min(area.height.saturating_sub(2)).max(12);
+    let w = 84.min(area.width.saturating_sub(2)).max(40);
+    let h = 25.min(area.height.saturating_sub(2)).max(14);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -1714,7 +1714,7 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Clear, popup);
 
     let title =
-        " 📻 Online Radio Hub — Tab tab · Enter play · a enqueue · f fav (♥) · +/N add · / search · Esc close ";
+        " 📻 Radio-Browser Hub (+45k Rádios) — ←/→ Gênero · Enter Tocar · a Fila · f Fav · + Add · Esc Fechar ";
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
@@ -1725,7 +1725,7 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Tab header
+            Constraint::Length(1), // Category Carousel bar
             Constraint::Length(2), // Search bar
             Constraint::Min(4),    // Station list
         ])
@@ -1737,86 +1737,56 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     let fg = parse_color(&theme.colors.foreground);
     let muted = parse_color(&theme.colors.muted);
 
-    // Tab Header
-    let is_curated = app.radio_tab == crate::radio_browser::RadioTab::Curated;
-    let tab_curated_style = if is_curated {
-        Style::default().fg(accent).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(muted)
-    };
-    let tab_search_style = if !is_curated {
-        Style::default().fg(accent).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(muted)
-    };
+    // Active Category Tabs
+    let active_cat_idx = app
+        .radio_category_idx
+        .min(crate::radio_browser::RadioCategory::ALL.len() - 1);
 
-    let tabs_line = Line::from(vec![
-        Span::raw("  "),
-        Span::styled(
-            if is_curated {
-                "[★ Curated Stations]"
-            } else {
-                " ★ Curated Stations "
-            },
-            tab_curated_style,
-        ),
-        Span::raw("   "),
-        Span::styled(
-            if !is_curated {
-                "[🔍 Search Radio-Browser (+40k)]"
-            } else {
-                " 🔍 Search Radio-Browser (+40k) "
-            },
-            tab_search_style,
-        ),
-    ]);
-    f.render_widget(Paragraph::new(tabs_line), chunks[0]);
+    let mut cat_spans = Vec::new();
+    cat_spans.push(Span::raw(" "));
+    for (i, cat) in crate::radio_browser::RadioCategory::ALL.iter().enumerate() {
+        let is_selected = i == active_cat_idx;
+        if is_selected {
+            cat_spans.push(Span::styled(
+                format!("[ {} ] ", cat.label()),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            cat_spans.push(Span::styled(
+                format!("{} ", cat.label()),
+                Style::default().fg(muted),
+            ));
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(cat_spans)), chunks[0]);
 
     // Search Bar
-    if app.radio_tab == crate::radio_browser::RadioTab::Search {
-        let cursor = if app.radio_search_editing { "█" } else { "" };
-        let search_text = if app.radio_search_query.is_empty() && !app.radio_search_editing {
-            "  (press / to type search query, Enter to search)".to_string()
-        } else {
-            format!("  🔍 {}{cursor}", app.radio_search_query)
-        };
-        let search_style = if app.radio_search_editing {
-            Style::default().fg(fg).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(muted)
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(vec![Span::styled(search_text, search_style)])),
-            chunks[1],
-        );
-    }
+    let cursor = if app.radio_search_editing { "█" } else { "" };
+    let search_text = if app.radio_search_query.is_empty() && !app.radio_search_editing {
+        " 🔍 Busca: (digite diretamente ou pressione / para pesquisar +45.000 rádios)".to_string()
+    } else {
+        format!(" 🔍 Busca: {}{cursor}", app.radio_search_query)
+    };
+    let search_style = if app.radio_search_editing {
+        Style::default().fg(fg).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(muted)
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(search_text, search_style)])),
+        chunks[1],
+    );
 
     // Station list
-    let stations: &[crate::radio_browser::RadioStation] = match app.radio_tab {
-        crate::radio_browser::RadioTab::Curated => &app.radio_curated_list,
-        crate::radio_browser::RadioTab::Search => &app.radio_search_results,
-    };
+    let stations = app.radio_filtered_stations();
 
-    let list_area = if app.radio_tab == crate::radio_browser::RadioTab::Search {
-        chunks[2]
-    } else {
-        Rect {
-            x: chunks[1].x,
-            y: chunks[1].y,
-            width: chunks[1].width,
-            height: chunks[1].height + chunks[2].height,
-        }
-    };
+    let list_area = chunks[2];
 
     if stations.is_empty() {
-        let empty_msg = if app.radio_tab == crate::radio_browser::RadioTab::Search {
-            if app.radio_search_rx.is_some() {
-                "  Searching online stations…"
-            } else {
-                "  No stations found. Press / to search by genre (e.g. jazz, lofi, rock, brazil) or name."
-            }
+        let empty_msg = if app.radio_search_rx.is_some() {
+            "  ⏳ Conectando aos servidores do Radio-Browser e carregando estações…"
         } else {
-            "  No curated stations available."
+            "  Nenhuma estação encontrada. Digite um termo ou use ← / → para navegar entre os gêneros."
         };
         f.render_widget(
             Paragraph::new(Span::styled(empty_msg, Style::default().fg(muted))),
@@ -1851,12 +1821,13 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
         };
 
         let country = st.country.as_deref().unwrap_or("World");
+        let codec = st.codec.as_deref().unwrap_or("MP3");
         let bitrate_str = st
             .bitrate
             .map(|b| format!("{b}k"))
             .unwrap_or_else(|| "128k".into());
-        let tags_trimmed = if st.tags.len() > 24 {
-            format!("{}…", &st.tags[..23])
+        let tags_trimmed = if st.tags.len() > 22 {
+            format!("{}…", &st.tags[..21])
         } else {
             st.tags.clone()
         };
@@ -1865,9 +1836,9 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(prefix, Style::default().fg(accent)),
             Span::styled(fav_icon, Style::default().fg(accent)),
             Span::styled(format!("{:<26} ", st.name), name_style),
-            Span::styled(format!(" {:<12} ", country), Style::default().fg(secondary)),
+            Span::styled(format!(" {:<10} ", country), Style::default().fg(secondary)),
             Span::styled(
-                format!(" {:<6} ", bitrate_str),
+                format!(" {:<8} ", format!("{bitrate_str} {codec}")),
                 Style::default().fg(primary),
             ),
             Span::styled(format!(" {}", tags_trimmed), Style::default().fg(muted)),

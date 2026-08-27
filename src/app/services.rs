@@ -620,19 +620,55 @@ impl App {
         self.show_radio_browser = true;
         self.radio_row = 0;
         self.radio_search_editing = false;
-        self.set_info("Radio Hub — Tab switch mode · Enter play · a enqueue · / search");
+        if self.radio_search_results.is_empty() && self.radio_search_rx.is_none() {
+            let cat = crate::radio_browser::RadioCategory::ALL
+                .get(self.radio_category_idx)
+                .copied()
+                .unwrap_or(crate::radio_browser::RadioCategory::TopVoted);
+            self.trigger_radio_category_fetch(cat);
+        }
+    }
+
+    pub(crate) fn trigger_radio_category_fetch(
+        &mut self,
+        cat: crate::radio_browser::RadioCategory,
+    ) {
+        use crate::radio_browser::RadioCategory as C;
+        match cat {
+            C::Curated | C::Custom | C::Favorites => {
+                return;
+            }
+            _ => {}
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.radio_search_rx = Some(rx);
+        let q = self.radio_search_query.trim().to_string();
+
+        std::thread::spawn(move || {
+            let res = match cat {
+                C::TopVoted => crate::radio_browser::fetch_top_voted(100),
+                C::Lofi => crate::radio_browser::fetch_by_tag("lofi", 100),
+                C::Rock => crate::radio_browser::fetch_by_tag("rock", 100),
+                C::Jazz => crate::radio_browser::fetch_by_tag("jazz", 100),
+                C::Synthwave => crate::radio_browser::fetch_by_tag("synthwave", 100),
+                C::Brazil => crate::radio_browser::fetch_by_country("brazil", 100),
+                C::Classical => crate::radio_browser::fetch_by_tag("classical", 100),
+                C::Search => crate::radio_browser::search_radio_browser(&q, 100),
+                _ => Ok(Vec::new()),
+            }
+            .map_err(|e| e.to_string());
+            let _ = tx.send(res);
+        });
     }
 
     pub(crate) fn trigger_radio_search(&mut self) {
         let q = self.radio_search_query.trim().to_string();
-        if q.is_empty() {
-            return;
-        }
         let (tx, rx) = std::sync::mpsc::channel();
         self.radio_search_rx = Some(rx);
-        self.set_info(format!("Searching Radio-Browser for '{q}'…"));
+        self.set_info(format!("Buscando rádios por '{q}'…"));
         std::thread::spawn(move || {
-            let res = crate::radio_browser::search_radio_browser(&q, 50).map_err(|e| e.to_string());
+            let res = crate::radio_browser::search_radio_browser(&q, 100).map_err(|e| e.to_string());
             let _ = tx.send(res);
         });
     }
@@ -664,6 +700,9 @@ impl App {
             },
             country: Some("Personalizada".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(1),
+            stationuuid: None,
         };
 
         let _ = crate::radio_browser::add_custom_station(station.clone());
@@ -738,10 +777,12 @@ impl App {
         let cat = crate::radio_browser::RadioCategory::ALL
             .get(self.radio_category_idx)
             .copied()
-            .unwrap_or(crate::radio_browser::RadioCategory::All);
+            .unwrap_or(crate::radio_browser::RadioCategory::TopVoted);
 
         match cat {
-            crate::radio_browser::RadioCategory::All => self.radio_curated_list.iter().collect(),
+            crate::radio_browser::RadioCategory::Curated => {
+                self.radio_curated_list.iter().collect()
+            }
             crate::radio_browser::RadioCategory::Custom => {
                 let custom_urls: std::collections::HashSet<String> =
                     crate::radio_browser::load_custom_stations()
@@ -763,78 +804,7 @@ impl App {
                 .chain(self.radio_search_results.iter())
                 .filter(|st| self.ratings.is_favorite(&PathBuf::from(&st.url)))
                 .collect(),
-            crate::radio_browser::RadioCategory::Lofi => self
-                .radio_curated_list
-                .iter()
-                .filter(|st| {
-                    let t = st.tags.to_lowercase();
-                    t.contains("lofi")
-                        || t.contains("chill")
-                        || t.contains("study")
-                        || t.contains("beats")
-                })
-                .collect(),
-            crate::radio_browser::RadioCategory::Jazz => self
-                .radio_curated_list
-                .iter()
-                .filter(|st| {
-                    let t = st.tags.to_lowercase();
-                    t.contains("jazz")
-                        || t.contains("blues")
-                        || t.contains("swing")
-                        || t.contains("lounge")
-                })
-                .collect(),
-            crate::radio_browser::RadioCategory::Synthwave => self
-                .radio_curated_list
-                .iter()
-                .filter(|st| {
-                    let t = st.tags.to_lowercase();
-                    t.contains("synthwave")
-                        || t.contains("retrowave")
-                        || t.contains("cyber")
-                        || t.contains("hacker")
-                        || t.contains("darkwave")
-                })
-                .collect(),
-            crate::radio_browser::RadioCategory::Rock => self
-                .radio_curated_list
-                .iter()
-                .filter(|st| {
-                    let t = st.tags.to_lowercase();
-                    t.contains("rock")
-                        || t.contains("metal")
-                        || t.contains("indie")
-                        || t.contains("alternative")
-                })
-                .collect(),
-            crate::radio_browser::RadioCategory::Brazil => self
-                .radio_curated_list
-                .iter()
-                .filter(|st| {
-                    let t = st.tags.to_lowercase();
-                    let c = st.country.as_deref().unwrap_or("").to_lowercase();
-                    c.contains("brazil")
-                        || c.contains("brasil")
-                        || t.contains("mpb")
-                        || t.contains("bossa")
-                })
-                .collect(),
-            crate::radio_browser::RadioCategory::Classical => self
-                .radio_curated_list
-                .iter()
-                .filter(|st| {
-                    let t = st.tags.to_lowercase();
-                    t.contains("classical")
-                        || t.contains("piano")
-                        || t.contains("baroque")
-                        || t.contains("orchestral")
-                        || t.contains("opera")
-                })
-                .collect(),
-            crate::radio_browser::RadioCategory::Search => {
-                self.radio_search_results.iter().collect()
-            }
+            _ => self.radio_search_results.iter().collect(),
         }
     }
 

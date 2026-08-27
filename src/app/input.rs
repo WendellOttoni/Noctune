@@ -1231,27 +1231,50 @@ impl App {
                 KeyCode::Char(c) => {
                     self.radio_search_query.push(c);
                 }
+                KeyCode::Down => {
+                    let stations = self.radio_filtered_stations();
+                    if !stations.is_empty() && self.radio_row + 1 < stations.len() {
+                        self.radio_row += 1;
+                    }
+                }
+                KeyCode::Up => {
+                    self.radio_row = self.radio_row.saturating_sub(1);
+                }
                 _ => {}
             }
             return;
         }
 
-        let list_len = match self.radio_tab {
-            crate::radio_browser::RadioTab::Curated => self.radio_curated_list.len(),
-            crate::radio_browser::RadioTab::Search => self.radio_search_results.len(),
-        };
+        let stations = self.radio_filtered_stations();
+        let list_len = stations.len();
 
         match key.code {
             KeyCode::Esc | KeyCode::Char('K') => {
                 self.show_radio_browser = false;
                 self.radio_search_editing = false;
             }
-            KeyCode::Tab => {
-                self.radio_tab = self.radio_tab.cycle();
+            KeyCode::Left => {
+                if self.radio_category_idx == 0 {
+                    self.radio_category_idx = crate::radio_browser::RadioCategory::ALL.len() - 1;
+                } else {
+                    self.radio_category_idx -= 1;
+                }
                 self.radio_row = 0;
+                let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                self.trigger_radio_category_fetch(cat);
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                self.radio_category_idx =
+                    (self.radio_category_idx + 1) % crate::radio_browser::RadioCategory::ALL.len();
+                self.radio_row = 0;
+                let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                self.trigger_radio_category_fetch(cat);
             }
             KeyCode::Char('/') => {
-                self.radio_tab = crate::radio_browser::RadioTab::Search;
+                self.radio_category_idx = crate::radio_browser::RadioCategory::ALL
+                    .iter()
+                    .position(|c| *c == crate::radio_browser::RadioCategory::Search)
+                    .unwrap_or(0);
                 self.radio_search_editing = true;
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1262,47 +1285,31 @@ impl App {
                     self.radio_row += 1;
                 }
             }
+            KeyCode::PageUp => {
+                self.radio_row = self.radio_row.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                if list_len > 0 {
+                    self.radio_row = (self.radio_row + 10).min(list_len - 1);
+                }
+            }
             KeyCode::Enter => {
-                let station = match self.radio_tab {
-                    crate::radio_browser::RadioTab::Curated => {
-                        self.radio_curated_list.get(self.radio_row).cloned()
-                    }
-                    crate::radio_browser::RadioTab::Search => {
-                        self.radio_search_results.get(self.radio_row).cloned()
-                    }
-                };
-                if let Some(st) = station {
+                if let Some(st) = stations.get(self.radio_row).copied().cloned() {
                     self.play_radio_station(&st, false);
                 }
             }
             KeyCode::Char('a') => {
-                let station = match self.radio_tab {
-                    crate::radio_browser::RadioTab::Curated => {
-                        self.radio_curated_list.get(self.radio_row).cloned()
-                    }
-                    crate::radio_browser::RadioTab::Search => {
-                        self.radio_search_results.get(self.radio_row).cloned()
-                    }
-                };
-                if let Some(st) = station {
+                if let Some(st) = stations.get(self.radio_row).copied().cloned() {
                     self.play_radio_station(&st, true);
                 }
             }
-            KeyCode::Char('+') | KeyCode::Char('N') | KeyCode::Char('n') => {
+            KeyCode::Char('+') | KeyCode::Char('N') => {
                 self.show_radio_custom_modal = true;
                 self.radio_custom_fields = [String::new(), String::new(), String::new()];
                 self.radio_custom_field_idx = 0;
             }
             KeyCode::Char('f') => {
-                let station = match self.radio_tab {
-                    crate::radio_browser::RadioTab::Curated => {
-                        self.radio_curated_list.get(self.radio_row).cloned()
-                    }
-                    crate::radio_browser::RadioTab::Search => {
-                        self.radio_search_results.get(self.radio_row).cloned()
-                    }
-                };
-                if let Some(st) = station {
+                if let Some(st) = stations.get(self.radio_row).copied().cloned() {
                     let p = std::path::PathBuf::from(&st.url);
                     let fav = self.ratings.toggle_favorite(&p);
                     self.set_info(if fav {
@@ -1311,6 +1318,14 @@ impl App {
                         format!("Rádio removida dos favoritos: {}", st.name)
                     });
                 }
+            }
+            KeyCode::Char(c) if !c.is_control() => {
+                self.radio_category_idx = crate::radio_browser::RadioCategory::ALL
+                    .iter()
+                    .position(|c| *c == crate::radio_browser::RadioCategory::Search)
+                    .unwrap_or(0);
+                self.radio_search_query.push(c);
+                self.radio_search_editing = true;
             }
             _ => {}
         }

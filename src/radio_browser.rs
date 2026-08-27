@@ -1,5 +1,5 @@
 //! Online Radio Directory & Curated Station Hub.
-//! Connects to the community-driven Radio-Browser API (+40,000 global stations)
+//! Connects to the community-driven Radio-Browser API (+45,000 global stations)
 //! and provides built-in curated plug-and-play streaming stations.
 
 use anyhow::{anyhow, Result};
@@ -18,48 +18,57 @@ pub struct RadioStation {
     pub country: Option<String>,
     #[serde(default)]
     pub bitrate: Option<u32>,
+    #[serde(default)]
+    pub codec: Option<String>,
+    #[serde(default)]
+    pub votes: Option<u32>,
+    #[serde(default)]
+    pub stationuuid: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioCategory {
-    All,
-    Custom,
-    Favorites,
+    TopVoted,
     Lofi,
+    Rock,
     Jazz,
     Synthwave,
-    Rock,
     Brazil,
     Classical,
+    Curated,
+    Custom,
+    Favorites,
     Search,
 }
 
 impl RadioCategory {
-    pub const ALL: [RadioCategory; 10] = [
-        RadioCategory::All,
-        RadioCategory::Custom,
-        RadioCategory::Favorites,
+    pub const ALL: [RadioCategory; 11] = [
+        RadioCategory::TopVoted,
         RadioCategory::Lofi,
+        RadioCategory::Rock,
         RadioCategory::Jazz,
         RadioCategory::Synthwave,
-        RadioCategory::Rock,
         RadioCategory::Brazil,
         RadioCategory::Classical,
+        RadioCategory::Curated,
+        RadioCategory::Custom,
+        RadioCategory::Favorites,
         RadioCategory::Search,
     ];
 
     pub fn label(&self) -> &'static str {
         match self {
-            RadioCategory::All => "📻 Destaques (Todas)",
-            RadioCategory::Custom => "✨ Minhas Rádios",
-            RadioCategory::Favorites => "★ Favoritas",
-            RadioCategory::Lofi => "☕ Lo-Fi & Chill",
-            RadioCategory::Jazz => "🎷 Jazz & Blues",
-            RadioCategory::Synthwave => "⚡ Synthwave & Cyber",
+            RadioCategory::TopVoted => "🔥 Top 100 Globais",
+            RadioCategory::Lofi => "☕ Lo-Fi & Beats",
             RadioCategory::Rock => "🎸 Rock & Metal",
+            RadioCategory::Jazz => "🎷 Jazz & Blues",
+            RadioCategory::Synthwave => "⚡ Synthwave & Retrowave",
             RadioCategory::Brazil => "🇧🇷 Brasil & MPB",
             RadioCategory::Classical => "🎻 Clássica & Piano",
-            RadioCategory::Search => "🔍 Busca Global (+40k)",
+            RadioCategory::Curated => "★ Seleção Manual",
+            RadioCategory::Custom => "✨ Minhas Rádios",
+            RadioCategory::Favorites => "♥ Favoritas",
+            RadioCategory::Search => "🔍 Busca Livre (+45k)",
         }
     }
 }
@@ -90,6 +99,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "lofi, chill, instrumental, study".into(),
             country: Some("France".into()),
             bitrate: Some(192),
+            codec: Some("MP3".into()),
+            votes: Some(15000),
+            stationuuid: None,
         },
         RadioStation {
             name: "Nightwave Plaza (Vaporwave)".into(),
@@ -98,6 +110,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "vaporwave, future funk, chill".into(),
             country: Some("Worldwide".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(9500),
+            stationuuid: None,
         },
         RadioStation {
             name: "SomaFM: Groove Salad".into(),
@@ -106,6 +121,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "ambient, downtempo, chill".into(),
             country: Some("United States".into()),
             bitrate: Some(256),
+            codec: Some("MP3".into()),
+            votes: Some(18000),
+            stationuuid: None,
         },
         RadioStation {
             name: "Chillhop Radio".into(),
@@ -114,6 +132,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "chillhop, lofi, beats".into(),
             country: Some("Netherlands".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(8200),
+            stationuuid: None,
         },
         // Synthwave & Cyberpunk
         RadioStation {
@@ -123,6 +144,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "synthwave, retrowave, cyberpunk, 80s".into(),
             country: Some("United States".into()),
             bitrate: Some(256),
+            codec: Some("MP3".into()),
+            votes: Some(12000),
+            stationuuid: None,
         },
         RadioStation {
             name: "SomaFM: DEF CON Radio".into(),
@@ -131,6 +155,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "hacker, electronic, ambient, darkwave".into(),
             country: Some("United States".into()),
             bitrate: Some(256),
+            codec: Some("MP3".into()),
+            votes: Some(11000),
+            stationuuid: None,
         },
         // Jazz & Classical
         RadioStation {
@@ -140,6 +167,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "spy jazz, lounge, surf, 60s".into(),
             country: Some("United States".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(7800),
+            stationuuid: None,
         },
         RadioStation {
             name: "Radio Swiss Jazz".into(),
@@ -148,6 +178,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "jazz, swing, bebop, blues".into(),
             country: Some("Switzerland".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(14000),
+            stationuuid: None,
         },
         RadioStation {
             name: "Radio Swiss Classic".into(),
@@ -156,6 +189,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "classical, orchestral, baroque".into(),
             country: Some("Switzerland".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(13500),
+            stationuuid: None,
         },
         RadioStation {
             name: "Classic FM (UK)".into(),
@@ -164,6 +200,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "classical, orchestral, relax, symphony".into(),
             country: Some("United Kingdom".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(16000),
+            stationuuid: None,
         },
         RadioStation {
             name: "WQXR 105.9 FM (Classical)".into(),
@@ -172,6 +211,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "classical, opera, orchestral, piano".into(),
             country: Some("United States".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(10500),
+            stationuuid: None,
         },
         // Rock, Metal & Pop
         RadioStation {
@@ -181,6 +223,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "indie rock, pop, alternative".into(),
             country: Some("United States".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(9200),
+            stationuuid: None,
         },
         RadioStation {
             name: "SomaFM: Metal Detector".into(),
@@ -189,6 +234,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "metal, hard rock, heavy".into(),
             country: Some("United States".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(8900),
+            stationuuid: None,
         },
         RadioStation {
             name: "Kiss FM 92.5 (Brasil)".into(),
@@ -197,6 +245,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "rock, classic rock, hard rock, metal".into(),
             country: Some("Brazil".into()),
             bitrate: Some(128),
+            codec: Some("AAC".into()),
+            votes: Some(6400),
+            stationuuid: None,
         },
         // Brazil Stations
         RadioStation {
@@ -206,6 +257,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "pop, adult contemporary, international".into(),
             country: Some("Brazil".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(11200),
+            stationuuid: None,
         },
         RadioStation {
             name: "Rádio Eldorado FM (Brasil)".into(),
@@ -214,6 +268,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "mpb, rock, news, culture".into(),
             country: Some("Brazil".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(7100),
+            stationuuid: None,
         },
         RadioStation {
             name: "NovaBrasil FM (Brasil)".into(),
@@ -222,6 +279,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "mpb, bossa nova, brasil".into(),
             country: Some("Brazil".into()),
             bitrate: Some(128),
+            codec: Some("AAC".into()),
+            votes: Some(5800),
+            stationuuid: None,
         },
         RadioStation {
             name: "Rádio Batuta MPB (Brasil)".into(),
@@ -230,6 +290,9 @@ pub fn curated_stations() -> Vec<RadioStation> {
             tags: "mpb, samba, bossa nova, brasil".into(),
             country: Some("Brazil".into()),
             bitrate: Some(128),
+            codec: Some("MP3".into()),
+            votes: Some(4200),
+            stationuuid: None,
         },
     ]
 }
@@ -277,13 +340,27 @@ pub fn all_stations() -> Vec<RadioStation> {
     list
 }
 
-/// Query the Radio-Browser public API for stations matching the query.
-pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>> {
-    let query_trimmed = query.trim();
-    if query_trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
+const SERVERS: &[&str] = &[
+    "https://de1.api.radio-browser.info",
+    "https://nl1.api.radio-browser.info",
+    "https://at1.api.radio-browser.info",
+];
 
+#[derive(Deserialize)]
+struct ApiStation {
+    name: String,
+    url_resolved: Option<String>,
+    url: String,
+    homepage: Option<String>,
+    tags: Option<String>,
+    country: Option<String>,
+    bitrate: Option<u32>,
+    codec: Option<String>,
+    votes: Option<u32>,
+    stationuuid: Option<String>,
+}
+
+fn query_radio_browser_path(path: &str) -> Result<Vec<RadioStation>> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
         .user_agent(concat!(
@@ -293,26 +370,9 @@ pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>
         ))
         .build()?;
 
-    let encoded_query = urlencoding_simple(query_trimmed);
-    let endpoints = [
-        format!("https://de1.api.radio-browser.info/json/stations/search?name={encoded_query}&limit={limit}&order=votes&reverse=true"),
-        format!("https://at1.api.radio-browser.info/json/stations/search?name={encoded_query}&limit={limit}&order=votes&reverse=true"),
-        format!("https://nl1.api.radio-browser.info/json/stations/bytag/{encoded_query}?limit={limit}&order=votes&reverse=true"),
-    ];
-
-    #[derive(Deserialize)]
-    struct ApiStation {
-        name: String,
-        url_resolved: Option<String>,
-        url: String,
-        homepage: Option<String>,
-        tags: Option<String>,
-        country: Option<String>,
-        bitrate: Option<u32>,
-    }
-
-    let mut last_err = anyhow!("no radio stations found");
-    for endpoint in endpoints {
+    let mut last_err = anyhow!("Nenhuma estação encontrada nos servidores do Radio-Browser");
+    for server in SERVERS {
+        let endpoint = format!("{server}{path}");
         match client.get(&endpoint).send() {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(stations) = resp.json::<Vec<ApiStation>>() {
@@ -321,11 +381,14 @@ pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>
                         .filter(|s| !s.name.trim().is_empty())
                         .map(|s| RadioStation {
                             name: s.name.trim().to_string(),
-                            url: s.url_resolved.unwrap_or(s.url),
+                            url: s.url_resolved.filter(|u| !u.is_empty()).unwrap_or(s.url),
                             homepage: s.homepage.filter(|h| !h.is_empty()),
                             tags: s.tags.unwrap_or_default(),
                             country: s.country.filter(|c| !c.is_empty()),
                             bitrate: s.bitrate.filter(|&b| b > 0),
+                            codec: s.codec.filter(|c| !c.is_empty()),
+                            votes: s.votes,
+                            stationuuid: s.stationuuid.filter(|u| !u.is_empty()),
                         })
                         .collect();
                     if !results.is_empty() {
@@ -334,15 +397,55 @@ pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>
                 }
             }
             Ok(resp) => {
-                last_err = anyhow!("Radio-Browser API returned {}", resp.status());
+                last_err = anyhow!("Radio-Browser retornou status HTTP {}", resp.status());
             }
             Err(e) => {
-                last_err = anyhow!("Radio-Browser connection error: {e}");
+                last_err = anyhow!("Erro de conexão com Radio-Browser: {e}");
             }
         }
     }
-
     Err(last_err)
+}
+
+pub fn fetch_top_voted(limit: u32) -> Result<Vec<RadioStation>> {
+    query_radio_browser_path(&format!("/json/stations/topvote/{limit}"))
+}
+
+pub fn fetch_by_tag(tag: &str, limit: u32) -> Result<Vec<RadioStation>> {
+    let encoded = urlencoding_simple(tag);
+    query_radio_browser_path(&format!(
+        "/json/stations/bytag/{encoded}?limit={limit}&order=votes&reverse=true"
+    ))
+}
+
+pub fn fetch_by_country(country: &str, limit: u32) -> Result<Vec<RadioStation>> {
+    let encoded = urlencoding_simple(country);
+    query_radio_browser_path(&format!(
+        "/json/stations/bycountry/{encoded}?limit={limit}&order=votes&reverse=true"
+    ))
+}
+
+/// Query the Radio-Browser public API for stations matching the query.
+pub fn search_radio_browser(query: &str, limit: u32) -> Result<Vec<RadioStation>> {
+    let query_trimmed = query.trim();
+    if query_trimmed.is_empty() {
+        return fetch_top_voted(limit);
+    }
+
+    let encoded_query = urlencoding_simple(query_trimmed);
+    let search_path = format!(
+        "/json/stations/search?name={encoded_query}&limit={limit}&order=votes&reverse=true"
+    );
+    if let Ok(res) = query_radio_browser_path(&search_path) {
+        if !res.is_empty() {
+            return Ok(res);
+        }
+    }
+
+    let tag_path = format!(
+        "/json/stations/bytag/{encoded_query}?limit={limit}&order=votes&reverse=true"
+    );
+    query_radio_browser_path(&tag_path)
 }
 
 fn urlencoding_simple(s: &str) -> String {
