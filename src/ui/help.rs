@@ -1,18 +1,142 @@
-//! Help overlay (#100). Extracted from `ui.rs` — pure code move.
+//! Help overlay (#100). Redesigned with 2-column card layout, key badges and categorized sections.
 
 use ratatui::{
-    layout::Rect,
-    style::Style,
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
 use crate::theme::{parse_color, Theme};
 
+struct ShortcutSection {
+    icon: &'static str,
+    title: &'static str,
+    shortcuts: &'static [(&'static str, &'static str)],
+}
+
+const LEFT_SECTIONS: &[ShortcutSection] = &[
+    ShortcutSection {
+        icon: "▶",
+        title: "Playback & Controles",
+        shortcuts: &[
+            ("Space", "Tocar / Pausar reprodução"),
+            ("n / p", "Próxima / Faixa anterior"),
+            ("s", "Parar áudio e descarregar"),
+            ("← / →", "Buscar -5s / +5s na faixa"),
+            ("+ / -", "Aumentar / Diminuir volume"),
+            ("m", "Alternar Mini Player"),
+            ("Ctrl+P / :", "Paleta de Comandos unificada"),
+        ],
+    },
+    ShortcutSection {
+        icon: "📚",
+        title: "Biblioteca & Fila",
+        shortcuts: &[
+            ("Tab", "Alternar foco (Biblioteca / Fila)"),
+            ("↑↓ / jk", "Mover cursor de seleção"),
+            ("Enter", "Reproduzir faixa / abrir pasta"),
+            ("a / d", "Adicionar / Remover da fila"),
+            ("c / u", "Limpar fila / Desfazer ação"),
+            ("f", "Favoritar / Desfavoritar (♥)"),
+            ("/", "Busca rápida (SQLite FTS5)"),
+        ],
+    },
+    ShortcutSection {
+        icon: "👁",
+        title: "Visões & Navegação",
+        shortcuts: &[
+            ("1", "Visão Flat (Todas as músicas)"),
+            ("2", "Foco na Fila de reprodução"),
+            ("3", "Hub de Rádios Online"),
+            ("4", "Explorador de Pastas do disco"),
+            ("V", "Ciclar modos de visualização"),
+            ("H", "Histórico de tocadas recentes"),
+            ("Shift+Tab", "Alternar temas visuais"),
+        ],
+    },
+];
+
+const RIGHT_SECTIONS: &[ShortcutSection] = &[
+    ShortcutSection {
+        icon: "🎚",
+        title: "Áudio, EQ & Visualizador",
+        shortcuts: &[
+            ("e", "Painel de Áudio & EQ 10-Bandas"),
+            ("0 / Shift+E", "Ciclar presets de EQ (Rock, Bass...)"),
+            ("v", "Ciclar visualizador FFT (Spectrum, VU...)"),
+            ("[ / ]", "Ajustar sensibilidade do VU"),
+            ("y", "Letras sincronizadas (Karaokê LRC)"),
+            ("G", "ReplayGain (Off / Faixa / Álbum)"),
+            ("D", "Selecionar saída de áudio"),
+        ],
+    },
+    ShortcutSection {
+        icon: "☁",
+        title: "Streaming & Nuvem",
+        shortcuts: &[
+            ("3 / K", "Diretório de rádios (+40k estações)"),
+            ("Ctrl+N", "Subsonic / Navidrome Cloud"),
+            ("i", "Prompt de URL: YouTube, SoundCloud..."),
+            ("P / @", "Spotify Browser & Playback nativo"),
+            ("F", "Integração & Scrobbling Last.fm"),
+        ],
+    },
+    ShortcutSection {
+        icon: "📁",
+        title: "Playlists & Sistema",
+        shortcuts: &[
+            ("w", "Salvar fila como playlist (.m3u)"),
+            ("L", "Carregar playlists locais"),
+            ("X", "Publicar playlist na comunidade"),
+            ("C", "Explorar & importar playlists públicas"),
+            ("T", "Editor de tags ID3 e metadados"),
+            ("R", "Reescanear diretórios de música"),
+            ("U / Shift+U", "Verificar atualizações no GitHub"),
+            ("q / Esc", "Fechar este modal de ajuda"),
+        ],
+    },
+];
+
+fn render_sections(sections: &[ShortcutSection], theme: &Theme) -> Vec<Line<'static>> {
+    let fg = parse_color(&theme.colors.foreground);
+    let secondary = parse_color(&theme.colors.secondary);
+    let accent = parse_color(&theme.colors.accent);
+    let muted = parse_color(&theme.colors.muted);
+
+    let sec_header_style = Style::default().fg(accent).add_modifier(Modifier::BOLD);
+    let key_badge_style = Style::default().fg(secondary).add_modifier(Modifier::BOLD);
+    let sep_style = Style::default().fg(muted);
+    let text_style = Style::default().fg(fg);
+
+    let mut lines = Vec::new();
+
+    for (i, sec) in sections.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", sec.icon), sec_header_style),
+            Span::styled(sec.title, sec_header_style),
+        ]));
+
+        for &(key, desc) in sec.shortcuts {
+            lines.push(Line::from(vec![
+                Span::styled(format!("   {:<12} ", key), key_badge_style),
+                Span::styled("─ ", sep_style),
+                Span::styled(desc, text_style),
+            ]));
+        }
+    }
+
+    lines
+}
+
 pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
-    let w = 62.min(area.width.saturating_sub(2));
-    let h = area.height.saturating_sub(2).max(6);
+    let w = 86.min(area.width.saturating_sub(2)).max(40);
+    let h = 32.min(area.height.saturating_sub(2)).max(12);
+
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -21,98 +145,59 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
     };
     f.render_widget(Clear, popup);
 
-    let lines: Vec<Line> = vec![
-        Line::from("  Playback"),
-        Line::from("    Space        play / pause"),
-        Line::from("    n / p        next / previous"),
-        Line::from("    s            stop"),
-        Line::from("    ← / →        seek -5s / +5s"),
-        Line::from("    + / -        volume up / down"),
-        Line::from("    m            toggle mini mode"),
-        Line::from("    Ctrl+P       open Command Palette (search & actions)"),
-        Line::from(""),
-        Line::from("  Library / Queue"),
-        Line::from("    Tab          switch focus"),
-        Line::from("    ↑↓ / jk      move selection"),
-        Line::from("    Enter        play selected"),
-        Line::from("    a / d        add / remove from queue"),
-        Line::from("    c            clear queue (confirm twice)"),
-        Line::from("    u            undo last clear / remove"),
-        Line::from("    f            toggle favorite"),
-        Line::from("    /            search (title, artist, album, genre, year)"),
-        Line::from("    H            toggle recently played view"),
-        Line::from(""),
-        Line::from("  Modes & playlists"),
-        Line::from("    S            toggle shuffle"),
-        Line::from("    r            cycle repeat (off/all/one)"),
-        Line::from("    o            cycle sort (title/artist/album/year)"),
-        Line::from("    T            edit track tags / metadata"),
-        Line::from("    w            save queue as .m3u / .m3u8"),
-        Line::from("    L            load / browse saved playlists (.m3u/.m3u8)"),
-        Line::from("    X            share / publish playlist to public catalog"),
-        Line::from("    C            browse & import community public playlists"),
-        Line::from("    O            open profiles browser (save/load settings)"),
-        Line::from(""),
-        Line::from("  Quick Views"),
-        Line::from("    1            switch to Library view"),
-        Line::from("    2            focus Queue"),
-        Line::from("    3            open Dedicated Radio Mode"),
-        Line::from("    4            open Folders Browser"),
-        Line::from(""),
-        Line::from("  View & Themes"),
-        Line::from("    V            cycle view mode (flat/albums/smart/browser/radio)"),
-        Line::from("    Shift+Tab    cycle color themes"),
-        Line::from("    Click        play library / queue row"),
-        Line::from("    Click bar    seek to position"),
-        Line::from("    Scroll       scroll list"),
-        Line::from(""),
-        Line::from("  EQ & Audio"),
-        Line::from("    e            open audio panel (EQ, crossfade, speed, viz sens…)"),
-        Line::from(
-            "    0 / Shift+E  cycle EQ presets (Flat, Bass Boost, Vocal, Rock, Electronic…)",
-        ),
-        Line::from("    Ctrl+S       save custom preset (in EQ tuner)"),
-        Line::from("    y            open synced lyrics / Karaoke popup"),
-        Line::from("    v            cycle viz mode (spectrum/waveform/vu/waterfall/oscilloscope)"),
-        Line::from("    [ / ]        viz sensitivity -/+"),
-        Line::from("    G            cycle ReplayGain (off/track/album)"),
-        Line::from(""),
-        Line::from("  Library tools"),
-        Line::from("    R            rescan music_dirs"),
-        Line::from("    I            track info popup"),
-        Line::from("    D            select audio output device"),
-        Line::from(""),
-        Line::from("  Online / Streaming"),
-        Line::from("    3 / K        open Online Radio Mode (+40k stations & curated)"),
-        Line::from("    Ctrl+N       open Subsonic / Navidrome Cloud browser"),
-        Line::from("    Shift+U      check and apply app update in-place"),
-        Line::from("    i            open URL prompt"),
-        Line::from("                 • YouTube / youtu.be links"),
-        Line::from("                 • SoundCloud links & scsearch:query"),
-        Line::from("                 • ytsearch:query  (top 5 results)"),
-        Line::from("                 • ytmsearch:query (YouTube Music)"),
-        Line::from("                 • M3U / PLS radio playlist URLs"),
-        Line::from("                 • Direct HTTP stream URL"),
-        Line::from(""),
-        Line::from("  Integrations & System"),
-        Line::from("    F            Last.fm login (press twice to confirm)"),
-        Line::from("    P            Spotify browser login (OAuth PKCE)"),
-        Line::from("    @            Spotify play/pause toggle"),
-        Line::from("    U            check & apply app update from GitHub"),
-    ];
+    let muted = parse_color(&theme.colors.muted);
 
-    let p = Paragraph::new(Text::from(lines))
-        .style(Style::default().fg(parse_color(&theme.colors.foreground)))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme.border(true))
-                .title(Span::styled(
-                    " Help  ↑↓ scroll · any other key closes ",
-                    theme.accent(),
-                )),
-        )
-        .scroll((scroll, 0))
-        .wrap(Wrap { trim: false });
-    f.render_widget(p, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            " 📖 Noctune — Guia de Atalhos & Comandos ",
+            theme.accent(),
+        ))
+        .title_bottom(Line::from(vec![
+            Span::styled(" [↑/↓/j/k] ", theme.accent()),
+            Span::styled("Rolar  ", Style::default().fg(muted)),
+            Span::styled(" [Esc/?/q] ", theme.accent()),
+            Span::styled("Fechar ", Style::default().fg(muted)),
+        ]));
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    if inner.width >= 72 {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Length(1),
+                Constraint::Percentage(50),
+            ])
+            .split(inner);
+
+        let left_lines = render_sections(LEFT_SECTIONS, theme);
+        let right_lines = render_sections(RIGHT_SECTIONS, theme);
+
+        let left_p = Paragraph::new(left_lines).scroll((scroll, 0));
+        let right_p = Paragraph::new(right_lines).scroll((scroll, 0));
+
+        f.render_widget(left_p, cols[0]);
+
+        // Subtle vertical divider in the middle
+        let mut divider_spans = Vec::new();
+        for _ in 0..cols[1].height {
+            divider_spans.push(Line::from(Span::styled("│", Style::default().fg(muted))));
+        }
+        f.render_widget(Paragraph::new(divider_spans), cols[1]);
+
+        f.render_widget(right_p, cols[2]);
+    } else {
+        // Fallback for narrow terminals: single combined column
+        let mut all_sections = Vec::new();
+        all_sections.extend_from_slice(LEFT_SECTIONS);
+        all_sections.extend_from_slice(RIGHT_SECTIONS);
+
+        let lines = render_sections(&all_sections, theme);
+        let p = Paragraph::new(lines).scroll((scroll, 0));
+        f.render_widget(p, inner);
+    }
 }

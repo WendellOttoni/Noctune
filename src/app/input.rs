@@ -26,6 +26,15 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.help_scroll = self.help_scroll.saturating_sub(1);
                 }
+                KeyCode::PageDown => {
+                    self.help_scroll = self.help_scroll.saturating_add(6);
+                }
+                KeyCode::PageUp => {
+                    self.help_scroll = self.help_scroll.saturating_sub(6);
+                }
+                KeyCode::Home => {
+                    self.help_scroll = 0;
+                }
                 _ => {
                     self.show_help = false;
                     self.help_scroll = 0;
