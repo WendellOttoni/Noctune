@@ -2133,7 +2133,11 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
     // 4. Footer
     let footer_text = format!(
         " {}/{} resultados ",
-        if total_matches > 0 { app.command_palette_row + 1 } else { 0 },
+        if total_matches > 0 {
+            app.command_palette_row + 1
+        } else {
+            0
+        },
         total_matches
     );
     f.render_widget(
@@ -2159,26 +2163,13 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
     let accent = parse_color(&theme.colors.accent);
     let secondary = parse_color(&theme.colors.secondary);
 
-    let hint = Line::from(vec![
-        Span::styled("Tab", Style::default().fg(accent)),
-        Span::styled(" campo  ", Style::default().fg(muted)),
-        Span::styled("Enter", Style::default().fg(accent)),
-        Span::styled(" publicar  ", Style::default().fg(muted)),
-        Span::styled("Esc", Style::default().fg(accent)),
-        Span::styled(" cancelar", Style::default().fg(muted)),
-    ]);
-
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border(true))
-        .title(Span::styled(
-            " 🌐 Compartilhar & Publicar Playlist ",
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        ))
-        .title_bottom(hint);
-    let inner = block.inner(popup);
+        .border_style(Style::default().fg(accent))
+        .title(" Compartilhar Playlist (Enter: Publicar | Tab: Campo | Esc: Cancelar) ");
     f.render_widget(block, popup);
 
+    let inner = block.inner(popup);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2186,6 +2177,7 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(3), // Description
             Constraint::Length(3), // Visibility
             Constraint::Length(3), // Tags
+            Constraint::Min(0),
         ])
         .split(inner);
 
@@ -2199,10 +2191,20 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         })
         .title(" Título da Playlist ");
     let title_text = if app.share_playlist_title.is_empty() && app.share_modal_field != 0 {
-        Span::styled(" (Sem título - usará nome da fila) ", Style::default().fg(muted))
+        Span::styled(
+            " (Sem título - usará nome da fila) ",
+            Style::default().fg(muted),
+        )
     } else {
         Span::styled(
-            format!(" {}", if app.share_modal_field == 0 { format!("{}█", app.share_playlist_title) } else { app.share_playlist_title.clone() }),
+            format!(
+                " {}",
+                if app.share_modal_field == 0 {
+                    format!("{}█", app.share_playlist_title)
+                } else {
+                    app.share_playlist_title.clone()
+                }
+            ),
             Style::default().fg(fg),
         )
     };
@@ -2218,7 +2220,14 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         })
         .title(" Descrição (opcional) ");
     let desc_text = Span::styled(
-        format!(" {}", if app.share_modal_field == 1 { format!("{}█", app.share_playlist_desc) } else { app.share_playlist_desc.clone() }),
+        format!(
+            " {}",
+            if app.share_modal_field == 1 {
+                format!("{}█", app.share_playlist_desc)
+            } else {
+                app.share_playlist_desc.clone()
+            }
+        ),
         Style::default().fg(fg),
     );
     f.render_widget(Paragraph::new(desc_text).block(desc_block), chunks[1]);
@@ -2239,7 +2248,13 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
     };
     let vis_text = Span::styled(
         format!(" {vis_icon} {vis_label}"),
-        Style::default().fg(if app.share_modal_field == 2 { secondary } else { fg }).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(if app.share_modal_field == 2 {
+                secondary
+            } else {
+                fg
+            })
+            .add_modifier(Modifier::BOLD),
     );
     f.render_widget(Paragraph::new(vis_text).block(vis_block), chunks[2]);
 
@@ -2253,7 +2268,14 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         })
         .title(" Tags (separadas por vírgula) ");
     let tags_text = Span::styled(
-        format!(" {}", if app.share_modal_field == 3 { format!("{}█", app.share_playlist_tags) } else { app.share_playlist_tags.clone() }),
+        format!(
+            " {}",
+            if app.share_modal_field == 3 {
+                format!("{}█", app.share_playlist_tags)
+            } else {
+                app.share_playlist_tags.clone()
+            }
+        ),
         Style::default().fg(fg),
     );
     f.render_widget(Paragraph::new(tags_text).block(tags_block), chunks[3]);

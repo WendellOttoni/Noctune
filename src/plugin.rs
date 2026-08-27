@@ -1,10 +1,7 @@
 use anyhow::{anyhow, Result};
 use mlua::{Function, Lua, RegistryKey, Table, Value};
 use parking_lot::Mutex;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use crate::audio::Track;
 

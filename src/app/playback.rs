@@ -1,12 +1,12 @@
 use anyhow::Result;
 use notify::Watcher as _;
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use crate::audio::Track;
 
 use super::{
     types::{LibraryRow, Pane, PlaylistEntry, RepeatMode, UndoSnapshot, ViewMode, MAX_UNDO_SNAPSHOTS},
-    util::{pseudo_random, rect_contains, rg_scale},
+    util::{pseudo_random, rg_scale},
     App,
 };
 
@@ -818,7 +818,6 @@ impl App {
         self.loading_track = Some(t.clone());
         self.set_info(format!("Loading: {}…", t.display()));
     }
-}
 
     pub(crate) fn toggle_favorite(&mut self) {
         let path = match self.focus {
@@ -858,8 +857,9 @@ impl App {
             }
         }
     }
+}
 
-    pub(crate) fn parse_extinf(rest: &str) -> (Option<std::time::Duration>, Option<String>, String) {
+pub(crate) fn parse_extinf(rest: &str) -> (Option<std::time::Duration>, Option<String>, String) {
     let (secs_str, display) = match rest.split_once(',') {
         Some((s, d)) => (s.trim(), d.trim()),
         None => ("", rest.trim()),
