@@ -1356,12 +1356,14 @@ impl App {
                         format!("Volume: {:.0}%", cur_vol * 100.0)
                     } else if let Some(stripped) = arg.strip_prefix('+') {
                         if let Ok(delta) = stripped.parse::<f32>() {
-                            self.player.set_volume((cur_vol + delta / 100.0).clamp(0.0, 1.5));
+                            self.player
+                                .set_volume((cur_vol + delta / 100.0).clamp(0.0, 1.5));
                         }
                         format!("Volume: {:.0}%", self.player.volume() * 100.0)
                     } else if let Some(stripped) = arg.strip_prefix('-') {
                         if let Ok(delta) = stripped.parse::<f32>() {
-                            self.player.set_volume((cur_vol - delta / 100.0).clamp(0.0, 1.5));
+                            self.player
+                                .set_volume((cur_vol - delta / 100.0).clamp(0.0, 1.5));
                         }
                         format!("Volume: {:.0}%", self.player.volume() * 100.0)
                     } else if let Ok(val) = arg.parse::<f32>() {
@@ -1381,17 +1383,17 @@ impl App {
                             "▶ Playing"
                         };
                         let el = self.player.elapsed();
-                        let el_str =
-                            format!("{:02}:{:02}", el.as_secs() / 60, el.as_secs() % 60);
                         let dur_str = t
                             .duration
                             .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
                             .unwrap_or_else(|| "--:--".into());
                         let artist = t.artist.as_deref().unwrap_or("Unknown Artist");
                         format!(
-                            "{state}: {} - {} [{el_str}/{dur_str}] (Vol: {:.0}%)",
+                            "{state}: {} - {} [{:02}:{:02}/{dur_str}] (Vol: {:.0}%)",
                             artist,
                             t.title,
+                            el.as_secs() / 60,
+                            el.as_secs() % 60,
                             cur_vol * 100.0
                         )
                     } else {
