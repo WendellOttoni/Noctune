@@ -1228,7 +1228,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate().take(8) {
         let active = current == Some(i);
         let style = if active {
-            Style::default().fg(bg).bg(accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(bg)
+                .bg(accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(muted)
         };
@@ -1259,7 +1262,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
-                .title(Span::styled(" 🎚️ Equalizador Gráfico de 10 Bandas (EQ Tuner) ", theme.accent())),
+                .title(Span::styled(
+                    " 🎚️ Equalizador Gráfico de 10 Bandas (EQ Tuner) ",
+                    theme.accent(),
+                )),
         );
     f.render_widget(p, popup);
 }
@@ -2029,8 +2035,13 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
         .split(inner);
 
     // 1. Input prompt line
-    let prompt_icon = if app.command_palette_input.starts_with('>') || app.command_palette_input.starts_with(':') {
-        Span::styled(" > ", Style::default().fg(accent).add_modifier(Modifier::BOLD))
+    let prompt_icon = if app.command_palette_input.starts_with('>')
+        || app.command_palette_input.starts_with(':')
+    {
+        Span::styled(
+            " > ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::styled(" 🔍 ", Style::default().fg(secondary))
     };
@@ -2038,10 +2049,7 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
         &app.command_palette_input,
         Style::default().fg(fg).add_modifier(Modifier::BOLD),
     );
-    let cursor = Span::styled(
-        "█",
-        Style::default().fg(accent),
-    );
+    let cursor = Span::styled("█", Style::default().fg(accent));
     let placeholder = if app.command_palette_input.is_empty() {
         Span::styled(
             " Digite para buscar comandos, músicas, temas ou '>' para ações…",
@@ -2052,7 +2060,12 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
     };
 
     f.render_widget(
-        Paragraph::new(Line::from(vec![prompt_icon, input_text, cursor, placeholder])),
+        Paragraph::new(Line::from(vec![
+            prompt_icon,
+            input_text,
+            cursor,
+            placeholder,
+        ])),
         chunks[0],
     );
 
@@ -2104,11 +2117,7 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
                     Style::default().fg(fg),
                 )
             } else {
-                (
-                    "   ",
-                    Style::default().fg(fg),
-                    Style::default().fg(muted),
-                )
+                ("   ", Style::default().fg(fg), Style::default().fg(muted))
             };
 
             let cat_span = Span::styled(
@@ -2167,9 +2176,8 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(accent))
         .title(" Compartilhar Playlist (Enter: Publicar | Tab: Campo | Esc: Cancelar) ");
-    f.render_widget(block, popup);
-
     let inner = block.inner(popup);
+    f.render_widget(block, popup);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
