@@ -85,13 +85,7 @@ impl LibraryDatabase {
                 let dur_secs = t.duration.map(|d| d.as_secs() as i64);
 
                 insert_track.execute(params![
-                    path_str,
-                    t.title,
-                    t.artist,
-                    t.album,
-                    dur_secs,
-                    t.genre,
-                    t.year,
+                    path_str, t.title, t.artist, t.album, dur_secs, t.genre, t.year,
                 ])?;
 
                 insert_fts.execute(params![

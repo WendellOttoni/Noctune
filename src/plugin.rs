@@ -108,9 +108,7 @@ impl PluginEngine {
 
         // noctune.get_volume()
         let vol = self.volume.clone();
-        let get_vol_fn = self.lua.create_function(move |_, ()| {
-            Ok(*vol.lock())
-        })?;
+        let get_vol_fn = self.lua.create_function(move |_, ()| Ok(*vol.lock()))?;
         noctune_table.set("get_volume", get_vol_fn)?;
 
         // noctune.volume_up()

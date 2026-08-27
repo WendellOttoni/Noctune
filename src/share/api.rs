@@ -30,7 +30,10 @@ pub struct ShareClient {
 
 impl ShareClient {
     pub fn new(base_url: Option<&str>) -> Result<Self> {
-        let url = base_url.unwrap_or(DEFAULT_SHARE_API_URL).trim_end_matches('/').to_string();
+        let url = base_url
+            .unwrap_or(DEFAULT_SHARE_API_URL)
+            .trim_end_matches('/')
+            .to_string();
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(12))
             .build()?;
@@ -65,7 +68,10 @@ impl ShareClient {
         limit: usize,
     ) -> Result<Vec<SharedPlaylistSummary>> {
         let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
-        let mut url = format!("{}/api/playlists/search?q={}&limit={}", self.base_url, q, limit);
+        let mut url = format!(
+            "{}/api/playlists/search?q={}&limit={}",
+            self.base_url, q, limit
+        );
         if let Some(t) = tag {
             let t_enc: String = url::form_urlencoded::byte_serialize(t.as_bytes()).collect();
             url.push_str(&format!("&tag={}", t_enc));

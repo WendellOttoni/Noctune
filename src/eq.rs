@@ -344,8 +344,11 @@ impl<S: Source<Item = f32>> EqSource<S> {
         for i in 1..NUM_BANDS - 1 {
             filters[i] = Biquad::peaking(rate, BAND_FREQS[i], q, s.bands[i]);
         }
-        filters[NUM_BANDS - 1] =
-            Biquad::high_shelf(rate, BAND_FREQS[NUM_BANDS - 1] / 1.5, s.bands[NUM_BANDS - 1]);
+        filters[NUM_BANDS - 1] = Biquad::high_shelf(
+            rate,
+            BAND_FREQS[NUM_BANDS - 1] / 1.5,
+            s.bands[NUM_BANDS - 1],
+        );
         filters
     }
 
