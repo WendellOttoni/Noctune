@@ -58,14 +58,23 @@ impl ShareClient {
         Ok(resp.id)
     }
 
-    pub fn search(&self, query: &str, tag: Option<&str>, limit: usize) -> Result<Vec<SharedPlaylistSummary>> {
+    pub fn search(
+        &self,
+        query: &str,
+        tag: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<SharedPlaylistSummary>> {
         let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
         let mut url = format!("{}/api/playlists/search?q={}&limit={}", self.base_url, q, limit);
         if let Some(t) = tag {
             let t_enc: String = url::form_urlencoded::byte_serialize(t.as_bytes()).collect();
             url.push_str(&format!("&tag={}", t_enc));
         }
-        let res = self.client.get(&url).send().context("Falha ao buscar playlists públicas")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Falha ao buscar playlists públicas")?;
         if !res.status().is_success() {
             return Err(anyhow!("Servidor retornou status HTTP {}", res.status()));
         }
@@ -75,9 +84,16 @@ impl ShareClient {
 
     pub fn get(&self, id: &str) -> Result<SharedPlaylist> {
         let url = format!("{}/api/playlists/{}", self.base_url, id);
-        let res = self.client.get(&url).send().context("Falha ao carregar playlist compartilhada")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Falha ao carregar playlist compartilhada")?;
         if !res.status().is_success() {
-            return Err(anyhow!("Playlist não encontrada ou indisponível (HTTP {})", res.status()));
+            return Err(anyhow!(
+                "Playlist não encontrada ou indisponível (HTTP {})",
+                res.status()
+            ));
         }
         let pl: SharedPlaylist = res.json()?;
         Ok(pl)

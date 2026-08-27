@@ -39,7 +39,10 @@ pub struct SubsonicAlbum {
 
 impl SubsonicAlbum {
     pub fn display_title(&self) -> &str {
-        self.title.as_deref().or(self.name.as_deref()).unwrap_or("Unknown Album")
+        self.title
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or("Unknown Album")
     }
 }
 
@@ -75,7 +78,9 @@ impl SubsonicClient {
     pub fn new(config: &SubsonicConfig) -> Result<Self> {
         let server_url = config.server_url.trim().trim_end_matches('/').to_string();
         if server_url.is_empty() || config.username.is_empty() {
-            return Err(anyhow!("Subsonic / Navidrome não configurado (URL e usuário necessários)"));
+            return Err(anyhow!(
+                "Subsonic / Navidrome não configurado (URL e usuário necessários)"
+            ));
         }
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(12))
@@ -106,7 +111,11 @@ impl SubsonicClient {
 
     pub fn ping(&self) -> Result<()> {
         let url = format!("{}/rest/ping.view?{}", self.server_url, self.auth_query());
-        let res = self.client.get(&url).send().context("Falha ao conectar com servidor Subsonic")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Falha ao conectar com servidor Subsonic")?;
         if !res.status().is_success() {
             return Err(anyhow!("Servidor retornou status HTTP {}", res.status()));
         }
@@ -121,7 +130,11 @@ impl SubsonicClient {
             q,
             self.auth_query()
         );
-        let res = self.client.get(&url).send().context("Erro na busca do Subsonic")?;
+        let res = self
+            .client
+            .get(&url)
+            .send()
+            .context("Erro na busca do Subsonic")?;
         let json: serde_json::Value = res.json()?;
         let songs_json = json
             .pointer("/subsonic-response/searchResult3/song")
