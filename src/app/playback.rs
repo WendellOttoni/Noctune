@@ -295,8 +295,12 @@ impl App {
             .or_else(|| self.player.current())
             .or_else(|| self.queue.last());
 
-        let target_artist = last_track.and_then(|t| t.artist.as_ref()).map(|s| s.to_lowercase());
-        let target_genre = last_track.and_then(|t| t.genre.as_ref()).map(|s| s.to_lowercase());
+        let target_artist = last_track
+            .and_then(|t| t.artist.as_ref())
+            .map(|s| s.to_lowercase());
+        let target_genre = last_track
+            .and_then(|t| t.genre.as_ref())
+            .map(|s| s.to_lowercase());
 
         let queued_paths: std::collections::HashSet<_> =
             self.queue.iter().map(|t| &t.path).collect();

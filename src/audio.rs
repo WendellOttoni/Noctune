@@ -692,7 +692,8 @@ impl Player {
         let Some(start) = self.crossfade_start else {
             return CrossfadeStatus::None;
         };
-        let progress = (start.elapsed().as_secs_f32() / self.crossfade_secs.max(0.05)).clamp(0.0, 1.0);
+        let progress =
+            (start.elapsed().as_secs_f32() / self.crossfade_secs.max(0.05)).clamp(0.0, 1.0);
         // Equal-power crossfade curve (quarter-sine / quarter-cosine):
         // Keeps acoustic energy constant across transitions without center volume dip
         let out_curve = ((1.0 - progress) * std::f32::consts::FRAC_PI_2).sin();

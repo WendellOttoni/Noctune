@@ -92,7 +92,9 @@ fn main() -> Result<()> {
                 println!("  noctune stop             Stop playback");
                 println!("  noctune volume [val]     Get / adjust volume (e.g. +10, -10, 80)");
                 println!("  noctune status           Show currently playing track info");
-                println!("  noctune status --json    Show status formatted as JSON for polybar/waybar");
+                println!(
+                    "  noctune status --json    Show status formatted as JSON for polybar/waybar"
+                );
                 println!("  noctune --help           Show this help");
                 return Ok(());
             }

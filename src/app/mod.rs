@@ -1345,27 +1345,29 @@ impl App {
                         "OK: Stopped".to_string()
                     }
                     C::Volume(arg) => {
+                        let cur_vol = self.player.volume();
                         if arg.is_empty() {
-                            format!("Volume: {:.0}%", self.volume * 100.0)
+                            format!("Volume: {:.0}%", cur_vol * 100.0)
                         } else if let Some(stripped) = arg.strip_prefix('+') {
                             if let Ok(delta) = stripped.parse::<f32>() {
-                                self.adjust_volume(delta / 100.0);
+                                self.player.set_volume((cur_vol + delta / 100.0).clamp(0.0, 1.5));
                             }
-                            format!("Volume: {:.0}%", self.volume * 100.0)
+                            format!("Volume: {:.0}%", self.player.volume() * 100.0)
                         } else if let Some(stripped) = arg.strip_prefix('-') {
                             if let Ok(delta) = stripped.parse::<f32>() {
-                                self.adjust_volume(-delta / 100.0);
+                                self.player.set_volume((cur_vol - delta / 100.0).clamp(0.0, 1.5));
                             }
-                            format!("Volume: {:.0}%", self.volume * 100.0)
+                            format!("Volume: {:.0}%", self.player.volume() * 100.0)
                         } else if let Ok(val) = arg.parse::<f32>() {
-                            let target = (val / 100.0).clamp(0.0, 1.0);
-                            self.set_volume(target);
-                            format!("Volume: {:.0}%", self.volume * 100.0)
+                            let target = (val / 100.0).clamp(0.0, 1.5);
+                            self.player.set_volume(target);
+                            format!("Volume: {:.0}%", self.player.volume() * 100.0)
                         } else {
                             "ERROR: Invalid volume argument".to_string()
                         }
                     }
                     C::Status => {
+                        let cur_vol = self.player.volume();
                         if let Some(t) = self.player.current() {
                             let state = if self.player.is_paused() {
                                 "⏸ Paused"
@@ -1377,22 +1379,21 @@ impl App {
                                 format!("{:02}:{:02}", el.as_secs() / 60, el.as_secs() % 60);
                             let dur_str = t
                                 .duration
-                                .map(|d| {
-                                    format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60)
-                                })
+                                .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
                                 .unwrap_or_else(|| "--:--".into());
                             let artist = t.artist.as_deref().unwrap_or("Unknown Artist");
                             format!(
                                 "{state}: {} - {} [{el_str}/{dur_str}] (Vol: {:.0}%)",
                                 artist,
                                 t.title,
-                                self.volume * 100.0
+                                cur_vol * 100.0
                             )
                         } else {
                             "⏹ Stopped: No track playing".to_string()
                         }
                     }
                     C::StatusJson => {
+                        let cur_vol = self.player.volume();
                         if let Some(t) = self.player.current() {
                             let state = if self.player.is_paused() {
                                 "paused"
@@ -1408,7 +1409,7 @@ impl App {
                                 t.title.replace('"', "\\\""),
                                 artist.replace('"', "\\\""),
                                 album.replace('"', "\\\""),
-                                self.volume * 100.0
+                                cur_vol * 100.0
                             )
                         } else {
                             "{\"status\":\"stopped\",\"title\":\"\",\"artist\":\"\",\"album\":\"\",\"elapsed_secs\":0,\"duration_secs\":0,\"volume\":0}".to_string()
