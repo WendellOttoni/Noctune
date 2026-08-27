@@ -2,10 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
     app::{
-        prefetch::SlotKind,
-        scan::scan_library_with_progress,
-        types::Pane,
-        util::parse_spotify_url,
+        prefetch::SlotKind, scan::scan_library_with_progress, types::Pane, util::parse_spotify_url,
         App,
     },
     audio::Track,
@@ -416,7 +413,9 @@ impl App {
 
     pub(crate) fn share_publish_current(&mut self) {
         let title = if self.share_playlist_title.trim().is_empty() {
-            self.active_playlist_name.clone().unwrap_or_else(|| "Minha Playlist".into())
+            self.active_playlist_name
+                .clone()
+                .unwrap_or_else(|| "Minha Playlist".into())
         } else {
             self.share_playlist_title.trim().to_string()
         };

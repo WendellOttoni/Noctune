@@ -1737,10 +1737,7 @@ impl App {
                 if let Some(dur) = target_dur {
                     self.seek_to_async(dur);
                     self.lyrics_auto_scroll = true;
-                    self.set_info(format!(
-                        "Letra: saltou para {}",
-                        format_duration(dur)
-                    ));
+                    self.set_info(format!("Letra: saltou para {}", format_duration(dur)));
                 }
             }
             _ => {}
@@ -1819,34 +1816,51 @@ impl App {
         }
         if rect_contains(prog, x, y) && prog.width > 0 {
             let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
-            if let Err(e) = self.seek_fraction_async(frac) {
-                self.set_info(format!("Seek error: {e}"));
+            if let Some(dur) = self.player.duration() {
+                let target = Duration::from_secs_f32(dur.as_secs_f32() * frac);
+                self.seek_to_async(target);
             }
         }
     }
 }
 
-fn fuzzy_score(pattern: &str, text: &str) -> Option<i64> {
+pub(crate) fn fuzzy_match_simple(pattern: &str, target: &str) -> Option<i64> {
     let p_lower = pattern.to_lowercase();
-    let t_lower = text.to_lowercase();
+    let t_lower = target.to_lowercase();
+    let mut p_chars = p_lower.chars().peekable();
+    let mut score = 0i64;
+    let mut last_idx = 0;
 
-    if let Some(pos) = t_lower.find(&p_lower) {
-        return Some(1000 - (pos as i64 * 10) - (t_lower.len() as i64));
+    for (i, c) in t_lower.chars().enumerate() {
+        if let Some(&p) = p_chars.peek() {
+            if c == p {
+                p_chars.next();
+                score += 10;
+                if i == last_idx + 1 {
+                    score += 5; // Consecutive bonus
+                }
+                last_idx = i;
+                if p_chars.peek().is_none() {
+                    break;
+                }
+            }
+        }
     }
 
-    let mut score = 0i64;
-    let mut t_chars = t_lower.char_indices();
-    let mut last_idx = 0;
-    for pc in p_lower.chars() {
-        loop {
-            match t_chars.next() {
-                Some((idx, tc)) if tc == pc => {
-                    if idx == last_idx {
-                        score += 40;
-                    } else {
-                        score += 10;
+    if p_chars.peek().is_some() {
+        return None;
+    }
+
+    let mut words = p_lower.split_whitespace();
+    for word in words.by_ref() {
+        let mut chars = word.chars();
+        while let Some(wc) = chars.next() {
+            match t_lower.find(wc) {
+                Some(idx) => {
+                    score += 2;
+                    if idx == 0 || t_lower.chars().nth(idx - 1) == Some(' ') {
+                        score += 10; // Word start bonus
                     }
-                    last_idx = idx + 1;
                     break;
                 }
                 Some(_) => {}
@@ -1856,4 +1870,3 @@ fn fuzzy_score(pattern: &str, text: &str) -> Option<i64> {
     }
     Some(score - (t_lower.len() as i64))
 }
-

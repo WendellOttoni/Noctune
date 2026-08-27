@@ -5,7 +5,9 @@ use std::time::Duration;
 use crate::audio::Track;
 
 use super::{
-    types::{LibraryRow, Pane, PlaylistEntry, RepeatMode, UndoSnapshot, ViewMode, MAX_UNDO_SNAPSHOTS},
+    types::{
+        LibraryRow, Pane, PlaylistEntry, RepeatMode, UndoSnapshot, ViewMode, MAX_UNDO_SNAPSHOTS,
+    },
     util::{pseudo_random, rg_scale},
     App,
 };
@@ -140,7 +142,9 @@ impl App {
             Ok(w) => w,
             Err(_) => return,
         };
-        if w.watch(&config_dir, notify::RecursiveMode::Recursive).is_ok() {
+        if w.watch(&config_dir, notify::RecursiveMode::Recursive)
+            .is_ok()
+        {
             self.config_watcher_rx = Some(rx);
             self._config_watcher = Some(w);
         }

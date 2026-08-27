@@ -16,9 +16,9 @@ use std::{path::PathBuf, time::Duration};
 use notify::Watcher as _;
 
 // Re-exports of submodules and types
-pub use self::types::*;
 use self::prefetch::{PrefetchSlots, PreloadedTrack, SlotKind};
 use self::scan::scan_library_with_progress;
+pub use self::types::*;
 use self::util::{rg_scale, sort_tracks};
 
 use crate::{
@@ -225,8 +225,9 @@ pub struct App {
     pub browse_search_editing: bool,
     pub browse_results: Vec<crate::share::api::SharedPlaylistSummary>,
     pub browse_row: usize,
-    pub(crate) browse_rx:
-        Option<std::sync::mpsc::Receiver<Result<Vec<crate::share::api::SharedPlaylistSummary>, String>>>,
+    pub(crate) browse_rx: Option<
+        std::sync::mpsc::Receiver<Result<Vec<crate::share::api::SharedPlaylistSummary>, String>>,
+    >,
     pub(crate) share_publish_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
 }
 
