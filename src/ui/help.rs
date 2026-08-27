@@ -86,6 +86,7 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from("    Shift+U      check and apply app update in-place"),
         Line::from("    i            open URL prompt"),
         Line::from("                 • YouTube / youtu.be links"),
+        Line::from("                 • SoundCloud links & scsearch:query"),
         Line::from("                 • ytsearch:query  (top 5 results)"),
         Line::from("                 • ytmsearch:query (YouTube Music)"),
         Line::from("                 • M3U / PLS radio playlist URLs"),
