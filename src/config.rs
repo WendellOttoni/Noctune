@@ -200,6 +200,8 @@ pub struct Keybinds {
     pub open_url: String,
     #[serde(default)]
     pub toggle_favorite: String,
+    #[serde(default)]
+    pub command_palette: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,6 +252,7 @@ impl Default for Config {
                 cycle_theme: String::new(),
                 open_url: String::new(),
                 toggle_favorite: String::new(),
+                command_palette: String::new(),
             },
             playback: Playback {
                 default_volume: 0.7,

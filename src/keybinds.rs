@@ -78,6 +78,8 @@ pub enum Action {
     ViewBrowser,
     /// Toggle the Karaoke / Synced Lyrics modal.
     ShowLyrics,
+    /// Open Unified Command Palette (#123).
+    CommandPalette,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -188,6 +190,7 @@ impl Bindings {
             (&kb.cycle_theme, Action::CycleTheme),
             (&kb.open_url, Action::OpenUrl),
             (&kb.toggle_favorite, Action::ToggleFavorite),
+            (&kb.command_palette, Action::CommandPalette),
         ];
         let mut table: Vec<(KeyChord, Action)> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
@@ -277,6 +280,10 @@ impl Bindings {
                 KeyChord::with_mods(KeyCode::Char('l'), KeyModifiers::CONTROL),
                 Action::LastfmPanel,
             ),
+            (
+                KeyChord::with_mods(KeyCode::Char('p'), KeyModifiers::CONTROL),
+                Action::CommandPalette,
+            ),
         ];
         for (c, a) in builtins {
             if !table.iter().any(|(c2, _)| c2 == c) {
@@ -362,4 +369,39 @@ mod tests {
         // "Ctrl+" splits into ["Ctrl", ""] — empty key has no valid mapping.
         assert!(parse_chord("Ctrl+").is_none());
     }
+
+    #[test]
+    fn command_palette_default_lookup() {
+        let (bindings, _) = Bindings::from_config(&Keybinds {
+            quit: "q".into(),
+            play_pause: "space".into(),
+            next: "n".into(),
+            prev: "p".into(),
+            volume_up: "+".into(),
+            volume_down: "-".into(),
+            seek_back: String::new(),
+            seek_forward: String::new(),
+            stop: String::new(),
+            shuffle: String::new(),
+            repeat: String::new(),
+            search: String::new(),
+            tab: String::new(),
+            enqueue: String::new(),
+            remove_from_queue: String::new(),
+            clear_queue: String::new(),
+            toggle_mini: String::new(),
+            toggle_view: String::new(),
+            rescan: String::new(),
+            help: String::new(),
+            cycle_theme: String::new(),
+            open_url: String::new(),
+            toggle_favorite: String::new(),
+            command_palette: String::new(),
+        });
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            Some(Action::CommandPalette)
+        );
+    }
 }
+

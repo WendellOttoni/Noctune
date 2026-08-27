@@ -190,6 +190,10 @@ pub struct App {
     pub show_lyrics: bool,
     pub lyrics_scroll: usize,
     pub lyrics_auto_scroll: bool,
+    pub show_command_palette: bool,
+    pub command_palette_input: String,
+    pub command_palette_row: usize,
+    pub command_palette_matches: Vec<PaletteItem>,
 }
 
 impl App {
@@ -483,6 +487,10 @@ impl App {
             show_lyrics: false,
             lyrics_scroll: 0,
             lyrics_auto_scroll: true,
+            show_command_palette: false,
+            command_palette_input: String::new(),
+            command_palette_row: 0,
+            command_palette_matches: Vec::new(),
         };
 
         let (update_tx, update_rx) = std::sync::mpsc::channel();

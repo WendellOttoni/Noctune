@@ -40,6 +40,11 @@ impl App {
             return;
         }
 
+        if self.show_command_palette {
+            self.handle_command_palette_key(key);
+            return;
+        }
+
         if self.show_audio_panel {
             self.handle_audio_panel_key(key);
             return;
@@ -595,6 +600,251 @@ impl App {
                     }
                 }
             }
+            Action::CommandPalette => {
+                self.show_command_palette = true;
+                self.command_palette_input.clear();
+                self.command_palette_row = 0;
+                self.update_command_palette_matches();
+            }
+        }
+    }
+
+    pub(crate) fn handle_command_palette_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_command_palette = false;
+                self.command_palette_input.clear();
+                self.command_palette_matches.clear();
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                if !self.command_palette_matches.is_empty() {
+                    self.command_palette_row =
+                        (self.command_palette_row + 1) % self.command_palette_matches.len();
+                }
+            }
+            KeyCode::Up | KeyCode::BackTab => {
+                if !self.command_palette_matches.is_empty() {
+                    self.command_palette_row = if self.command_palette_row == 0 {
+                        self.command_palette_matches.len() - 1
+                    } else {
+                        self.command_palette_row - 1
+                    };
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(item) = self
+                    .command_palette_matches
+                    .get(self.command_palette_row)
+                    .cloned()
+                {
+                    self.show_command_palette = false;
+                    self.command_palette_input.clear();
+                    self.command_palette_matches.clear();
+                    self.execute_palette_action(item.action);
+                }
+            }
+            KeyCode::Backspace => {
+                self.command_palette_input.pop();
+                self.command_palette_row = 0;
+                self.update_command_palette_matches();
+            }
+            KeyCode::Char(c) => {
+                self.command_palette_input.push(c);
+                self.command_palette_row = 0;
+                self.update_command_palette_matches();
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn execute_palette_action(&mut self, action: crate::app::types::PaletteAction) {
+        use crate::app::types::PaletteAction;
+        match action {
+            PaletteAction::Execute(act) => self.run_action(act),
+            PaletteAction::SetTheme(name) => self.apply_theme_by_name(&name),
+            PaletteAction::SetEqPreset(idx) => self.apply_eq_preset_by_idx(idx),
+            PaletteAction::PlayTrack(path) => self.play_track_by_path(&path),
+            PaletteAction::SetViewMode(mode) => {
+                self.view_mode = mode;
+                self.focus = Pane::Library;
+                self.set_info(format!("View: {}", mode.label()));
+            }
+        }
+    }
+
+    pub(crate) fn apply_theme_by_name(&mut self, name: &str) {
+        match crate::theme::Theme::load(name) {
+            Ok(t) => {
+                self.theme = t;
+                self.config.theme = name.to_string();
+                let _ = self.config.save();
+                self.set_info(format!("Tema aplicado: 🎨 {name}"));
+            }
+            Err(e) => self.set_error(format!("Erro ao carregar tema {name}: {e}")),
+        }
+    }
+
+    pub(crate) fn apply_eq_preset_by_idx(&mut self, idx: usize) {
+        let presets = crate::eq::PRESETS;
+        if let Some((name, state)) = presets.get(idx) {
+            self.eq_preset_idx = idx;
+            self.player.eq().set(*state);
+            self.config.playback.eq_preset = name.to_string();
+            let _ = self.config.save();
+            self.set_info(format!("Equalizador: 🎚️ {name}"));
+        }
+    }
+
+    pub(crate) fn play_track_by_path(&mut self, path: &std::path::Path) {
+        if let Some(pos) = self.queue.iter().position(|t| t.path == path) {
+            self.queue_index = Some(pos);
+            self.queue_state.select(Some(pos));
+            self.play_current();
+        } else if let Some(track) = self.library.iter().find(|t| t.path == path).cloned() {
+            self.queue.push(track);
+            let idx = self.queue.len() - 1;
+            self.queue_index = Some(idx);
+            self.queue_state.select(Some(idx));
+            self.play_current();
+        }
+    }
+
+    pub(crate) fn update_command_palette_matches(&mut self) {
+        use crate::app::types::{PaletteCategory, PaletteItem, PaletteAction};
+
+        let raw_query = self.command_palette_input.trim();
+        let is_cmd_mode = raw_query.starts_with('>') || raw_query.starts_with(':');
+        let query = if is_cmd_mode {
+            raw_query[1..].trim()
+        } else {
+            raw_query
+        };
+
+        let mut items: Vec<PaletteItem> = Vec::new();
+
+        // 1. Built-in Commands
+        let cmds = [
+            ("play", "Play / Pause", "Alternar reprodução e pausa", Action::PlayPause),
+            ("next", "Próxima Música", "Avançar para a próxima faixa da fila", Action::Next),
+            ("prev", "Música Anterior", "Voltar para a faixa anterior", Action::Prev),
+            ("stop", "Parar Reprodução", "Parar áudio e descarregar sink", Action::Stop),
+            ("shuffle", "Alternar Shuffle", "Ativar ou desativar modo aleatório", Action::Shuffle),
+            ("repeat", "Alternar Repeat", "Ciclar modos de repetição (off/all/one)", Action::Repeat),
+            ("mini", "Alternar Mini Player", "Alternar modo compacto com capa de álbum", Action::ToggleMini),
+            ("eq", "Equalizador Tuner", "Abrir calibrador de frequências de áudio", Action::EqTuner),
+            ("audio", "Painel de Áudio & Compressor", "Ajustar dinâmica e ganho", Action::ShowAudioPanel),
+            ("viz", "Ciclar Visualizador FFT", "Mudar modo: spectrum, waveform, vu-meter...", Action::CycleVizMode),
+            ("lyrics", "Letras / Karaokê", "Abrir modal de letras sincronizadas (LRC)", Action::ShowLyrics),
+            ("radio", "Rádios Online", "Explorar diretório mundial de web rádios", Action::RadioBrowser),
+            ("spotify", "Spotify Browser", "Buscar e navegar nas playlists do Spotify", Action::SpotifyBrowser),
+            ("playlists", "Gerenciador de Playlists", "Salvar e carregar arquivos .m3u", Action::LoadPlaylist),
+            ("rescan", "Reescanear Biblioteca", "Procurar novos arquivos de música no disco", Action::Rescan),
+            ("stats", "Estatísticas de Audição", "Ver artistas e gêneros mais tocados", Action::ShowStats),
+            ("lastfm", "Painel Last.fm", "Ver histórico de scrobbling e tops", Action::LastfmPanel),
+            ("fav", "Favoritar Música Atual (♥)", "Adicionar/remover dos favoritos", Action::ToggleFavorite),
+            ("sleep", "Sleep Timer", "Temporizador de 30min para desligamento", Action::SleepTimer),
+            ("tags", "Editor de Tags ID3", "Editar título, artista e álbum do arquivo", Action::EditTags),
+            ("help", "Ajuda & Atalhos", "Ver lista completa de atalhos do teclado", Action::Help),
+            ("update", "Verificar Atualizações", "Checar nova versão no GitHub", Action::SelfUpdate),
+            ("quit", "Sair do Noctune", "Fechar o player", Action::Quit),
+        ];
+
+        for (id, title, desc, act) in cmds {
+            items.push(PaletteItem {
+                id: id.to_string(),
+                title: title.to_string(),
+                description: desc.to_string(),
+                category: PaletteCategory::Command,
+                action: PaletteAction::Execute(act),
+            });
+        }
+
+        // 2. Views
+        let views = [
+            ("view-library", "Visão: Biblioteca Flat", "Ver lista completa de músicas", ViewMode::Flat),
+            ("view-albums", "Visão: Por Álbuns", "Ver biblioteca agrupada por álbum", ViewMode::Albums),
+            ("view-smart", "Visão: Playlists Inteligentes", "Mais tocadas, favoritas e recentes", ViewMode::Smart),
+            ("view-browser", "Visão: Explorador de Pastas", "Navegar no sistema de arquivos", ViewMode::Browser),
+            ("view-radio", "Visão: Hub de Rádios", "Painel dedicado para estações online", ViewMode::Radio),
+            ("view-recent", "Visão: Tocadas Recentemente", "Histórico de reprodução", ViewMode::RecentlyPlayed),
+        ];
+        for (id, title, desc, mode) in views {
+            items.push(PaletteItem {
+                id: id.to_string(),
+                title: title.to_string(),
+                description: desc.to_string(),
+                category: PaletteCategory::View,
+                action: PaletteAction::SetViewMode(mode),
+            });
+        }
+
+        // 3. Themes
+        let available_themes = [
+            "default", "catppuccin", "dracula", "nord", "tokyonight",
+            "gruvbox", "monokai", "solarized-dark", "cyberpunk", "rose-pine", "synthwave", "amoled"
+        ];
+        for t in available_themes {
+            items.push(PaletteItem {
+                id: format!("theme-{t}"),
+                title: format!("Tema: {t}"),
+                description: "Aplicar tema visual".to_string(),
+                category: PaletteCategory::Theme,
+                action: PaletteAction::SetTheme(t.to_string()),
+            });
+        }
+
+        // 4. EQ Presets
+        for (i, (name, st)) in crate::eq::PRESETS.iter().enumerate() {
+            items.push(PaletteItem {
+                id: format!("eq-{name}"),
+                title: format!("EQ Preset: {name}"),
+                description: format!("Graves {:+.0}dB · Médios {:+.0}dB · Agudos {:+.0}dB", st.low_db, st.mid_db, st.high_db),
+                category: PaletteCategory::EqPreset,
+                action: PaletteAction::SetEqPreset(i),
+            });
+        }
+
+        // 5. If query is not command-mode, also search library tracks
+        if !is_cmd_mode && !query.is_empty() {
+            let q_lower = query.to_lowercase();
+            let mut count = 0;
+            for t in &self.library {
+                if count >= 30 {
+                    break;
+                }
+                if t.title.to_lowercase().contains(&q_lower)
+                    || t.artist.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                    || t.album.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                {
+                    let dur_str = t.duration.map(format_duration).unwrap_or_else(|| "--:--".into());
+                    let desc = format!("{} • {}", t.album.as_deref().unwrap_or("Sem Álbum"), dur_str);
+                    items.push(PaletteItem {
+                        id: format!("track-{}", t.path.display()),
+                        title: t.display(),
+                        description: desc,
+                        category: PaletteCategory::Track,
+                        action: PaletteAction::PlayTrack(t.path.clone()),
+                    });
+                    count += 1;
+                }
+            }
+        }
+
+        // Filter and sort by fuzzy score
+        if query.is_empty() {
+            self.command_palette_matches = items;
+        } else {
+            let mut scored: Vec<(i64, PaletteItem)> = items
+                .into_iter()
+                .filter_map(|item| {
+                    let score_title = fuzzy_score(query, &item.title);
+                    let score_desc = fuzzy_score(query, &item.description).map(|s| s / 2);
+                    let best = score_title.max(score_desc);
+                    best.map(|s| (s, item))
+                })
+                .collect();
+            scored.sort_by(|a, b| b.0.cmp(&a.0));
+            self.command_palette_matches = scored.into_iter().map(|(_, item)| item).collect();
         }
     }
 
@@ -1208,3 +1458,35 @@ impl App {
         }
     }
 }
+
+fn fuzzy_score(pattern: &str, text: &str) -> Option<i64> {
+    let p_lower = pattern.to_lowercase();
+    let t_lower = text.to_lowercase();
+
+    if let Some(pos) = t_lower.find(&p_lower) {
+        return Some(1000 - (pos as i64 * 10) - (t_lower.len() as i64));
+    }
+
+    let mut score = 0i64;
+    let mut t_chars = t_lower.char_indices();
+    let mut last_idx = 0;
+    for pc in p_lower.chars() {
+        loop {
+            match t_chars.next() {
+                Some((idx, tc)) if tc == pc => {
+                    if idx == last_idx {
+                        score += 40;
+                    } else {
+                        score += 10;
+                    }
+                    last_idx = idx + 1;
+                    break;
+                }
+                Some(_) => {}
+                None => return None,
+            }
+        }
+    }
+    Some(score - (t_lower.len() as i64))
+}
+

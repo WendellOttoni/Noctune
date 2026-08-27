@@ -29,6 +29,7 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
         Line::from("    ← / →        seek -5s / +5s"),
         Line::from("    + / -        volume up / down"),
         Line::from("    m            toggle mini mode"),
+        Line::from("    Ctrl+P       open Command Palette (search & actions)"),
         Line::from(""),
         Line::from("  Library / Queue"),
         Line::from("    Tab          switch focus"),

@@ -1604,3 +1604,154 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
         f.render_widget(Paragraph::new(msg), inner);
     }
 }
+
+pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
+    let w = 78.min(area.width.saturating_sub(4)).max(40);
+    let h = 18.min(area.height.saturating_sub(4)).max(10);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 4,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, popup);
+
+    let secondary = parse_color(&app.theme.colors.secondary);
+    let accent = parse_color(&app.theme.colors.accent);
+    let muted = parse_color(&app.theme.colors.muted);
+    let fg = parse_color(&app.theme.colors.foreground);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.border(true))
+        .title(Span::styled(
+            " 🔍 Command Palette [Ctrl+P / Esc: fechar · Enter: executar · ↑↓: navegar] ",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Input prompt line
+            Constraint::Length(1), // Separator line
+            Constraint::Min(4),    // Matches list
+            Constraint::Length(1), // Footer count / hint
+        ])
+        .split(inner);
+
+    // 1. Input prompt line
+    let prompt_icon = if app.command_palette_input.starts_with('>') || app.command_palette_input.starts_with(':') {
+        Span::styled(" > ", Style::default().fg(accent).add_modifier(Modifier::BOLD))
+    } else {
+        Span::styled(" 🔍 ", Style::default().fg(secondary))
+    };
+    let input_text = Span::styled(
+        &app.command_palette_input,
+        Style::default().fg(fg).add_modifier(Modifier::BOLD),
+    );
+    let cursor = Span::styled(
+        "█",
+        Style::default().fg(accent),
+    );
+    let placeholder = if app.command_palette_input.is_empty() {
+        Span::styled(
+            " Digite para buscar comandos, músicas, temas ou '>' para ações…",
+            Style::default().fg(muted),
+        )
+    } else {
+        Span::raw("")
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![prompt_icon, input_text, cursor, placeholder])),
+        chunks[0],
+    );
+
+    // 2. Separator
+    let sep = "─".repeat(chunks[1].width as usize);
+    f.render_widget(
+        Paragraph::new(Span::styled(sep, Style::default().fg(muted))),
+        chunks[1],
+    );
+
+    // 3. Matches list
+    let list_area = chunks[2];
+    let max_visible = list_area.height as usize;
+    let total_matches = app.command_palette_matches.len();
+
+    if total_matches == 0 {
+        let empty_msg = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "   Nenhum resultado correspondente para a busca.",
+                Style::default().fg(muted),
+            )),
+        ];
+        f.render_widget(Paragraph::new(empty_msg), list_area);
+    } else {
+        let selected = app.command_palette_row.min(total_matches.saturating_sub(1));
+        let scroll_offset = if selected >= max_visible {
+            selected - max_visible + 1
+        } else {
+            0
+        };
+
+        let mut lines = Vec::new();
+        for (i, item) in app
+            .command_palette_matches
+            .iter()
+            .enumerate()
+            .skip(scroll_offset)
+            .take(max_visible)
+        {
+            let is_sel = i == selected;
+            let icon = item.category.icon();
+            let cat_label = item.category.label();
+
+            let (prefix, title_style, desc_style) = if is_sel {
+                (
+                    " ▶ ",
+                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
+                    Style::default().fg(fg),
+                )
+            } else {
+                (
+                    "   ",
+                    Style::default().fg(fg),
+                    Style::default().fg(muted),
+                )
+            };
+
+            let cat_span = Span::styled(
+                format!(" [{icon} {cat_label}] "),
+                Style::default().fg(if is_sel { secondary } else { muted }),
+            );
+            let title_span = Span::styled(format!("{:<30} ", item.title), title_style);
+            let desc_span = Span::styled(&item.description, desc_style);
+
+            let row_line = Line::from(vec![
+                Span::styled(prefix, Style::default().fg(accent)),
+                cat_span,
+                title_span,
+                desc_span,
+            ]);
+
+            lines.push(row_line);
+        }
+        f.render_widget(Paragraph::new(lines), list_area);
+    }
+
+    // 4. Footer
+    let footer_text = format!(
+        " {}/{} resultados ",
+        if total_matches > 0 { app.command_palette_row + 1 } else { 0 },
+        total_matches
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(footer_text, Style::default().fg(muted))),
+        chunks[3],
+    );
+}
+

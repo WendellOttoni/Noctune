@@ -87,4 +87,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_lyrics {
         render_lyrics_modal(f, area, app);
     }
+    if app.show_command_palette {
+        render_command_palette(f, area, app);
+    }
 }

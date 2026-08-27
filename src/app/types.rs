@@ -234,3 +234,56 @@ impl ViewMode {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteCategory {
+    Command,
+    Theme,
+    EqPreset,
+    Track,
+    Radio,
+    View,
+}
+
+impl PaletteCategory {
+    pub fn label(self) -> &'static str {
+        match self {
+            PaletteCategory::Command => "Comando",
+            PaletteCategory::Theme => "Tema",
+            PaletteCategory::EqPreset => "Equalizador",
+            PaletteCategory::Track => "Música",
+            PaletteCategory::Radio => "Rádio",
+            PaletteCategory::View => "Visão",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            PaletteCategory::Command => "⚡",
+            PaletteCategory::Theme => "🎨",
+            PaletteCategory::EqPreset => "🎚️",
+            PaletteCategory::Track => "🎵",
+            PaletteCategory::Radio => "📻",
+            PaletteCategory::View => "👁️",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaletteAction {
+    Execute(crate::keybinds::Action),
+    SetTheme(String),
+    SetEqPreset(usize),
+    PlayTrack(PathBuf),
+    SetViewMode(ViewMode),
+}
+
+#[derive(Debug, Clone)]
+pub struct PaletteItem {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub category: PaletteCategory,
+    pub action: PaletteAction,
+}
+
