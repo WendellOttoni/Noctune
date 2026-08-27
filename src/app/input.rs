@@ -865,8 +865,16 @@ impl App {
                         .iter()
                         .filter(|t| {
                             t.title.to_lowercase().contains(&q_lower)
-                                || t.artist.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
-                                || t.album.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                                || t.artist
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .to_lowercase()
+                                    .contains(&q_lower)
+                                || t.album
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .to_lowercase()
+                                    .contains(&q_lower)
                         })
                         .take(40)
                         .cloned()
@@ -880,8 +888,16 @@ impl App {
                     .iter()
                     .filter(|t| {
                         t.title.to_lowercase().contains(&q_lower)
-                            || t.artist.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
-                            || t.album.as_deref().unwrap_or("").to_lowercase().contains(&q_lower)
+                            || t.artist
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .contains(&q_lower)
+                            || t.album
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .contains(&q_lower)
                     })
                     .take(40)
                     .cloned()
@@ -889,8 +905,15 @@ impl App {
             };
 
             for t in matched_tracks.into_iter().take(40) {
-                let dur_str = t.duration.map(format_duration).unwrap_or_else(|| "--:--".into());
-                let desc = format!("{} • {}", t.album.as_deref().unwrap_or("Sem Álbum"), dur_str);
+                let dur_str = t
+                    .duration
+                    .map(format_duration)
+                    .unwrap_or_else(|| "--:--".into());
+                let desc = format!(
+                    "{} • {}",
+                    t.album.as_deref().unwrap_or("Sem Álbum"),
+                    dur_str
+                );
                 items.push(PaletteItem {
                     id: format!("track-{}", t.path.display()),
                     title: t.display(),
@@ -1179,14 +1202,19 @@ impl App {
                 let all: Vec<(&str, crate::eq::EqState)> = builtins
                     .iter()
                     .map(|(n, s)| (*n, *s))
-                    .chain(self.custom_eq_presets.iter().map(|p| {
-                        (p.name.as_str(), p.to_eq_state())
-                    }))
+                    .chain(
+                        self.custom_eq_presets
+                            .iter()
+                            .map(|p| (p.name.as_str(), p.to_eq_state())),
+                    )
                     .collect();
                 let next = all
                     .iter()
                     .position(|(_, s)| {
-                        s.bands.iter().zip(snap.bands.iter()).all(|(a, b)| (a - b).abs() < 0.1)
+                        s.bands
+                            .iter()
+                            .zip(snap.bands.iter())
+                            .all(|(a, b)| (a - b).abs() < 0.1)
                     })
                     .map(|i| (i + 1) % all.len())
                     .unwrap_or(0);
@@ -1816,51 +1844,34 @@ impl App {
         }
         if rect_contains(prog, x, y) && prog.width > 0 {
             let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
-            if let Some(dur) = self.player.duration() {
-                let target = Duration::from_secs_f32(dur.as_secs_f32() * frac);
-                self.seek_to_async(target);
+            if let Err(e) = self.seek_fraction_async(frac) {
+                self.set_info(format!("Seek error: {e}"));
             }
         }
     }
 }
 
-pub(crate) fn fuzzy_match_simple(pattern: &str, target: &str) -> Option<i64> {
+fn fuzzy_score(pattern: &str, text: &str) -> Option<i64> {
     let p_lower = pattern.to_lowercase();
-    let t_lower = target.to_lowercase();
-    let mut p_chars = p_lower.chars().peekable();
+    let t_lower = text.to_lowercase();
+
+    if let Some(pos) = t_lower.find(&p_lower) {
+        return Some(1000 - (pos as i64 * 10) - (t_lower.len() as i64));
+    }
+
     let mut score = 0i64;
+    let mut t_chars = t_lower.char_indices();
     let mut last_idx = 0;
-
-    for (i, c) in t_lower.chars().enumerate() {
-        if let Some(&p) = p_chars.peek() {
-            if c == p {
-                p_chars.next();
-                score += 10;
-                if i == last_idx + 1 {
-                    score += 5; // Consecutive bonus
-                }
-                last_idx = i;
-                if p_chars.peek().is_none() {
-                    break;
-                }
-            }
-        }
-    }
-
-    if p_chars.peek().is_some() {
-        return None;
-    }
-
-    let mut words = p_lower.split_whitespace();
-    for word in words.by_ref() {
-        let mut chars = word.chars();
-        while let Some(wc) = chars.next() {
-            match t_lower.find(wc) {
-                Some(idx) => {
-                    score += 2;
-                    if idx == 0 || t_lower.chars().nth(idx - 1) == Some(' ') {
-                        score += 10; // Word start bonus
+    for pc in p_lower.chars() {
+        loop {
+            match t_chars.next() {
+                Some((idx, tc)) if tc == pc => {
+                    if idx == last_idx {
+                        score += 40;
+                    } else {
+                        score += 10;
                     }
+                    last_idx = idx + 1;
                     break;
                 }
                 Some(_) => {}
