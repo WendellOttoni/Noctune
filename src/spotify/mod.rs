@@ -1,4 +1,5 @@
 pub mod api;
+pub mod native;
 pub mod oauth;
 
 use anyhow::Result;
@@ -6,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub use api::SpotifyApi;
+pub use native::NativeSpotifySession;
 #[allow(unused_imports)]
 pub use oauth::AuthSession;
 pub use oauth::{authorize, exchange_code, refresh_token};

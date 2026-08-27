@@ -206,6 +206,7 @@ pub struct App {
         Option<std::sync::mpsc::Receiver<Result<crate::subsonic::SubsonicFetchResult, String>>>,
     pub plugins: Option<crate::plugin::PluginEngine>,
     pub db: Option<crate::db::LibraryDatabase>,
+    pub native_spotify: Option<crate::spotify::NativeSpotifySession>,
 }
 
 impl App {
@@ -514,7 +515,14 @@ impl App {
             subsonic_rx: None,
             plugins: None,
             db: None,
+            native_spotify: None,
         };
+
+        if let Some(tokens) = crate::spotify::load_tokens() {
+            let mut native_sess = crate::spotify::NativeSpotifySession::new("Noctune".to_string());
+            let _ = native_sess.start(&tokens.access_token);
+            app.native_spotify = Some(native_sess);
+        }
 
         if let Ok(p) = crate::config::db_path() {
             if let Ok(database) = crate::db::LibraryDatabase::open(&p) {
