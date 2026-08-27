@@ -10,6 +10,7 @@ use ratatui::{
 
 use crate::theme::{parse_color, Theme};
 
+#[derive(Clone, Copy)]
 struct ShortcutSection {
     icon: &'static str,
     title: &'static str,
