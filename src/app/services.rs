@@ -1108,4 +1108,37 @@ impl App {
         let _ = std::io::Write::write_all(&mut out, bytes);
         let _ = std::io::Write::flush(&mut out);
     }
+
+    pub(crate) fn download_current(&mut self) {
+        let Some(track) = self.player.current().cloned() else {
+            self.set_info("Nenhuma faixa em reprodução para download.");
+            return;
+        };
+
+        let path_str = track.path.to_string_lossy();
+        if !path_str.starts_with("http://")
+            && !path_str.starts_with("https://")
+            && !path_str.starts_with("ytsearch:")
+            && !path_str.starts_with("scsearch:")
+        {
+            self.set_info("Esta faixa já é um arquivo local no disco.");
+            return;
+        }
+
+        if self.download_rx.is_some() {
+            self.set_info("Já existe um download em andamento. Aguarde terminar.");
+            return;
+        }
+
+        let dest_dir = self
+            .config
+            .music_dirs
+            .first()
+            .cloned()
+            .unwrap_or_else(|| std::path::PathBuf::from("./Music"));
+
+        self.set_info(format!("⏳ Iniciando download de '{}'…", track.title));
+        let rx = crate::downloader::DownloadService::start_download(track, dest_dir);
+        self.download_rx = Some(rx);
+    }
 }

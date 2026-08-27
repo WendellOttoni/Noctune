@@ -90,6 +90,8 @@ pub enum Action {
     BrowsePlaylists,
     /// Toggle Endless Mode / Smart Auto-Play (#133).
     ToggleEndlessMode,
+    /// Download & cache current streaming track to local disk (#134).
+    DownloadCurrent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

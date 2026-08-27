@@ -76,6 +76,7 @@ pub struct App {
     pub last_drag_seek: Option<std::time::Instant>,
     pub clear_confirm_until: Option<std::time::Instant>,
     pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
+    pub download_rx: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
     pub load_rx: Option<std::sync::mpsc::Receiver<Result<crate::audio::SymphoniaSource, String>>>,
     pub loading_track: Option<Track>,
     pub pending_seek_offset: Option<Duration>,
@@ -412,6 +413,7 @@ impl App {
             last_drag_seek: None,
             clear_confirm_until: None,
             url_rx: None,
+            download_rx: None,
             load_rx: None,
             loading_track: None,
             pending_seek_offset: None,
@@ -1245,6 +1247,51 @@ impl App {
                 }
             }
         }
+
+        if let Some(rx) = &self.download_rx {
+            match rx.try_recv() {
+                Ok(Ok(path)) => {
+                    let file_name = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("audio.mp3")
+                        .to_string();
+                    let meta = crate::metadata::probe_full(&path);
+                    let track = Track {
+                        path: path.clone(),
+                        title: meta.title.unwrap_or_else(|| file_name.clone()),
+                        artist: meta.artist,
+                        album: meta.album,
+                        genre: meta.genre,
+                        year: meta.year,
+                        duration: meta.duration,
+                        replaygain_track_db: None,
+                        replaygain_album_db: None,
+                        cover_url: None,
+                        added_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .ok()
+                            .map(|d| d.as_secs()),
+                    };
+                    self.tracks.push(track.clone());
+                    if let Some(db) = &self.db {
+                        let _ = db.insert_track(&track);
+                    }
+                    self.library_revision = self.library_revision.wrapping_add(1);
+                    self.set_info(format!("💾 Download concluído e salvo: {file_name}"));
+                    self.download_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.set_error(format!("Falha no download: {e}"));
+                    self.download_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.download_rx = None;
+                }
+            }
+        }
+
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
                 self.player.stop();

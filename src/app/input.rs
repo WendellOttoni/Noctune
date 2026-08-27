@@ -17,6 +17,10 @@ impl App {
             self.should_quit = true;
             return;
         }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('d')) {
+            self.download_current();
+            return;
+        }
 
         if self.show_help {
             match key.code {
@@ -666,6 +670,7 @@ impl App {
                     }
                 ));
             }
+            Action::DownloadCurrent => self.download_current(),
         }
     }
 
@@ -904,6 +909,12 @@ impl App {
                 "Alternar Modo Infinito (Auto-Play)",
                 "Tocar músicas similares ao fim da fila",
                 Action::ToggleEndlessMode,
+            ),
+            (
+                "download",
+                "Salvar Faixa Atual Offline",
+                "Baixar áudio de streaming para biblioteca local",
+                Action::DownloadCurrent,
             ),
             (
                 "rescan",

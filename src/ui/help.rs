@@ -81,6 +81,7 @@ const RIGHT_SECTIONS: &[ShortcutSection] = &[
             ("Ctrl+N", "Subsonic / Navidrome Cloud"),
             ("i", "Prompt de URL: YouTube, SoundCloud..."),
             ("P / @", "Spotify Browser & Playback nativo"),
+            ("Ctrl+D", "Baixar stream atual para disco"),
             ("F", "Integração & Scrobbling Last.fm"),
         ],
     },

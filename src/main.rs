@@ -8,6 +8,7 @@ mod compressor;
 mod config;
 mod db;
 mod discord;
+mod downloader;
 mod eq;
 mod history;
 mod keybinds;
