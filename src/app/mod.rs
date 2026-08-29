@@ -184,6 +184,7 @@ pub struct App {
     pub radio_search_editing: bool,
     pub radio_search_rx:
         Option<std::sync::mpsc::Receiver<Result<Vec<crate::radio_browser::RadioStation>, String>>>,
+    pub radio_history: Vec<(String, Option<String>, u64)>,
     pub update_info: Option<crate::updater::UpdateInfo>,
     pub is_updating: bool,
     pub(crate) update_check_rx:
@@ -521,6 +522,7 @@ impl App {
             radio_search_query: String::new(),
             radio_search_editing: false,
             radio_search_rx: None,
+            radio_history: Vec::new(),
             update_info: None,
             is_updating: false,
             update_check_rx: None,
@@ -1130,6 +1132,18 @@ impl App {
                 (None, title.clone())
             };
 
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let entry = (song.clone(), artist.clone(), now);
+            if !self.radio_history.iter().any(|(s, a, _)| s == &song && a == &artist) {
+                self.radio_history.insert(0, entry);
+                if self.radio_history.len() > 30 {
+                    self.radio_history.pop();
+                }
+            }
+
             if let Some(current) = self.player.current_mut() {
                 if let Some(a) = &artist {
                     current.artist = Some(a.clone());
@@ -1204,6 +1218,12 @@ impl App {
         if let Some(rx) = &self.lyrics_rx {
             match rx.try_recv() {
                 Ok((track_path, Some(lyrics))) => {
+                    if track_path.exists() && !track_path.to_string_lossy().starts_with("http") {
+                        let lrc_path = track_path.with_extension("lrc");
+                        if !lrc_path.exists() {
+                            let _ = lyrics.save_to_file(&lrc_path);
+                        }
+                    }
                     if self
                         .player
                         .current()

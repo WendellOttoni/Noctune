@@ -130,6 +130,18 @@ impl Lyrics {
         }
         idx
     }
+
+    pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
+        let mut text = String::new();
+        for line in &self.lines {
+            let total_sec = line.at.as_secs();
+            let min = total_sec / 60;
+            let sec = total_sec % 60;
+            let cs = line.at.subsec_millis() / 10;
+            text.push_str(&format!("[{:02}:{:02}.{:02}]{}\n", min, sec, cs, line.text));
+        }
+        fs::write(path, text)
+    }
 }
 
 #[derive(Debug, Deserialize)]

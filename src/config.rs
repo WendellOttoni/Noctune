@@ -452,6 +452,10 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(project_dirs()?.data_dir().join("library.db"))
 }
 
+pub fn audio_cache_dir() -> Result<PathBuf> {
+    Ok(project_dirs()?.cache_dir().join("audio"))
+}
+
 pub fn eq_presets_path() -> Result<PathBuf> {
     Ok(project_dirs()?.config_dir().join("eq_presets.toml"))
 }

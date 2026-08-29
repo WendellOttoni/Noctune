@@ -43,6 +43,7 @@ pub struct SymphoniaSource {
     track_id: u32,
     sample_rate: u32,
     channels: u16,
+    codec_name: String,
     buf: Vec<f32>,
     buf_pos: usize,
     sample_buf: Option<SampleBuffer<f32>>,
@@ -78,6 +79,20 @@ impl SymphoniaSource {
             .channels
             .map(|c| c.count() as u16)
             .unwrap_or(2);
+        let codec_name = match track.codec_params.codec {
+            symphonia::core::codecs::CODEC_TYPE_MP3 => "MP3",
+            symphonia::core::codecs::CODEC_TYPE_AAC => "AAC",
+            symphonia::core::codecs::CODEC_TYPE_FLAC => "FLAC",
+            symphonia::core::codecs::CODEC_TYPE_VORBIS => "Vorbis (Ogg)",
+            symphonia::core::codecs::CODEC_TYPE_OPUS => "Opus",
+            symphonia::core::codecs::CODEC_TYPE_PCM_S16LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S24LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_S32LE
+            | symphonia::core::codecs::CODEC_TYPE_PCM_F32LE => "PCM / WAV",
+            symphonia::core::codecs::CODEC_TYPE_ALAC => "ALAC",
+            _ => "Audio",
+        }
+        .to_string();
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(|e| anyhow!("codec init: {e}"))?;
@@ -88,6 +103,7 @@ impl SymphoniaSource {
             track_id,
             sample_rate,
             channels,
+            codec_name,
             buf: Vec::new(),
             buf_pos: 0,
             sample_buf: None,
@@ -215,6 +231,10 @@ impl SymphoniaSource {
             }
         }
     }
+
+    pub fn codec_name(&self) -> &str {
+        &self.codec_name
+    }
 }
 
 impl Drop for SymphoniaSource {
@@ -285,6 +305,9 @@ pub struct Player {
     comp: CompHandle,
     pub rg_scale: f32,
     pub speed: f32,
+    pub current_sample_rate: u32,
+    pub current_channels: u16,
+    pub current_codec: String,
     // crossfade state
     fade_sink: Option<Sink>,
     fade_current: Option<Track>,
@@ -392,6 +415,9 @@ impl Player {
             comp: CompHandle::new(),
             rg_scale: 1.0,
             speed: 1.0,
+            current_sample_rate: 44100,
+            current_channels: 2,
+            current_codec: "—".into(),
             fade_sink: None,
             fade_current: None,
             fade_started_at: None,
@@ -527,6 +553,9 @@ impl Player {
     ) -> Result<()> {
         self.cancel_crossfade();
         self.gapless_queued = None;
+        self.current_sample_rate = source.sample_rate;
+        self.current_channels = source.channels;
+        self.current_codec = source.codec_name.clone();
         let viz = VizSource::new(source, self.tap.clone());
         let eq = EqSource::new(viz, self.eq.clone());
         let comp = CompSource::new(eq, self.comp.clone());
@@ -1026,6 +1055,26 @@ fn open_http_stream(
     url: &str,
     stream_title: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
+    let lower = url.to_lowercase();
+    let direct_url = if lower.ends_with(".pls")
+        || lower.ends_with(".m3u")
+        || lower.ends_with(".m3u8")
+        || lower.contains(".pls?")
+        || lower.contains(".m3u?")
+    {
+        if let Ok(tracks) = crate::radio::fetch_playlist(url) {
+            if let Some(first) = tracks.first() {
+                first.path.to_string_lossy().to_string()
+            } else {
+                url.to_string()
+            }
+        } else {
+            url.to_string()
+        }
+    } else {
+        url.to_string()
+    };
+
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(concat!(
@@ -1035,14 +1084,14 @@ fn open_http_stream(
         .build()?;
 
     let resp = client
-        .get(url)
+        .get(&direct_url)
         .header("Icy-MetaData", "1")
         .header("Accept", "*/*")
         .send()
-        .with_context(|| format!("GET {url}"))?;
+        .with_context(|| format!("GET {direct_url}"))?;
 
     if !resp.status().is_success() {
-        return Err(anyhow!("{url} returned HTTP {}", resp.status()));
+        return Err(anyhow!("{direct_url} returned HTTP {}", resp.status()));
     }
 
     let mut hint = Hint::new();

@@ -30,6 +30,13 @@ pub fn render_visualizer(f: &mut Frame, area: Rect, app: &App) {
         crate::app::VizMode::VuMeter => render_viz_vu(f, inner, app),
         crate::app::VizMode::Waterfall => render_viz_waterfall(f, inner, app),
         crate::app::VizMode::Oscilloscope => render_viz_oscilloscope(f, inner, app),
+        crate::app::VizMode::CoverArt => {
+            if let Some(img) = &app.album_art {
+                crate::album_art::render_blocks(f, inner, img);
+            } else {
+                render_viz_spectrum(f, inner, app);
+            }
+        }
     }
 }
 

@@ -20,7 +20,7 @@ fn yt_dlp_install_hint() -> &'static str {
 /// Locate yt-dlp. On Windows the process PATH may differ from the user's shell PATH
 /// (e.g. winget-installed binary not yet visible to an already-running launcher), so
 /// also probe the standard winget shim directories before giving up (issue #55, bug 3).
-fn yt_dlp_executable() -> String {
+pub(crate) fn yt_dlp_executable() -> String {
     if cfg!(target_os = "windows") {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
             let candidates = [
@@ -62,6 +62,8 @@ fn classify(stderr_lower: &str) -> YtErrorKind {
         || stderr_lower.contains("copyright")
         || stderr_lower.contains("not found")
         || stderr_lower.contains("404")
+        || stderr_lower.contains("403")
+        || stderr_lower.contains("forbidden")
     {
         return YtErrorKind::Permanent;
     }
@@ -237,20 +239,44 @@ fn download_via_tempfile(
     start_secs: Option<u64>,
     _stream_err: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
-    // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
-    // DASH WebM/Opus has higher bitrate but triggers "unsupported feature: core" in
-    // symphonia's Matroska reader when YouTube serves it as fragmented DASH segments.
-    let format_selector = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/18/bestaudio";
+    let cache_dir = crate::config::audio_cache_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&cache_dir);
 
-    let tmp_dir = std::env::temp_dir();
     let hash: u64 = youtube_url
         .bytes()
         .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    let tmp_pattern = tmp_dir
+    let is_seek = start_secs.is_some_and(|s| s > 0);
+
+    let base_dir = if is_seek {
+        std::env::temp_dir()
+    } else {
+        cache_dir
+    };
+    let base_path = base_dir.join(format!("noctune_{hash}"));
+
+    // Check if full track is already cached
+    if !is_seek {
+        for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
+            let path = base_path.with_extension(ext);
+            if path.exists() {
+                if let Ok(bytes) = std::fs::read(&path) {
+                    if !bytes.is_empty() {
+                        let hint = symphonia::core::probe::Hint::new();
+                        if let Ok(src) = SymphoniaSource::from_bytes(bytes, hint) {
+                            return Ok(src);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
+    let format_selector = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/18/bestaudio";
+    let pattern = base_dir
         .join(format!("noctune_{hash}.%(ext)s"))
         .to_string_lossy()
         .to_string();
-    let tmp_base = tmp_dir.join(format!("noctune_{hash}"));
 
     let mut args: Vec<String> = vec![
         "-f".into(),
@@ -258,7 +284,7 @@ fn download_via_tempfile(
         "--no-playlist".into(),
         "--no-warnings".into(),
         "-o".into(),
-        tmp_pattern.clone(),
+        pattern,
     ];
     if let Some(secs) = start_secs {
         args.push("--download-sections".into());
@@ -274,15 +300,21 @@ fn download_via_tempfile(
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(anyhow!("yt-dlp: {}", err.trim()));
+        let err_trim = err.trim();
+        if err_trim.contains("403") || err_trim.to_lowercase().contains("forbidden") {
+            return Err(anyhow!("yt-dlp: HTTP 403 Forbidden (atualize o yt-dlp com 'yt-dlp -U')"));
+        }
+        return Err(anyhow!("yt-dlp: {}", err_trim));
     }
 
     for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
-        let path = tmp_base.with_extension(ext);
+        let path = base_path.with_extension(ext);
         if path.exists() {
             let bytes =
                 std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-            let _ = std::fs::remove_file(&path);
+            if is_seek {
+                let _ = std::fs::remove_file(&path);
+            }
             let hint = symphonia::core::probe::Hint::new();
             return SymphoniaSource::from_bytes(bytes, hint).map_err(|e| anyhow!("decode: {e}"));
         }
@@ -412,11 +444,21 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
     });
 
     // webpage_url preferred; flat-playlist entries use "url"; fallback: construct from id
-    let watch_url = info.webpage_url.or(info.url).or_else(|| {
-        info.id
-            .as_ref()
-            .map(|id| format!("https://www.youtube.com/watch?v={id}"))
-    })?;
+    let watch_url = if let Some(wp) = info.webpage_url {
+        wp
+    } else if let Some(u) = info.url {
+        if u.starts_with("http://") || u.starts_with("https://") {
+            u
+        } else if let Some(id) = info.id.as_ref() {
+            format!("https://www.youtube.com/watch?v={id}")
+        } else {
+            format!("https://www.youtube.com/watch?v={u}")
+        }
+    } else if let Some(id) = info.id {
+        format!("https://www.youtube.com/watch?v={id}")
+    } else {
+        return None;
+    };
 
     let title = info.title.unwrap_or_else(|| "Unknown".to_string());
     let artist = info.uploader.or(info.channel);

@@ -17,66 +17,157 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
     let Some(track) = app.player.current() else {
         return;
     };
-    let meta = crate::metadata::probe_full(&track.path);
+    let is_local = track.path.exists() && !track.path.to_string_lossy().starts_with("http");
+    let meta = if is_local {
+        crate::metadata::probe_full(&track.path)
+    } else {
+        crate::metadata::TrackMetaFull::default()
+    };
+
+    let muted = parse_color(&app.theme.colors.muted);
+    let fg = parse_color(&app.theme.colors.foreground);
+    let accent = parse_color(&app.theme.colors.accent);
+
+    let section_header = |title: &str| -> Line<'static> {
+        Line::from(vec![
+            Span::styled(format!("── {} ", title), Style::default().fg(accent).add_modifier(Modifier::BOLD)),
+            Span::styled("─".repeat(40), Style::default().fg(muted)),
+        ])
+    };
 
     let row = |label: &str, value: String| -> Line<'static> {
         Line::from(vec![
             Span::styled(
-                format!("  {:<14}", label),
-                Style::default().fg(parse_color(&app.theme.colors.muted)),
+                format!("  {:<18}", label),
+                Style::default().fg(muted),
             ),
             Span::styled(
                 value,
-                Style::default().fg(parse_color(&app.theme.colors.foreground)),
+                Style::default().fg(fg),
             ),
         ])
     };
     let dash = "—".to_string();
 
-    let dur_str = meta
+    let dur_str = track
         .duration
+        .or(meta.duration)
         .map(|d| {
             let s = d.as_secs();
             format!("{:02}:{:02}", s / 60, s % 60)
         })
-        .unwrap_or_else(|| dash.clone());
+        .unwrap_or_else(|| {
+            if !is_local {
+                "Live Stream".to_string()
+            } else {
+                dash.clone()
+            }
+        });
 
     let rate_str = meta
         .sample_rate
-        .map(|r| format!("{} Hz", r))
-        .unwrap_or_else(|| dash.clone());
+        .map(|r| format!("{} Hz ({:.1} kHz)", r, r as f32 / 1000.0))
+        .unwrap_or_else(|| {
+            let r = app.player.current_sample_rate;
+            if r > 0 {
+                format!("{} Hz ({:.1} kHz)", r, r as f32 / 1000.0)
+            } else {
+                dash.clone()
+            }
+        });
+
     let chans_str = meta
         .channels
-        .map(|c| format!("{}", c))
-        .unwrap_or_else(|| dash.clone());
-    let bits_str = meta
-        .bits_per_sample
-        .map(|b| format!("{} bit", b))
-        .unwrap_or_else(|| dash.clone());
+        .map(|c| if c == 2 { "Stereo (2ch)".into() } else if c == 1 { "Mono (1ch)".into() } else { format!("{c} canais") })
+        .unwrap_or_else(|| {
+            let c = app.player.current_channels;
+            if c == 2 { "Stereo (2ch)".into() } else if c == 1 { "Mono (1ch)".into() } else { format!("{c} canais") }
+        });
+
+    let codec_str = meta.codec.unwrap_or_else(|| {
+        let c = app.player.current_codec.clone();
+        if c != "—" && !c.is_empty() {
+            c
+        } else {
+            let p = track.path.to_string_lossy();
+            if p.contains(".mp3") { "MP3".into() }
+            else if p.contains(".flac") { "FLAC".into() }
+            else if p.contains(".m4a") || p.contains(".aac") { "AAC".into() }
+            else if p.contains(".opus") { "Opus".into() }
+            else if p.contains(".ogg") { "Ogg Vorbis".into() }
+            else { "Audio Stream".into() }
+        }
+    });
+
+    let path_str = track.path.to_string_lossy().to_string();
+    let (source_type, file_size_str) = if is_local {
+        let size = std::fs::metadata(&track.path).map(|m| m.len()).unwrap_or(0);
+        let sz_str = if size > 1024 * 1024 {
+            format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
+        } else if size > 1024 {
+            format!("{:.1} KB", size as f64 / 1024.0)
+        } else {
+            format!("{size} B")
+        };
+        ("Arquivo Local", sz_str)
+    } else if path_str.starts_with("https://www.youtube.com") || path_str.starts_with("https://youtu.be") || path_str.starts_with("ytsearch:") {
+        let cached = crate::config::audio_cache_dir().ok().map(|d| {
+            let hash: u64 = path_str.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+            let base = d.join(format!("noctune_{hash}"));
+            ["mp4", "m4a", "webm", "opus", "mp3"].iter().any(|ext| base.with_extension(ext).exists())
+        }).unwrap_or(false);
+        if cached {
+            ("YouTube (Cache Local)", "Em cache no disco".into())
+        } else {
+            ("YouTube (Streaming)", "Stream online".into())
+        }
+    } else if path_str.starts_with("http") {
+        ("Rádio Online / Web Stream", "Transmissão contínua".into())
+    } else {
+        ("Streaming", dash.clone())
+    };
+
+    let lrc_status = if is_local && track.path.with_extension("lrc").exists() {
+        "Disponível (.lrc local)"
+    } else if app.lyrics.is_some() {
+        "Disponível (LRCLIB online)"
+    } else {
+        "Não disponível"
+    };
+
+    let rg_str = if let Some(t_db) = track.replaygain_track_db {
+        format!("{t_db:+.2} dB (escala: {:.2}x)", app.player.rg_scale)
+    } else if let Some(a_db) = track.replaygain_album_db {
+        format!("{a_db:+.2} dB (album gain, escala: {:.2}x)", app.player.rg_scale)
+    } else {
+        format!("Desativado (escala: {:.2}x)", app.player.rg_scale)
+    };
 
     let lines: Vec<Line> = vec![
-        row("Title", meta.title.unwrap_or_else(|| track.title.clone())),
-        row("Artist", meta.artist.unwrap_or_else(|| dash.clone())),
-        row(
-            "Album Artist",
-            meta.album_artist.unwrap_or_else(|| dash.clone()),
-        ),
-        row("Album", meta.album.unwrap_or_else(|| dash.clone())),
-        row("Year", meta.year.unwrap_or_else(|| dash.clone())),
-        row("Genre", meta.genre.unwrap_or_else(|| dash.clone())),
-        row("Track #", meta.track_number.unwrap_or_else(|| dash.clone())),
+        section_header("Metadados"),
+        row("Título", meta.title.unwrap_or_else(|| track.title.clone())),
+        row("Artista", meta.artist.or_else(|| track.artist.clone()).unwrap_or_else(|| dash.clone())),
+        row("Álbum", meta.album.or_else(|| track.album.clone()).unwrap_or_else(|| dash.clone())),
+        row("Ano", meta.year.or_else(|| track.year.clone()).unwrap_or_else(|| dash.clone())),
+        row("Gênero", meta.genre.or_else(|| track.genre.clone()).unwrap_or_else(|| dash.clone())),
         Line::from(""),
-        row("Duration", dur_str),
-        row("Codec", meta.codec.unwrap_or_else(|| dash.clone())),
-        row("Sample rate", rate_str),
-        row("Channels", chans_str),
-        row("Bit depth", bits_str),
+        section_header("Ficha Técnica de Áudio"),
+        row("Codec", codec_str),
+        row("Taxa de Amostragem", rate_str),
+        row("Canais", chans_str),
+        row("Duração", dur_str),
+        row("ReplayGain", rg_str),
+        row("Velocidade", format!("{:.2}x", app.player.speed)),
+        row("Letras (LRC)", lrc_status.to_string()),
         Line::from(""),
-        row("Path", track.path.display().to_string()),
+        section_header("Origem & Armazenamento"),
+        row("Tipo de Fonte", source_type.to_string()),
+        row("Tamanho", file_size_str),
+        row("Localização", path_str),
     ];
 
-    let w = 72.min(area.width.saturating_sub(4));
-    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(4));
+    let w = 76.min(area.width.saturating_sub(4)).max(40);
+    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2)).max(12);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -89,7 +180,7 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .border_style(app.theme.border(true))
             .title(Span::styled(
-                " Track info — press any key ",
+                " ℹ Inspetor Técnico da Faixa — Pressione qualquer tecla ",
                 app.theme.accent(),
             )),
     );

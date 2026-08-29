@@ -105,6 +105,7 @@ pub enum VizMode {
     VuMeter,
     Waterfall,
     Oscilloscope,
+    CoverArt,
 }
 
 impl VizMode {
@@ -114,7 +115,8 @@ impl VizMode {
             VizMode::Waveform => VizMode::VuMeter,
             VizMode::VuMeter => VizMode::Waterfall,
             VizMode::Waterfall => VizMode::Oscilloscope,
-            VizMode::Oscilloscope => VizMode::Spectrum,
+            VizMode::Oscilloscope => VizMode::CoverArt,
+            VizMode::CoverArt => VizMode::Spectrum,
         }
     }
     pub fn label(self) -> &'static str {
@@ -124,6 +126,7 @@ impl VizMode {
             VizMode::VuMeter => "vu-meter",
             VizMode::Waterfall => "waterfall",
             VizMode::Oscilloscope => "oscilloscope",
+            VizMode::CoverArt => "cover-art",
         }
     }
 }

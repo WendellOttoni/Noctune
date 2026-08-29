@@ -805,7 +805,201 @@ impl App {
                 .chain(self.radio_search_results.iter())
                 .filter(|st| self.ratings.is_favorite(&PathBuf::from(&st.url)))
                 .collect(),
-            _ => self.radio_search_results.iter().collect(),
+            crate::radio_browser::RadioCategory::Lofi => {
+                let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                    .radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        let t = st.tags.to_lowercase();
+                        let n = st.name.to_lowercase();
+                        t.contains("lofi")
+                            || t.contains("lo-fi")
+                            || t.contains("chill")
+                            || t.contains("ambient")
+                            || t.contains("downtempo")
+                            || t.contains("vaporwave")
+                            || n.contains("lofi")
+                            || n.contains("lo-fi")
+                            || n.contains("chill")
+                    })
+                    .collect();
+                let mut seen: std::collections::HashSet<&str> =
+                    list.iter().map(|s| s.url.as_str()).collect();
+                for st in &self.radio_search_results {
+                    if seen.insert(&st.url) {
+                        list.push(st);
+                    }
+                }
+                list
+            }
+            crate::radio_browser::RadioCategory::Rock => {
+                let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                    .radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        let t = st.tags.to_lowercase();
+                        let n = st.name.to_lowercase();
+                        t.contains("rock")
+                            || t.contains("metal")
+                            || t.contains("indie")
+                            || t.contains("alternative")
+                            || n.contains("rock")
+                            || n.contains("metal")
+                    })
+                    .collect();
+                let mut seen: std::collections::HashSet<&str> =
+                    list.iter().map(|s| s.url.as_str()).collect();
+                for st in &self.radio_search_results {
+                    if seen.insert(&st.url) {
+                        list.push(st);
+                    }
+                }
+                list
+            }
+            crate::radio_browser::RadioCategory::Jazz => {
+                let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                    .radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        let t = st.tags.to_lowercase();
+                        let n = st.name.to_lowercase();
+                        t.contains("jazz")
+                            || t.contains("blues")
+                            || t.contains("swing")
+                            || t.contains("bebop")
+                            || t.contains("lounge")
+                            || n.contains("jazz")
+                            || n.contains("blues")
+                    })
+                    .collect();
+                let mut seen: std::collections::HashSet<&str> =
+                    list.iter().map(|s| s.url.as_str()).collect();
+                for st in &self.radio_search_results {
+                    if seen.insert(&st.url) {
+                        list.push(st);
+                    }
+                }
+                list
+            }
+            crate::radio_browser::RadioCategory::Synthwave => {
+                let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                    .radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        let t = st.tags.to_lowercase();
+                        let n = st.name.to_lowercase();
+                        t.contains("synthwave")
+                            || t.contains("retrowave")
+                            || t.contains("cyberpunk")
+                            || t.contains("vaporwave")
+                            || t.contains("electronic")
+                            || t.contains("80s")
+                            || n.contains("synthwave")
+                            || n.contains("nightwave")
+                            || n.contains("nightride")
+                    })
+                    .collect();
+                let mut seen: std::collections::HashSet<&str> =
+                    list.iter().map(|s| s.url.as_str()).collect();
+                for st in &self.radio_search_results {
+                    if seen.insert(&st.url) {
+                        list.push(st);
+                    }
+                }
+                list
+            }
+            crate::radio_browser::RadioCategory::Brazil => {
+                let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                    .radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        let c = st.country.as_deref().unwrap_or("").to_lowercase();
+                        let t = st.tags.to_lowercase();
+                        let n = st.name.to_lowercase();
+                        c == "brazil"
+                            || c == "brasil"
+                            || t.contains("brasil")
+                            || t.contains("brazil")
+                            || t.contains("mpb")
+                            || t.contains("samba")
+                            || t.contains("bossa nova")
+                            || n.contains("brasil")
+                    })
+                    .collect();
+                let mut seen: std::collections::HashSet<&str> =
+                    list.iter().map(|s| s.url.as_str()).collect();
+                for st in &self.radio_search_results {
+                    if seen.insert(&st.url) {
+                        list.push(st);
+                    }
+                }
+                list
+            }
+            crate::radio_browser::RadioCategory::Classical => {
+                let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                    .radio_curated_list
+                    .iter()
+                    .filter(|st| {
+                        let t = st.tags.to_lowercase();
+                        let n = st.name.to_lowercase();
+                        t.contains("classical")
+                            || t.contains("clássica")
+                            || t.contains("piano")
+                            || t.contains("orchestral")
+                            || t.contains("opera")
+                            || t.contains("baroque")
+                            || t.contains("symphony")
+                            || n.contains("classic")
+                    })
+                    .collect();
+                let mut seen: std::collections::HashSet<&str> =
+                    list.iter().map(|s| s.url.as_str()).collect();
+                for st in &self.radio_search_results {
+                    if seen.insert(&st.url) {
+                        list.push(st);
+                    }
+                }
+                list
+            }
+            crate::radio_browser::RadioCategory::TopVoted => {
+                if !self.radio_search_results.is_empty() {
+                    self.radio_search_results.iter().collect()
+                } else {
+                    let mut list: Vec<&crate::radio_browser::RadioStation> =
+                        self.radio_curated_list.iter().collect();
+                    list.sort_by_key(|s| std::cmp::Reverse(s.votes.unwrap_or(0)));
+                    list
+                }
+            }
+            crate::radio_browser::RadioCategory::Search => {
+                let q = self.radio_search_query.trim().to_lowercase();
+                if q.is_empty() {
+                    self.radio_search_results.iter().collect()
+                } else {
+                    let mut list: Vec<&crate::radio_browser::RadioStation> = self
+                        .radio_curated_list
+                        .iter()
+                        .filter(|st| {
+                            st.name.to_lowercase().contains(&q)
+                                || st.tags.to_lowercase().contains(&q)
+                                || st
+                                    .country
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .to_lowercase()
+                                    .contains(&q)
+                        })
+                        .collect();
+                    let mut seen: std::collections::HashSet<&str> =
+                        list.iter().map(|s| s.url.as_str()).collect();
+                    for st in &self.radio_search_results {
+                        if seen.insert(&st.url) {
+                            list.push(st);
+                        }
+                    }
+                    list
+                }
+            }
         }
     }
 

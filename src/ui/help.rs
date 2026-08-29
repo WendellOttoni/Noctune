@@ -1,7 +1,7 @@
-//! Help overlay (#100). Redesigned with 2-column card layout, key badges and categorized sections.
+//! Help overlay (#100). Single-column card layout with key badges, categorized sections, and scroll.
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
@@ -17,7 +17,7 @@ struct ShortcutSection {
     shortcuts: &'static [(&'static str, &'static str)],
 }
 
-const LEFT_SECTIONS: &[ShortcutSection] = &[
+const SECTIONS: &[ShortcutSection] = &[
     ShortcutSection {
         icon: "▶",
         title: "Playback & Controles",
@@ -57,9 +57,6 @@ const LEFT_SECTIONS: &[ShortcutSection] = &[
             ("Shift+Tab", "Alternar temas visuais"),
         ],
     },
-];
-
-const RIGHT_SECTIONS: &[ShortcutSection] = &[
     ShortcutSection {
         icon: "🎚",
         title: "Áudio, EQ & Visualizador",
@@ -69,6 +66,7 @@ const RIGHT_SECTIONS: &[ShortcutSection] = &[
             ("v", "Ciclar visualizador FFT (Spectrum, VU...)"),
             ("[ / ]", "Ajustar sensibilidade do VU"),
             ("y", "Letras sincronizadas (Karaokê LRC)"),
+            ("I / Ctrl+I", "Inspetor técnico da faixa (Ficha de áudio)"),
             ("G", "ReplayGain (Off / Faixa / Álbum)"),
             ("D", "Selecionar saída de áudio"),
         ],
@@ -126,7 +124,7 @@ fn render_sections(sections: &[ShortcutSection], theme: &Theme) -> Vec<Line<'sta
 
         for &(key, desc) in sec.shortcuts {
             lines.push(Line::from(vec![
-                Span::styled(format!("   {:<12} ", key), key_badge_style),
+                Span::styled(format!("   {:<14} ", key), key_badge_style),
                 Span::styled("─ ", sep_style),
                 Span::styled(desc, text_style),
             ]));
@@ -137,8 +135,8 @@ fn render_sections(sections: &[ShortcutSection], theme: &Theme) -> Vec<Line<'sta
 }
 
 pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
-    let w = 86.min(area.width.saturating_sub(2)).max(40);
-    let h = 32.min(area.height.saturating_sub(2)).max(12);
+    let w = 76.min(area.width.saturating_sub(4)).max(38);
+    let h = 28.min(area.height.saturating_sub(2)).max(10);
 
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
@@ -167,40 +165,7 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16, theme: &Theme) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    if inner.width >= 72 {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(50),
-                Constraint::Length(1),
-                Constraint::Percentage(50),
-            ])
-            .split(inner);
-
-        let left_lines = render_sections(LEFT_SECTIONS, theme);
-        let right_lines = render_sections(RIGHT_SECTIONS, theme);
-
-        let left_p = Paragraph::new(left_lines).scroll((scroll, 0));
-        let right_p = Paragraph::new(right_lines).scroll((scroll, 0));
-
-        f.render_widget(left_p, cols[0]);
-
-        // Subtle vertical divider in the middle
-        let mut divider_spans = Vec::new();
-        for _ in 0..cols[1].height {
-            divider_spans.push(Line::from(Span::styled("│", Style::default().fg(muted))));
-        }
-        f.render_widget(Paragraph::new(divider_spans), cols[1]);
-
-        f.render_widget(right_p, cols[2]);
-    } else {
-        // Fallback for narrow terminals: single combined column
-        let mut all_sections = Vec::new();
-        all_sections.extend_from_slice(LEFT_SECTIONS);
-        all_sections.extend_from_slice(RIGHT_SECTIONS);
-
-        let lines = render_sections(&all_sections, theme);
-        let p = Paragraph::new(lines).scroll((scroll, 0));
-        f.render_widget(p, inner);
-    }
+    let lines = render_sections(SECTIONS, theme);
+    let p = Paragraph::new(lines).scroll((scroll, 0));
+    f.render_widget(p, inner);
 }

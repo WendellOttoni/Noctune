@@ -258,6 +258,10 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('E')), Action::EqPreset),
             (KeyChord::new(KeyCode::Char('R')), Action::Rescan),
             (KeyChord::new(KeyCode::Char('I')), Action::TrackInfo),
+            (
+                KeyChord::with_mods(KeyCode::Char('i'), KeyModifiers::CONTROL),
+                Action::TrackInfo,
+            ),
             (KeyChord::new(KeyCode::BackTab), Action::CycleTheme),
             (KeyChord::new(KeyCode::Char('[')), Action::VizSensDown),
             (KeyChord::new(KeyCode::Char(']')), Action::VizSensUp),

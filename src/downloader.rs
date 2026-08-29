@@ -61,7 +61,7 @@ fn download_track_worker(track: &Track, dest_dir: &Path) -> Result<PathBuf, Stri
 
     if is_ytdlp_source {
         let output_template = dest_dir.join(format!("{file_prefix}.%(ext)s"));
-        let status = Command::new("yt-dlp")
+        let status = Command::new(crate::ytdlp::yt_dlp_executable())
             .args([
                 "-x",
                 "--audio-format",

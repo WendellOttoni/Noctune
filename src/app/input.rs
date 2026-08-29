@@ -292,8 +292,13 @@ impl App {
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if self.radio_focus_pane == 0 {
-                        self.radio_category_idx = self.radio_category_idx.saturating_sub(1);
-                        self.radio_row = 0;
+                        if self.radio_category_idx > 0 {
+                            self.radio_category_idx -= 1;
+                            self.radio_row = 0;
+                            self.radio_search_results.clear();
+                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            self.trigger_radio_category_fetch(cat);
+                        }
                     } else {
                         self.radio_row = self.radio_row.saturating_sub(1);
                     }
@@ -307,6 +312,9 @@ impl App {
                         if self.radio_category_idx < max {
                             self.radio_category_idx += 1;
                             self.radio_row = 0;
+                            self.radio_search_results.clear();
+                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            self.trigger_radio_category_fetch(cat);
                         }
                     } else {
                         let list = self.radio_filtered_stations();
@@ -616,6 +624,13 @@ impl App {
             Action::ViewRadio => {
                 self.view_mode = ViewMode::Radio;
                 self.focus = Pane::Library;
+                let cat = crate::radio_browser::RadioCategory::ALL
+                    .get(self.radio_category_idx)
+                    .copied()
+                    .unwrap_or(crate::radio_browser::RadioCategory::TopVoted);
+                if self.radio_search_results.is_empty() && self.radio_search_rx.is_none() {
+                    self.trigger_radio_category_fetch(cat);
+                }
                 self.set_info("📻 Radio Mode (3) — Tab switch pane · Enter play · / search");
             }
             Action::ViewBrowser => {
@@ -1260,6 +1275,7 @@ impl App {
                     self.radio_category_idx -= 1;
                 }
                 self.radio_row = 0;
+                self.radio_search_results.clear();
                 let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
                 self.trigger_radio_category_fetch(cat);
             }
@@ -1267,6 +1283,7 @@ impl App {
                 self.radio_category_idx =
                     (self.radio_category_idx + 1) % crate::radio_browser::RadioCategory::ALL.len();
                 self.radio_row = 0;
+                self.radio_search_results.clear();
                 let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
                 self.trigger_radio_category_fetch(cat);
             }
@@ -2000,6 +2017,74 @@ impl App {
     }
 
     pub(crate) fn on_mouse(&mut self, m: MouseEvent) {
+        if self.show_help {
+            match m.kind {
+                MouseEventKind::ScrollUp => {
+                    self.help_scroll = self.help_scroll.saturating_sub(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    self.help_scroll = self.help_scroll.saturating_add(3);
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.show_help = false;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if self.show_lyrics {
+            match m.kind {
+                MouseEventKind::ScrollUp => {
+                    self.lyrics_scroll = self.lyrics_scroll.saturating_sub(2);
+                    self.lyrics_auto_scroll = false;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.lyrics_scroll = self.lyrics_scroll.saturating_add(2);
+                    self.lyrics_auto_scroll = false;
+                }
+                _ => {}
+            }
+        }
+
+        if self.view_mode == ViewMode::Radio {
+            match m.kind {
+                MouseEventKind::ScrollUp => {
+                    if self.radio_focus_pane == 0 {
+                        if self.radio_category_idx > 0 {
+                            self.radio_category_idx -= 1;
+                            self.radio_row = 0;
+                            self.radio_search_results.clear();
+                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            self.trigger_radio_category_fetch(cat);
+                        }
+                    } else {
+                        self.radio_row = self.radio_row.saturating_sub(1);
+                    }
+                    return;
+                }
+                MouseEventKind::ScrollDown => {
+                    if self.radio_focus_pane == 0 {
+                        let max = crate::radio_browser::RadioCategory::ALL.len().saturating_sub(1);
+                        if self.radio_category_idx < max {
+                            self.radio_category_idx += 1;
+                            self.radio_row = 0;
+                            self.radio_search_results.clear();
+                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            self.trigger_radio_category_fetch(cat);
+                        }
+                    } else {
+                        let list = self.radio_filtered_stations();
+                        if !list.is_empty() && self.radio_row + 1 < list.len() {
+                            self.radio_row += 1;
+                        }
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match m.kind {
             MouseEventKind::ScrollUp => self.move_selection(-1),
             MouseEventKind::ScrollDown => self.move_selection(1),
@@ -2046,6 +2131,34 @@ impl App {
         let lib = self.layout.library;
         let q = self.layout.queue;
         let prog = self.layout.progress;
+
+        if self.view_mode == ViewMode::Radio {
+            if rect_contains(lib, x, y) {
+                self.radio_focus_pane = 0;
+                let row = (y - lib.y).saturating_sub(1) as usize;
+                if row < crate::radio_browser::RadioCategory::ALL.len() {
+                    self.radio_category_idx = row;
+                    self.radio_row = 0;
+                    self.radio_search_results.clear();
+                    let cat = crate::radio_browser::RadioCategory::ALL[row];
+                    self.trigger_radio_category_fetch(cat);
+                }
+                return;
+            }
+            if rect_contains(q, x, y) {
+                self.radio_focus_pane = 1;
+                let row = (y - q.y).saturating_sub(1) as usize;
+                let list = self.radio_filtered_stations();
+                if row < list.len() {
+                    self.radio_row = row;
+                    if let Some(st) = list.get(row).copied() {
+                        let st_cloned = st.clone();
+                        self.play_radio_station(&st_cloned, false);
+                    }
+                }
+                return;
+            }
+        }
 
         if rect_contains(lib, x, y) {
             self.focus = Pane::Library;
