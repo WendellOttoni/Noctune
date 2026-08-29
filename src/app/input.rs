@@ -2148,13 +2148,13 @@ impl App {
             if rect_contains(q, x, y) {
                 self.radio_focus_pane = 1;
                 let row = (y - q.y).saturating_sub(1) as usize;
-                let list = self.radio_filtered_stations();
-                if row < list.len() {
+                let st_opt = {
+                    let list = self.radio_filtered_stations();
+                    list.get(row).copied().cloned()
+                };
+                if let Some(st) = st_opt {
                     self.radio_row = row;
-                    if let Some(st) = list.get(row).copied() {
-                        let st_cloned = st.clone();
-                        self.play_radio_station(&st_cloned, false);
-                    }
+                    self.play_radio_station(&st, false);
                 }
                 return;
             }

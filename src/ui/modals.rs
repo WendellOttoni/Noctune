@@ -21,7 +21,7 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
     let meta = if is_local {
         crate::metadata::probe_full(&track.path)
     } else {
-        crate::metadata::TrackMetaFull::default()
+        crate::metadata::FullMeta::default()
     };
 
     let muted = parse_color(&app.theme.colors.muted);
