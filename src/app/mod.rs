@@ -1604,7 +1604,7 @@ impl App {
 
         if self.player.is_empty() && self.player.current().is_some() {
             if let Some(cur) = self.player.current() {
-                if Self::track_is_stream(cur)
+                if Self::track_is_live_radio(cur)
                     && self.stream_reconnect_attempts < 3
                     && !self.player.is_paused()
                 {

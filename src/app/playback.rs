@@ -155,6 +155,15 @@ impl App {
         p.starts_with("http://") || p.starts_with("https://")
     }
 
+    pub(crate) fn track_is_live_radio(t: &Track) -> bool {
+        let p = t.path.to_string_lossy();
+        (p.starts_with("http://") || p.starts_with("https://"))
+            && !crate::ytdlp::is_youtube_url(&p)
+            && !p.contains("spotify.com")
+            && !p.starts_with("spotify:")
+            && t.duration.is_none()
+    }
+
     pub(crate) fn seek_relative_async(&mut self, delta_secs: i64) {
         let Some(track) = self.player.current().cloned() else {
             return;
@@ -362,7 +371,11 @@ impl App {
             self.play_current();
             return;
         }
-        if let Some(i) = self.queue_index {
+        let cur_idx = self.queue_index.or_else(|| {
+            let cur_path = self.player.current().map(|t| &t.path)?;
+            self.queue.iter().position(|t| &t.path == cur_path)
+        });
+        if let Some(i) = cur_idx {
             if let Some(new) = self.pick_next_index(i) {
                 self.queue_index = Some(new);
                 self.queue_state.select(Some(new));
