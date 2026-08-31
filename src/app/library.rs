@@ -4,8 +4,8 @@ use crate::audio::Track;
 
 use super::{
     types::{
-        LibraryRow, LibraryViewCache, LibraryViewFingerprint, SmartRowsCache, SortMode, ViewMode,
-        AUDIO_EXTS,
+        BrowserRowsCache, LibraryRow, LibraryViewCache, LibraryViewFingerprint, SmartRowsCache,
+        SortMode, ViewMode, AUDIO_EXTS,
     },
     App,
 };
@@ -51,9 +51,23 @@ impl App {
             return self.smart_rows_cached().to_vec();
         }
         if self.view_mode == ViewMode::Browser {
-            // Filesystem-backed and infrequent; not worth caching against an
-            // external mtime fingerprint here.
-            return self.browser_rows();
+            let path = self.browser_current_path();
+            let stale = self
+                .browser_rows_cache
+                .as_ref()
+                .map(|cache| cache.path != path)
+                .unwrap_or(true);
+            if stale {
+                self.browser_rows_cache = Some(BrowserRowsCache {
+                    path,
+                    rows: self.browser_rows(),
+                });
+            }
+            return self
+                .browser_rows_cache
+                .as_ref()
+                .map(|cache| cache.rows.clone())
+                .unwrap_or_default();
         }
         self.library_rows_cached().to_vec()
     }
@@ -272,6 +286,7 @@ impl App {
         match rows.get(sel) {
             Some(LibraryRow::Dir(p)) => {
                 self.browser_path = Some(p.clone());
+                self.browser_rows_cache = None;
                 self.library_state.select(Some(0));
             }
             Some(LibraryRow::Track(arc)) => {
@@ -300,10 +315,12 @@ impl App {
             } else {
                 self.browser_path = parent;
             }
+            self.browser_rows_cache = None;
             self.library_state.select(Some(0));
         } else if self.config.music_dirs.len() > 1 {
             self.browser_music_root_idx =
                 (self.browser_music_root_idx + 1) % self.config.music_dirs.len();
+            self.browser_rows_cache = None;
             self.library_state.select(Some(0));
         }
     }

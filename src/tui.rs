@@ -9,12 +9,44 @@ use std::io::{self, Stdout};
 
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-pub fn init() -> Result<Tui> {
+pub struct Session {
+    terminal: Tui,
+}
+
+impl std::ops::Deref for Session {
+    type Target = Tui;
+    fn deref(&self) -> &Self::Target {
+        &self.terminal
+    }
+}
+
+impl std::ops::DerefMut for Session {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.terminal
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = restore();
+    }
+}
+
+pub fn init() -> Result<Session> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    if let Err(error) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+        let _ = disable_raw_mode();
+        return Err(error.into());
+    }
     let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    match Terminal::new(backend) {
+        Ok(terminal) => Ok(Session { terminal }),
+        Err(error) => {
+            let _ = restore();
+            Err(error.into())
+        }
+    }
 }
 
 pub fn restore() -> Result<()> {

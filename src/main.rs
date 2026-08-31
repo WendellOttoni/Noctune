@@ -126,9 +126,7 @@ fn main() -> Result<()> {
     // cell-size detection) can read from stdio without conflicting with the event loop.
     let art_picker = album_art::ArtPicker::new();
 
+    let mut app = app::App::new(config, theme, art_picker)?;
     let mut terminal = tui::init()?;
-    let result = app::App::new(config, theme, art_picker)?.run(&mut terminal);
-    tui::restore()?;
-
-    result
+    app.run(&mut terminal)
 }

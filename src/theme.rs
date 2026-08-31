@@ -50,6 +50,40 @@ pub struct Symbols {
 }
 
 impl Theme {
+    const BUILTIN_NAMES: [&'static str; 4] = ["default", "gruvbox", "mono", "synthwave"];
+
+    fn builtin(name: &str) -> Option<&'static str> {
+        match name {
+            "default" => Some(include_str!("../themes/default.toml")),
+            "gruvbox" => Some(include_str!("../themes/gruvbox.toml")),
+            "mono" => Some(include_str!("../themes/mono.toml")),
+            "synthwave" => Some(include_str!("../themes/synthwave.toml")),
+            _ => None,
+        }
+    }
+
+    pub fn available_names() -> Vec<String> {
+        let mut names: Vec<String> = Self::BUILTIN_NAMES
+            .iter()
+            .map(|name| (*name).into())
+            .collect();
+        if let Ok(dir) = config::themes_dir() {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml") {
+                        if let Some(name) = entry.path().file_stem().and_then(|name| name.to_str())
+                        {
+                            names.push(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
     pub fn load(name: &str) -> Result<Self> {
         let dir = config::themes_dir()?;
         if let Err(e) = fs::create_dir_all(&dir) {
@@ -60,12 +94,14 @@ impl Theme {
             let text = fs::read_to_string(&path)
                 .with_context(|| format!("reading theme {}", path.display()))?;
             toml::from_str(&text)?
-        } else {
-            let theme = Theme::default();
-            if let Err(e) = fs::write(&path, toml::to_string_pretty(&theme)?) {
-                eprintln!("theme: failed to write default {}: {e}", path.display());
+        } else if let Some(text) = Self::builtin(name) {
+            let theme = toml::from_str(text)?;
+            if let Err(e) = fs::write(&path, text) {
+                eprintln!("theme: failed to install builtin {}: {e}", path.display());
             }
             theme
+        } else {
+            anyhow::bail!("theme '{name}' does not exist")
         };
         // #103: validate color fields once on load and emit aggregated warnings to
         // stderr (full logging via tracing comes with #96). Invalid colors still

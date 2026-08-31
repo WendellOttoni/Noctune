@@ -8,7 +8,7 @@ use super::{
     types::{
         LibraryRow, Pane, PlaylistEntry, RepeatMode, UndoSnapshot, ViewMode, MAX_UNDO_SNAPSHOTS,
     },
-    util::{pseudo_random, rg_scale},
+    util::{next_queue_index, previous_queue_index, pseudo_random, rg_scale},
     App,
 };
 
@@ -51,8 +51,11 @@ impl App {
                 let (name, state) = presets[self.eq_preset_idx];
                 self.player.eq().set(state);
                 self.config.playback.eq_preset = name.to_string();
-                let _ = self.config.save();
-                self.set_info(format!("EQ Preset: 🎚️ {name}"));
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!("EQ changed, but config was not saved: {error}"));
+                } else {
+                    self.set_info(format!("EQ Preset: 🎚️ {name}"));
+                }
             }
             4 => {
                 let v = (self.player.volume() + dir as f32 * 0.05).clamp(0.0, 1.5);
@@ -64,8 +67,13 @@ impl App {
                 let xf = (self.player.crossfade_secs + dir as f32 * 0.5).clamp(0.0, 10.0);
                 self.player.crossfade_secs = xf;
                 self.config.playback.crossfade_secs = xf;
-                let _ = self.config.save();
-                self.set_info(format!("Crossfade: {:.1}s", xf));
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!(
+                        "Crossfade changed, but config was not saved: {error}"
+                    ));
+                } else {
+                    self.set_info(format!("Crossfade: {:.1}s", xf));
+                }
             }
             6 => {
                 self.adjust_viz_sensitivity(dir as f32 * crate::visualizer::SENS_STEP);
@@ -81,33 +89,7 @@ impl App {
 
     pub(crate) fn cycle_theme(&mut self) {
         if self.theme_names.is_empty() {
-            let dir = match crate::config::themes_dir() {
-                Ok(d) => d,
-                Err(e) => {
-                    self.set_info(format!("themes dir: {e}"));
-                    return;
-                }
-            };
-            let mut names: Vec<String> = std::fs::read_dir(&dir)
-                .ok()
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.ok())
-                .filter_map(|e| {
-                    let p = e.path();
-                    if p.extension().and_then(|s| s.to_str()) == Some("toml") {
-                        p.file_stem()
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            names.sort();
-            if names.is_empty() {
-                names.push("default".to_string());
-            }
+            let names = crate::theme::Theme::available_names();
             self.theme_idx = names
                 .iter()
                 .position(|n| n == &self.theme.name)
@@ -123,8 +105,11 @@ impl App {
             Ok(theme) => {
                 self.config.theme = name.clone();
                 self.theme = theme;
-                let _ = self.config.save();
-                self.set_info(format!("Tema: 🎨 {name}"));
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!("Theme changed, but config was not saved: {error}"));
+                } else {
+                    self.set_info(format!("Tema: 🎨 {name}"));
+                }
             }
             Err(e) => self.set_info(format!("Erro no tema: {e}")),
         }
@@ -240,12 +225,12 @@ impl App {
                 idx = (idx + 1) % self.queue.len();
             }
             Some(idx)
-        } else if current + 1 < self.queue.len() {
-            Some(current + 1)
-        } else if matches!(self.repeat, RepeatMode::All) {
-            Some(0)
         } else {
-            None
+            next_queue_index(
+                self.queue.len(),
+                current,
+                matches!(self.repeat, RepeatMode::All),
+            )
         }
     }
 
@@ -274,10 +259,8 @@ impl App {
             return;
         }
         let i = self.queue_index.unwrap_or(0);
-        let new = if i == 0 {
-            self.queue.len().saturating_sub(1)
-        } else {
-            i - 1
+        let Some(new) = previous_queue_index(self.queue.len(), i) else {
+            return;
         };
         self.queue_index = Some(new);
         self.queue_state.select(Some(new));
@@ -527,87 +510,57 @@ impl App {
         else {
             return;
         };
-        let Ok(text) = std::fs::read_to_string(&entry.path) else {
-            self.set_info(format!("Could not read {}", entry.path.display()));
-            return;
-        };
-        self.push_undo_snapshot(format!(
-            "{} playlist '{}'",
-            if append { "appended" } else { "loaded" },
-            entry.name
-        ));
-        if !append {
-            self.queue.clear();
-            self.queue_state.select(None);
-            self.queue_index = None;
-        }
-        let start = self.queue.len();
-        let mut pending_extinf: Option<(Option<std::time::Duration>, Option<String>, String)> =
-            None;
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("#EXTINF:") {
-                pending_extinf = Some(parse_extinf(rest));
-                continue;
-            }
-            if line.starts_with('#') {
-                continue;
-            }
-            let (dur, artist, title) = match pending_extinf.take() {
-                Some((d, a, t)) => (d, a, Some(t)),
-                None => (None, None, None),
-            };
-            if line.starts_with("http://") || line.starts_with("https://") {
-                self.queue.push(Track::from_url_with_meta(
-                    line.to_string(),
-                    title,
-                    artist,
-                    dur,
-                ));
-            } else {
-                let candidate = std::path::Path::new(line);
-                let p = if candidate.is_relative() {
-                    entry
-                        .path
-                        .parent()
-                        .map(|dir| dir.join(candidate))
-                        .unwrap_or_else(|| std::path::PathBuf::from(line))
-                } else {
-                    std::path::PathBuf::from(line)
-                };
-                if p.exists() {
-                    self.queue.push(Track::from_path_with_meta(p));
-                }
-            }
-        }
-        let loaded = self.queue.len() - start;
-        if loaded == 0 {
-            self.undo_stack.pop_back();
-        }
-        if !append {
-            if !self.queue.is_empty() {
-                self.queue_state.select(Some(0));
-            }
-            self.active_playlist_name = Some(entry.name.clone());
-        }
-        if loaded > 0 {
-            self.play_history.record_playlist_play(
-                crate::history::PlaylistRef::Local {
-                    path: entry.path.clone(),
-                },
-                entry.name.clone(),
-                None,
-                loaded as u32,
-            );
-        }
-        self.show_playlist_browser = false;
-        self.set_info(if append {
-            format!("Appended {} tracks from '{}'", loaded, entry.name)
-        } else {
-            format!("Loaded {} tracks from '{}'", loaded, entry.name)
+        self.set_info(format!("Loading playlist '{}'…", entry.name));
+        let event_entry = entry.clone();
+        let tx = self.service_tx.clone();
+        std::thread::spawn(move || {
+            let result = std::fs::read_to_string(&entry.path)
+                .map_err(|error| format!("Could not read {}: {error}", entry.path.display()))
+                .map(|text| {
+                    let mut tracks = Vec::new();
+                    let mut pending_extinf = None;
+                    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                        if let Some(rest) = line.strip_prefix("#EXTINF:") {
+                            pending_extinf = Some(parse_extinf(rest));
+                            continue;
+                        }
+                        if line.starts_with('#') {
+                            continue;
+                        }
+                        let (duration, artist, title) = match pending_extinf.take() {
+                            Some((duration, artist, title)) => (duration, artist, Some(title)),
+                            None => (None, None, None),
+                        };
+                        if line.starts_with("http://") || line.starts_with("https://") {
+                            tracks.push(Track::from_url_with_meta(
+                                line.to_string(),
+                                title,
+                                artist,
+                                duration,
+                            ));
+                            continue;
+                        }
+                        let candidate = std::path::Path::new(line);
+                        let path = if candidate.is_relative() {
+                            entry
+                                .path
+                                .parent()
+                                .map(|dir| dir.join(candidate))
+                                .unwrap_or_else(|| std::path::PathBuf::from(line))
+                        } else {
+                            std::path::PathBuf::from(line)
+                        };
+                        if path.exists() {
+                            tracks.push(Track::from_path_with_meta(path));
+                        }
+                    }
+                    tracks
+                });
+            let _ = tx.send(crate::app::ServiceEvent::PlaylistLoaded {
+                result,
+                entry: event_entry,
+                append,
+            });
         });
     }
 
@@ -679,6 +632,8 @@ impl App {
         } else {
             RepeatMode::Off
         };
+        self.config.playback.repeat = p.repeat;
+        self.config.playback.repeat_mode = Some(self.repeat.label().to_string());
         self.player.eq().set(p.to_eq_state());
         if self.config.theme != p.theme {
             if let Ok(theme) = crate::theme::Theme::load(&p.theme) {
@@ -686,8 +641,11 @@ impl App {
                 self.theme = theme;
             }
         }
-        let _ = self.config.save();
-        self.set_info(format!("Profile '{}' loaded.", p.name));
+        if let Err(error) = self.config.save() {
+            self.set_error(format!("Profile loaded, but config was not saved: {error}"));
+        } else {
+            self.set_info(format!("Profile '{}' loaded.", p.name));
+        }
     }
 
     pub(crate) fn move_selection(&mut self, delta: i32) {

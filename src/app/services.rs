@@ -21,6 +21,7 @@ impl App {
         self.scan_rx = Some(rx);
         self.scan_progress_rx = Some(prx);
         self.scan_progress = None;
+        self.browser_rows_cache = None;
         self.set_info("Scanning library…");
         std::thread::spawn(move || {
             let cache_file = cache_path();
@@ -145,61 +146,61 @@ impl App {
                     .and_then(|s| s.split('/').next())
                     .and_then(|s| s.parse::<u16>().ok())
                     .unwrap_or(8888);
-                match crate::spotify::oauth::wait_for_redirect(port, &session.state) {
-                    Ok(code) => match crate::spotify::exchange_code(&session, &code) {
-                        Ok(tokens) => {
-                            let _ = crate::spotify::save_tokens(&tokens);
-                            match crate::spotify::SpotifyApi::new(
-                                self.spotify_client_id.clone(),
-                                tokens,
-                            ) {
-                                Ok(api) => {
-                                    self.spotify = Some(api);
-                                    self.set_info("Spotify login complete.");
-                                }
-                                Err(e) => self.set_info(format!("Spotify init error: {e}")),
-                            }
-                        }
-                        Err(e) => self.set_info(format!("Token exchange failed: {e}")),
-                    },
-                    Err(e) => self.set_info(format!("Redirect listener error: {e}")),
-                }
+                let client_id = self.spotify_client_id.clone();
+                let tx = self.service_tx.clone();
+                std::thread::spawn(move || {
+                    let result = crate::spotify::oauth::wait_for_redirect(port, &session.state)
+                        .map_err(|error| error.to_string())
+                        .and_then(|code| {
+                            crate::spotify::exchange_code(&session, &code)
+                                .map_err(|error| error.to_string())
+                        })
+                        .and_then(|tokens| {
+                            crate::spotify::save_tokens(&tokens)
+                                .map_err(|error| error.to_string())?;
+                            crate::spotify::SpotifyApi::new(client_id, tokens)
+                                .map_err(|error| error.to_string())
+                        });
+                    let _ = tx.send(crate::app::ServiceEvent::SpotifyLogin(result));
+                });
             }
             Err(e) => self.set_info(format!("Spotify authorize error: {e}")),
         }
     }
 
     pub(crate) fn spotify_toggle(&mut self) {
-        let Some(api) = self.spotify.as_mut() else {
+        let Some(mut api) = self.spotify.clone() else {
             self.set_error("Spotify: not authorized — press Shift+P to login");
             return;
         };
-        match api.currently_playing() {
-            Ok(Some(cp)) if cp.is_playing => match api.pause() {
-                Ok(_) => self.set_info("Spotify paused."),
-                Err(e) => self.set_info(format!("Spotify pause error: {e}")),
-            },
-            Ok(_) => match api.play() {
-                Ok(_) => self.set_info("Spotify resumed."),
-                Err(e) => self.set_info(format!("Spotify play error: {e}")),
-            },
-            Err(e) => self.set_info(format!("Spotify error: {e}")),
-        }
+        self.set_info("Spotify: updating playback…");
+        let tx = self.service_tx.clone();
+        std::thread::spawn(move || {
+            let result = match api.currently_playing() {
+                Ok(Some(current)) if current.is_playing => {
+                    api.pause().map(|_| (api, "Spotify paused.".to_string()))
+                }
+                Ok(_) => api.play().map(|_| (api, "Spotify resumed.".to_string())),
+                Err(error) => Err(error),
+            }
+            .map_err(|error| error.to_string());
+            let _ = tx.send(crate::app::ServiceEvent::SpotifyToggle(result));
+        });
     }
 
     pub(crate) fn spotify_load_my_playlists(&mut self) {
         let Some(mut api) = self.spotify.clone() else {
             return;
         };
-        match api.my_playlists() {
-            Ok(playlists) => {
-                self.spotify_my_playlists = playlists;
-                if !self.spotify_my_playlists.is_empty() {
-                    self.spotify_playlist_row = 0;
-                }
-            }
-            Err(e) => self.set_info(format!("Spotify playlists error: {e}")),
-        }
+        self.set_info("Spotify: loading playlists…");
+        let tx = self.service_tx.clone();
+        std::thread::spawn(move || {
+            let result = api
+                .my_playlists()
+                .map(|playlists| (api, playlists))
+                .map_err(|error| error.to_string());
+            let _ = tx.send(crate::app::ServiceEvent::SpotifyPlaylists(result));
+        });
     }
 
     pub(crate) fn spotify_load_liked(&mut self) {
@@ -486,48 +487,48 @@ impl App {
         };
 
         self.set_info(format!("Importando playlist \"{}\"…", summary.name));
-        match client.get(&summary.id) {
-            Ok(pl) => {
-                let resolved_items = pl.resolve(&self.library);
-                let mut tracks = Vec::new();
-                for item in resolved_items {
-                    match item {
-                        crate::share::ResolvedItem::Resolved(t) => tracks.push(t),
-                        crate::share::ResolvedItem::Missing(st) => {
-                            if let crate::share::SharedTrack::Stream {
-                                url,
-                                title,
-                                artist,
-                                duration_ms,
-                                ..
-                            } = st
-                            {
-                                tracks.push(crate::audio::Track {
-                                    path: std::path::PathBuf::from(url),
+        let library = self.library.clone();
+        let tx = self.service_tx.clone();
+        std::thread::spawn(move || {
+            let result = client
+                .get(&summary.id)
+                .map_err(|error| error.to_string())
+                .map(|pl| {
+                    let resolved_items = pl.resolve(&library);
+                    let mut tracks = Vec::new();
+                    for item in resolved_items {
+                        match item {
+                            crate::share::ResolvedItem::Resolved(t) => tracks.push(t),
+                            crate::share::ResolvedItem::Missing(st) => {
+                                if let crate::share::SharedTrack::Stream {
+                                    url,
                                     title,
                                     artist,
-                                    album: None,
-                                    genre: None,
-                                    year: None,
-                                    duration: duration_ms.map(std::time::Duration::from_millis),
-                                    replaygain_track_db: None,
-                                    replaygain_album_db: None,
-                                    cover_url: None,
-                                    added_at: None,
-                                });
+                                    duration_ms,
+                                    ..
+                                } = st
+                                {
+                                    tracks.push(crate::audio::Track {
+                                        path: std::path::PathBuf::from(url),
+                                        title,
+                                        artist,
+                                        album: None,
+                                        genre: None,
+                                        year: None,
+                                        duration: duration_ms.map(std::time::Duration::from_millis),
+                                        replaygain_track_db: None,
+                                        replaygain_album_db: None,
+                                        cover_url: None,
+                                        added_at: None,
+                                    });
+                                }
                             }
                         }
                     }
-                }
-                let count = tracks.len();
-                self.queue.extend(tracks);
-                self.set_info(format!("Importadas {count} faixas para a fila!"));
-                self.show_browse_modal = false;
-            }
-            Err(e) => {
-                self.set_error(format!("Erro ao importar playlist: {e}"));
-            }
-        }
+                    tracks
+                });
+            let _ = tx.send(crate::app::ServiceEvent::BrowseImport(result));
+        });
     }
 
     pub(crate) fn open_tag_editor(&mut self) {
@@ -560,11 +561,74 @@ impl App {
         self.show_tag_editor = true;
     }
 
+    pub(crate) fn open_track_info(&mut self) {
+        let Some(track) = self.player.current().cloned() else {
+            self.set_info("No track is playing.");
+            return;
+        };
+        self.show_info = true;
+        self.track_info = None;
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.track_info_rx = Some(rx);
+        std::thread::spawn(move || {
+            let path_text = track.path.to_string_lossy().to_string();
+            let is_local = track.path.exists() && !path_text.starts_with("http");
+            let meta = if is_local {
+                crate::metadata::probe_full(&track.path)
+            } else {
+                crate::metadata::FullMeta::default()
+            };
+            let file_size = if is_local {
+                std::fs::metadata(&track.path)
+                    .map(|value| value.len())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            let youtube_cached = if path_text.starts_with("https://www.youtube.com")
+                || path_text.starts_with("https://youtu.be")
+                || path_text.starts_with("ytsearch:")
+            {
+                crate::config::audio_cache_dir()
+                    .ok()
+                    .map(|directory| {
+                        let hash = path_text.bytes().fold(0u64, |acc, byte| {
+                            acc.wrapping_mul(31).wrapping_add(byte as u64)
+                        });
+                        let base = directory.join(format!("noctune_{hash}"));
+                        ["mp4", "m4a", "webm", "opus", "mp3"]
+                            .iter()
+                            .any(|extension| base.with_extension(extension).exists())
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            let snapshot = crate::app::TrackInfoSnapshot {
+                path: track.path.clone(),
+                meta,
+                is_local,
+                file_size,
+                youtube_cached,
+                has_local_lrc: is_local && track.path.with_extension("lrc").exists(),
+            };
+            let _ = tx.send(snapshot);
+        });
+    }
+
     pub(crate) fn save_tag_editor(&mut self) {
         let Some(path) = self.tag_editor_path.take() else {
             return;
         };
         let title = self.tag_editor_fields[0].trim().to_string();
+        let title = if title.is_empty() {
+            path.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Unknown Track")
+                .to_string()
+        } else {
+            title
+        };
         let artist = if self.tag_editor_fields[1].trim().is_empty() {
             None
         } else {
@@ -586,13 +650,30 @@ impl App {
             Some(self.tag_editor_fields[4].trim().to_string())
         };
 
+        let parsed_year = match year.as_deref().map(str::parse::<u16>).transpose() {
+            Ok(value) => value,
+            Err(_) => {
+                self.tag_editor_path = Some(path);
+                self.set_error("Year must be a number.");
+                return;
+            }
+        };
+        if let Err(error) = crate::metadata::write_tags(
+            &path,
+            Some(&title),
+            artist.as_deref(),
+            album.as_deref(),
+            genre.as_deref(),
+            parsed_year,
+        ) {
+            self.tag_editor_path = Some(path);
+            self.set_error(format!("Could not save tags: {error}"));
+            return;
+        }
+
         for t in &mut self.library {
             if t.path == path {
-                t.title = if title.is_empty() {
-                    t.title.clone()
-                } else {
-                    title.clone()
-                };
+                t.title = title.clone();
                 t.artist = artist.clone();
                 t.album = album.clone();
                 t.genre = genre.clone();
@@ -601,11 +682,7 @@ impl App {
         }
         for t in &mut self.queue {
             if t.path == path {
-                t.title = if title.is_empty() {
-                    t.title.clone()
-                } else {
-                    title.clone()
-                };
+                t.title = title.clone();
                 t.artist = artist.clone();
                 t.album = album.clone();
                 t.genre = genre.clone();
@@ -706,7 +783,10 @@ impl App {
             stationuuid: None,
         };
 
-        let _ = crate::radio_browser::add_custom_station(station.clone());
+        if let Err(error) = crate::radio_browser::add_custom_station(station.clone()) {
+            self.set_error(format!("Could not save custom radio: {error}"));
+            return;
+        }
         self.radio_curated_list.retain(|s| s.url != url);
         self.radio_curated_list.insert(0, station);
 
@@ -784,21 +864,13 @@ impl App {
             crate::radio_browser::RadioCategory::Curated => {
                 self.radio_curated_list.iter().collect()
             }
-            crate::radio_browser::RadioCategory::Custom => {
-                let custom_urls: std::collections::HashSet<String> =
-                    crate::radio_browser::load_custom_stations()
-                        .into_iter()
-                        .map(|s| s.url)
-                        .collect();
-                self.radio_curated_list
-                    .iter()
-                    .filter(|st| {
-                        custom_urls.contains(&st.url)
-                            || st.country.as_deref() == Some("Personalizada")
-                            || st.tags.contains("custom")
-                    })
-                    .collect()
-            }
+            crate::radio_browser::RadioCategory::Custom => self
+                .radio_curated_list
+                .iter()
+                .filter(|st| {
+                    st.country.as_deref() == Some("Personalizada") || st.tags.contains("custom")
+                })
+                .collect(),
             crate::radio_browser::RadioCategory::Favorites => self
                 .radio_curated_list
                 .iter()
@@ -1024,39 +1096,32 @@ impl App {
         if let Some(token) = self.lastfm_pending_token.take() {
             let api_key = cfg.api_key.clone();
             let api_secret = cfg.api_secret.clone();
-            match crate::lastfm::get_session(&api_key, &api_secret, &token) {
-                Ok(session) => {
-                    let username = session.username.clone();
-                    crate::lastfm::save_session(&session);
-                    match crate::lastfm::LastfmClient::new(api_key, api_secret, session) {
-                        Ok(client) => {
-                            self.lastfm = Some(client);
-                            self.set_info(format!("Last.fm connected as {username}."));
-                        }
-                        Err(e) => self.set_info(format!("Last.fm client error: {e}")),
-                    }
-                }
-                Err(e) => {
-                    self.set_info(format!("Last.fm auth error: {e}"));
-                }
-            }
+            self.set_info("Last.fm: completing login…");
+            let tx = self.service_tx.clone();
+            std::thread::spawn(move || {
+                let result = crate::lastfm::get_session(&api_key, &api_secret, &token)
+                    .map_err(|error| error.to_string())
+                    .and_then(|session| {
+                        let username = session.username.clone();
+                        crate::lastfm::save_session(&session);
+                        crate::lastfm::LastfmClient::new(api_key, api_secret, session)
+                            .map(|client| (client, username))
+                            .map_err(|error| error.to_string())
+                    });
+                let _ = tx.send(crate::app::ServiceEvent::LastfmSession(result));
+            });
             return;
         }
 
         let api_key = cfg.api_key.clone();
         let api_secret = cfg.api_secret.clone();
-        match crate::lastfm::get_token(&api_key, &api_secret) {
-            Ok(token) => {
-                let url = format!(
-                    "http://www.last.fm/api/auth/?api_key={}&token={}",
-                    api_key, token
-                );
-                let _ = webbrowser::open(&url);
-                self.lastfm_pending_token = Some(token);
-                self.set_info("Last.fm: authorize in browser, then press F again.");
-            }
-            Err(e) => self.set_info(format!("Last.fm token error: {e}")),
-        }
+        self.set_info("Last.fm: requesting authorization…");
+        let tx = self.service_tx.clone();
+        std::thread::spawn(move || {
+            let result =
+                crate::lastfm::get_token(&api_key, &api_secret).map_err(|error| error.to_string());
+            let _ = tx.send(crate::app::ServiceEvent::LastfmToken(result));
+        });
     }
 
     pub(crate) fn spawn_lyrics_fetch(&mut self, t: &Track) {
@@ -1076,26 +1141,21 @@ impl App {
 
     pub(crate) fn on_track_started(&mut self, t: Track) {
         self.stream_reconnect_attempts = 0;
-        let new_art =
-            crate::metadata::probe_picture(&t.path).and_then(|bytes| self.art_picker.load(&bytes));
-        self.album_art = new_art;
+        self.album_art = None;
         self.art_generation = self.art_generation.wrapping_add(1);
         self.art_picker.invalidate();
-        if self.album_art.is_none() {
-            if let Some(url) = t.cover_url.clone() {
-                let (tx, rx) = std::sync::mpsc::channel();
-                self.art_rx = Some(rx);
-                let path = t.path.clone();
-                std::thread::spawn(move || {
-                    let bytes = crate::metadata::fetch_remote_picture(&url);
-                    let _ = tx.send((path, bytes));
-                });
-            } else {
-                self.art_rx = None;
-            }
-        } else {
-            self.art_rx = None;
-        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.art_rx = Some(rx);
+        let path = t.path.clone();
+        let cover_url = t.cover_url.clone();
+        std::thread::spawn(move || {
+            let bytes = crate::metadata::probe_picture(&path).or_else(|| {
+                cover_url
+                    .as_deref()
+                    .and_then(crate::metadata::fetch_remote_picture)
+            });
+            let _ = tx.send((path, bytes));
+        });
         self.set_info(format!("Playing: {}", t.display()));
         if let Some(s) = &mut self.media_session {
             s.update_metadata(
@@ -1245,6 +1305,9 @@ impl App {
     }
 
     pub(crate) fn render_overlay_art(&mut self) {
+        if self.mini_mode {
+            return;
+        }
         let Some(img) = self.album_art.as_ref() else {
             return;
         };
@@ -1269,6 +1332,19 @@ impl App {
             crate::album_art::Protocol::Iterm2 => crate::album_art::build_iterm2(img, area),
             crate::album_art::Protocol::Blocks => Vec::new(),
         });
+        let mut out = std::io::stdout().lock();
+        let _ = std::io::Write::write_all(&mut out, bytes);
+        let _ = std::io::Write::flush(&mut out);
+    }
+
+    pub(crate) fn clear_overlay_art(&mut self) {
+        self.layout.art_area = ratatui::layout::Rect::default();
+        self.art_picker.invalidate();
+        let bytes: &[u8] = match self.art_picker.protocol {
+            crate::album_art::Protocol::Kitty => b"\x1b_Ga=d,d=A\x1b\\",
+            crate::album_art::Protocol::Iterm2 => b"\x1b[2J\x1b[H",
+            crate::album_art::Protocol::Blocks => return,
+        };
         let mut out = std::io::stdout().lock();
         let _ = std::io::Write::write_all(&mut out, bytes);
         let _ = std::io::Write::flush(&mut out);

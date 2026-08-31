@@ -302,7 +302,9 @@ fn download_via_tempfile(
         let err = String::from_utf8_lossy(&out.stderr);
         let err_trim = err.trim();
         if err_trim.contains("403") || err_trim.to_lowercase().contains("forbidden") {
-            return Err(anyhow!("yt-dlp: HTTP 403 Forbidden (atualize o yt-dlp com 'yt-dlp -U')"));
+            return Err(anyhow!(
+                "yt-dlp: HTTP 403 Forbidden (atualize o yt-dlp com 'yt-dlp -U')"
+            ));
         }
         return Err(anyhow!("yt-dlp: {}", err_trim));
     }

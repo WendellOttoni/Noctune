@@ -296,7 +296,8 @@ impl App {
                             self.radio_category_idx -= 1;
                             self.radio_row = 0;
                             self.radio_search_results.clear();
-                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            let cat =
+                                crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
                             self.trigger_radio_category_fetch(cat);
                         }
                     } else {
@@ -313,7 +314,8 @@ impl App {
                             self.radio_category_idx += 1;
                             self.radio_row = 0;
                             self.radio_search_results.clear();
-                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            let cat =
+                                crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
                             self.trigger_radio_category_fetch(cat);
                         }
                     } else {
@@ -431,6 +433,10 @@ impl App {
             }
             Action::ShowStats => {
                 self.show_stats = !self.show_stats;
+                if self.show_stats {
+                    self.stats_snapshot =
+                        crate::stats::PlaybackStats::compute(&self.play_history, &self.library, 10);
+                }
             }
             Action::LastfmPanel => {
                 if !self.show_lastfm_panel {
@@ -502,6 +508,7 @@ impl App {
                 if self.view_mode == ViewMode::Browser {
                     self.browser_path = None;
                     self.browser_music_root_idx = 0;
+                    self.browser_rows_cache = None;
                 }
                 self.library_state.select(Some(0));
                 self.set_info(format!("View: {}", self.view_mode.label()));
@@ -542,11 +549,14 @@ impl App {
                 let (name, state) = presets[self.eq_preset_idx];
                 self.player.eq().set(state);
                 self.config.playback.eq_preset = name.to_string();
-                let _ = self.config.save();
-                self.set_info(format!("EQ Preset: 🎚️ {name}"));
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!("EQ changed, but config was not saved: {error}"));
+                } else {
+                    self.set_info(format!("EQ Preset: 🎚️ {name}"));
+                }
             }
             Action::Rescan => self.start_async_scan(),
-            Action::TrackInfo => self.show_info = true,
+            Action::TrackInfo => self.open_track_info(),
             Action::CycleTheme => self.cycle_theme(),
             Action::VizSensUp => self.adjust_viz_sensitivity(crate::visualizer::SENS_STEP),
             Action::VizSensDown => self.adjust_viz_sensitivity(-crate::visualizer::SENS_STEP),
@@ -580,6 +590,9 @@ impl App {
             }
             Action::ToggleMini => {
                 self.mini_mode = !self.mini_mode;
+                if self.mini_mode {
+                    self.clear_overlay_art();
+                }
             }
             Action::LastfmLogin => self.lastfm_login(),
             Action::SelectDevice => self.open_device_selector(),
@@ -764,8 +777,11 @@ impl App {
             Ok(t) => {
                 self.theme = t;
                 self.config.theme = name.to_string();
-                let _ = self.config.save();
-                self.set_info(format!("Tema aplicado: 🎨 {name}"));
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!("Tema aplicado, mas não salvo: {error}"));
+                } else {
+                    self.set_info(format!("Tema aplicado: 🎨 {name}"));
+                }
             }
             Err(e) => self.set_error(format!("Erro ao carregar tema {name}: {e}")),
         }
@@ -777,8 +793,11 @@ impl App {
             self.eq_preset_idx = idx;
             self.player.eq().set(*state);
             self.config.playback.eq_preset = name.to_string();
-            let _ = self.config.save();
-            self.set_info(format!("Equalizador: 🎚️ {name}"));
+            if let Err(error) = self.config.save() {
+                self.set_error(format!("Equalizador alterado, mas não salvo: {error}"));
+            } else {
+                self.set_info(format!("Equalizador: 🎚️ {name}"));
+            }
         }
     }
 
@@ -850,7 +869,7 @@ impl App {
             (
                 "mini",
                 "Alternar Mini Player",
-                "Alternar modo compacto com capa de álbum",
+                "Alternar modo compacto",
                 Action::ToggleMini,
             ),
             (
@@ -1042,27 +1061,13 @@ impl App {
         }
 
         // 3. Themes
-        let available_themes = [
-            "default",
-            "catppuccin",
-            "dracula",
-            "nord",
-            "tokyonight",
-            "gruvbox",
-            "monokai",
-            "solarized-dark",
-            "cyberpunk",
-            "rose-pine",
-            "synthwave",
-            "amoled",
-        ];
-        for t in available_themes {
+        for t in crate::theme::Theme::available_names() {
             items.push(PaletteItem {
                 id: format!("theme-{t}"),
                 title: format!("Tema: {t}"),
                 description: "Aplicar tema visual".to_string(),
                 category: PaletteCategory::Theme,
-                action: PaletteAction::SetTheme(t.to_string()),
+                action: PaletteAction::SetTheme(t),
             });
         }
 
@@ -2055,7 +2060,8 @@ impl App {
                             self.radio_category_idx -= 1;
                             self.radio_row = 0;
                             self.radio_search_results.clear();
-                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            let cat =
+                                crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
                             self.trigger_radio_category_fetch(cat);
                         }
                     } else {
@@ -2065,12 +2071,15 @@ impl App {
                 }
                 MouseEventKind::ScrollDown => {
                     if self.radio_focus_pane == 0 {
-                        let max = crate::radio_browser::RadioCategory::ALL.len().saturating_sub(1);
+                        let max = crate::radio_browser::RadioCategory::ALL
+                            .len()
+                            .saturating_sub(1);
                         if self.radio_category_idx < max {
                             self.radio_category_idx += 1;
                             self.radio_row = 0;
                             self.radio_search_results.clear();
-                            let cat = crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
+                            let cat =
+                                crate::radio_browser::RadioCategory::ALL[self.radio_category_idx];
                             self.trigger_radio_category_fetch(cat);
                         }
                     } else {

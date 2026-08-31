@@ -145,6 +145,20 @@ pub enum SpotifyTab {
     LikedSongs,
 }
 
+pub enum ServiceEvent {
+    SpotifyLogin(Result<crate::spotify::SpotifyApi, String>),
+    SpotifyToggle(Result<(crate::spotify::SpotifyApi, String), String>),
+    SpotifyPlaylists(Result<(crate::spotify::SpotifyApi, Vec<(String, String, u32)>), String>),
+    LastfmToken(Result<String, String>),
+    LastfmSession(Result<(crate::lastfm::LastfmClient, String), String>),
+    BrowseImport(Result<Vec<Track>, String>),
+    PlaylistLoaded {
+        result: Result<Vec<Track>, String>,
+        entry: PlaylistEntry,
+        append: bool,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct PlaylistEntry {
     pub name: String,
@@ -159,6 +173,16 @@ pub struct LayoutRects {
     pub progress: Rect,
     pub progress_total_ms: u64,
     pub art_area: Rect,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TrackInfoSnapshot {
+    pub path: PathBuf,
+    pub meta: crate::metadata::FullMeta,
+    pub is_local: bool,
+    pub file_size: u64,
+    pub youtube_cached: bool,
+    pub has_local_lrc: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +226,12 @@ pub struct LibraryViewFingerprint {
 #[derive(Debug)]
 pub struct LibraryViewCache {
     pub fingerprint: LibraryViewFingerprint,
+    pub rows: Vec<LibraryRow>,
+}
+
+#[derive(Debug)]
+pub struct BrowserRowsCache {
+    pub path: PathBuf,
     pub rows: Vec<LibraryRow>,
 }
 

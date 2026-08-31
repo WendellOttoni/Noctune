@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{Networks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
 use crate::{audio::Track, history::PlayHistory};
@@ -95,6 +95,7 @@ pub struct SystemStats {
     pub cpu_pct: f32,
     pub ram_mb: u64,
     pub net_down_kbps: f64,
+    last_refresh: Instant,
 }
 
 impl SystemStats {
@@ -111,11 +112,17 @@ impl SystemStats {
             cpu_pct: 0.0,
             ram_mb: 0,
             net_down_kbps: 0.0,
+            last_refresh: Instant::now() - Duration::from_secs(1),
         }
     }
 
-    /// Call once per second from the tick loop.
     pub fn refresh(&mut self) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_refresh);
+        if elapsed < Duration::from_secs(1) {
+            return;
+        }
+        self.last_refresh = now;
         self.sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[self.pid]),
             true,
@@ -128,6 +135,6 @@ impl SystemStats {
 
         self.networks.refresh();
         let bytes: u64 = self.networks.values().map(|n| n.received()).sum();
-        self.net_down_kbps = bytes as f64 / 1024.0;
+        self.net_down_kbps = bytes as f64 / 1024.0 / elapsed.as_secs_f64();
     }
 }

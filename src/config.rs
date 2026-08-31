@@ -268,6 +268,8 @@ pub struct Playback {
     pub default_volume: f32,
     pub shuffle: bool,
     pub repeat: bool,
+    #[serde(default)]
+    pub repeat_mode: Option<String>,
     #[serde(default = "default_crossfade_secs")]
     pub crossfade_secs: f32,
     #[serde(default = "default_eq_preset")]
@@ -321,6 +323,7 @@ impl Default for Config {
                 default_volume: 0.7,
                 shuffle: false,
                 repeat: false,
+                repeat_mode: None,
                 crossfade_secs: 2.0,
                 eq_preset: "Flat".to_string(),
                 endless_mode: false,

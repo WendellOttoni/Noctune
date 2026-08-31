@@ -7,6 +7,39 @@ use crate::audio::Track;
 
 use super::{ReplayGainMode, SortMode};
 
+const ACTIVE_FRAME_MS: u64 = 33;
+const IDLE_FRAME_MS: u64 = 100;
+
+pub fn frame_poll_interval(playback_active: bool) -> std::time::Duration {
+    std::time::Duration::from_millis(if playback_active {
+        ACTIVE_FRAME_MS
+    } else {
+        IDLE_FRAME_MS
+    })
+}
+
+pub fn next_queue_index(queue_len: usize, current: usize, repeat_all: bool) -> Option<usize> {
+    if queue_len == 0 {
+        None
+    } else if current + 1 < queue_len {
+        Some(current + 1)
+    } else if repeat_all {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+pub fn previous_queue_index(queue_len: usize, current: usize) -> Option<usize> {
+    if queue_len == 0 {
+        None
+    } else if current == 0 {
+        Some(queue_len - 1)
+    } else {
+        Some(current - 1)
+    }
+}
+
 pub fn rg_scale(track: &Track, mode: ReplayGainMode) -> f32 {
     let db = match mode {
         ReplayGainMode::Off => return 1.0,
@@ -82,5 +115,40 @@ pub fn sort_tracks_with_ratings(
                 rb.cmp(&ra).then_with(|| cmp_ci(&a.title, &b.title))
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{frame_poll_interval, next_queue_index, previous_queue_index};
+    use std::time::Duration;
+
+    #[test]
+    fn uses_fast_frames_during_playback() {
+        assert_eq!(frame_poll_interval(true), Duration::from_millis(33));
+    }
+
+    #[test]
+    fn slows_frames_while_idle() {
+        assert_eq!(frame_poll_interval(false), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn next_queue_index_advances_and_stops_at_end() {
+        assert_eq!(next_queue_index(3, 0, false), Some(1));
+        assert_eq!(next_queue_index(3, 2, false), None);
+    }
+
+    #[test]
+    fn next_queue_index_wraps_only_when_repeating_all() {
+        assert_eq!(next_queue_index(3, 2, true), Some(0));
+        assert_eq!(next_queue_index(0, 0, true), None);
+    }
+
+    #[test]
+    fn previous_queue_index_wraps_to_last_track() {
+        assert_eq!(previous_queue_index(3, 0), Some(2));
+        assert_eq!(previous_queue_index(3, 2), Some(1));
+        assert_eq!(previous_queue_index(0, 0), None);
     }
 }

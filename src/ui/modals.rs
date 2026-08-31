@@ -17,12 +17,12 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
     let Some(track) = app.player.current() else {
         return;
     };
-    let is_local = track.path.exists() && !track.path.to_string_lossy().starts_with("http");
-    let meta = if is_local {
-        crate::metadata::probe_full(&track.path)
-    } else {
-        crate::metadata::FullMeta::default()
-    };
+    let snapshot = app
+        .track_info
+        .as_ref()
+        .filter(|info| info.path == track.path);
+    let is_local = snapshot.map(|info| info.is_local).unwrap_or(false);
+    let meta = snapshot.map(|info| info.meta.clone()).unwrap_or_default();
 
     let muted = parse_color(&app.theme.colors.muted);
     let fg = parse_color(&app.theme.colors.foreground);
@@ -30,21 +30,18 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
 
     let section_header = |title: &str| -> Line<'static> {
         Line::from(vec![
-            Span::styled(format!("── {} ", title), Style::default().fg(accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("── {} ", title),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("─".repeat(40), Style::default().fg(muted)),
         ])
     };
 
     let row = |label: &str, value: String| -> Line<'static> {
         Line::from(vec![
-            Span::styled(
-                format!("  {:<18}", label),
-                Style::default().fg(muted),
-            ),
-            Span::styled(
-                value,
-                Style::default().fg(fg),
-            ),
+            Span::styled(format!("  {:<18}", label), Style::default().fg(muted)),
+            Span::styled(value, Style::default().fg(fg)),
         ])
     };
     let dash = "—".to_string();
@@ -78,10 +75,24 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
 
     let chans_str = meta
         .channels
-        .map(|c| if c == 2 { "Stereo (2ch)".into() } else if c == 1 { "Mono (1ch)".into() } else { format!("{c} canais") })
+        .map(|c| {
+            if c == 2 {
+                "Stereo (2ch)".into()
+            } else if c == 1 {
+                "Mono (1ch)".into()
+            } else {
+                format!("{c} canais")
+            }
+        })
         .unwrap_or_else(|| {
             let c = app.player.current_channels;
-            if c == 2 { "Stereo (2ch)".into() } else if c == 1 { "Mono (1ch)".into() } else { format!("{c} canais") }
+            if c == 2 {
+                "Stereo (2ch)".into()
+            } else if c == 1 {
+                "Mono (1ch)".into()
+            } else {
+                format!("{c} canais")
+            }
         });
 
     let codec_str = meta.codec.unwrap_or_else(|| {
@@ -90,18 +101,25 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             c
         } else {
             let p = track.path.to_string_lossy();
-            if p.contains(".mp3") { "MP3".into() }
-            else if p.contains(".flac") { "FLAC".into() }
-            else if p.contains(".m4a") || p.contains(".aac") { "AAC".into() }
-            else if p.contains(".opus") { "Opus".into() }
-            else if p.contains(".ogg") { "Ogg Vorbis".into() }
-            else { "Audio Stream".into() }
+            if p.contains(".mp3") {
+                "MP3".into()
+            } else if p.contains(".flac") {
+                "FLAC".into()
+            } else if p.contains(".m4a") || p.contains(".aac") {
+                "AAC".into()
+            } else if p.contains(".opus") {
+                "Opus".into()
+            } else if p.contains(".ogg") {
+                "Ogg Vorbis".into()
+            } else {
+                "Audio Stream".into()
+            }
         }
     });
 
     let path_str = track.path.to_string_lossy().to_string();
     let (source_type, file_size_str) = if is_local {
-        let size = std::fs::metadata(&track.path).map(|m| m.len()).unwrap_or(0);
+        let size = snapshot.map(|info| info.file_size).unwrap_or(0);
         let sz_str = if size > 1024 * 1024 {
             format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
         } else if size > 1024 {
@@ -110,12 +128,11 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             format!("{size} B")
         };
         ("Arquivo Local", sz_str)
-    } else if path_str.starts_with("https://www.youtube.com") || path_str.starts_with("https://youtu.be") || path_str.starts_with("ytsearch:") {
-        let cached = crate::config::audio_cache_dir().ok().map(|d| {
-            let hash: u64 = path_str.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-            let base = d.join(format!("noctune_{hash}"));
-            ["mp4", "m4a", "webm", "opus", "mp3"].iter().any(|ext| base.with_extension(ext).exists())
-        }).unwrap_or(false);
+    } else if path_str.starts_with("https://www.youtube.com")
+        || path_str.starts_with("https://youtu.be")
+        || path_str.starts_with("ytsearch:")
+    {
+        let cached = snapshot.map(|info| info.youtube_cached).unwrap_or(false);
         if cached {
             ("YouTube (Cache Local)", "Em cache no disco".into())
         } else {
@@ -127,7 +144,7 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
         ("Streaming", dash.clone())
     };
 
-    let lrc_status = if is_local && track.path.with_extension("lrc").exists() {
+    let lrc_status = if snapshot.map(|info| info.has_local_lrc).unwrap_or(false) {
         "Disponível (.lrc local)"
     } else if app.lyrics.is_some() {
         "Disponível (LRCLIB online)"
@@ -138,7 +155,10 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
     let rg_str = if let Some(t_db) = track.replaygain_track_db {
         format!("{t_db:+.2} dB (escala: {:.2}x)", app.player.rg_scale)
     } else if let Some(a_db) = track.replaygain_album_db {
-        format!("{a_db:+.2} dB (album gain, escala: {:.2}x)", app.player.rg_scale)
+        format!(
+            "{a_db:+.2} dB (album gain, escala: {:.2}x)",
+            app.player.rg_scale
+        )
     } else {
         format!("Desativado (escala: {:.2}x)", app.player.rg_scale)
     };
@@ -146,10 +166,30 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
     let lines: Vec<Line> = vec![
         section_header("Metadados"),
         row("Título", meta.title.unwrap_or_else(|| track.title.clone())),
-        row("Artista", meta.artist.or_else(|| track.artist.clone()).unwrap_or_else(|| dash.clone())),
-        row("Álbum", meta.album.or_else(|| track.album.clone()).unwrap_or_else(|| dash.clone())),
-        row("Ano", meta.year.or_else(|| track.year.clone()).unwrap_or_else(|| dash.clone())),
-        row("Gênero", meta.genre.or_else(|| track.genre.clone()).unwrap_or_else(|| dash.clone())),
+        row(
+            "Artista",
+            meta.artist
+                .or_else(|| track.artist.clone())
+                .unwrap_or_else(|| dash.clone()),
+        ),
+        row(
+            "Álbum",
+            meta.album
+                .or_else(|| track.album.clone())
+                .unwrap_or_else(|| dash.clone()),
+        ),
+        row(
+            "Ano",
+            meta.year
+                .or_else(|| track.year.clone())
+                .unwrap_or_else(|| dash.clone()),
+        ),
+        row(
+            "Gênero",
+            meta.genre
+                .or_else(|| track.genre.clone())
+                .unwrap_or_else(|| dash.clone()),
+        ),
         Line::from(""),
         section_header("Ficha Técnica de Áudio"),
         row("Codec", codec_str),
@@ -166,8 +206,8 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
         row("Localização", path_str),
     ];
 
-    let w = 76.min(area.width.saturating_sub(4)).max(40);
-    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2)).max(12);
+    let w = 76.min(area.width.saturating_sub(2));
+    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -192,7 +232,9 @@ pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
     let entries = &app.playlist_browser_entries;
 
     let w = 60.min(area.width.saturating_sub(4));
-    let h = (entries.len() as u16 + 5).clamp(6, area.height.saturating_sub(4));
+    let h = (entries.len() as u16 + 5)
+        .max(6)
+        .min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -298,7 +340,9 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
     let profiles = &app.profiles;
 
     let w = 60.min(area.width.saturating_sub(4));
-    let h = (profiles.len() as u16 + 6).clamp(7, area.height.saturating_sub(4));
+    let h = (profiles.len() as u16 + 6)
+        .max(7)
+        .min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -404,7 +448,7 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
     let secondary = parse_color(&theme.colors.secondary);
 
     let w = 80.min(area.width.saturating_sub(2));
-    let h = area.height.saturating_sub(4).max(10);
+    let h = area.height.saturating_sub(2);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -612,8 +656,8 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
 pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
     use crate::app::types::SubsonicTab;
     let theme = &app.theme;
-    let w = 78.min(area.width.saturating_sub(4)).max(46);
-    let h = 22.min(area.height.saturating_sub(4)).max(12);
+    let w = 78.min(area.width.saturating_sub(2));
+    let h = 22.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -912,8 +956,8 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 78.min(area.width.saturating_sub(4)).max(46);
-    let h = 22.min(area.height.saturating_sub(4)).max(12);
+    let w = 78.min(area.width.saturating_sub(2));
+    let h = 22.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -1029,7 +1073,9 @@ pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
 pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let w = 70.min(area.width.saturating_sub(4));
-    let h = (app.device_list.len() as u16 + 4).clamp(6, area.height.saturating_sub(4));
+    let h = (app.device_list.len() as u16 + 4)
+        .max(6)
+        .min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -1091,8 +1137,8 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let eq = app.player.eq().snapshot();
     let curve_h = 7usize;
-    let w = 84.min(area.width.saturating_sub(2)).max(52);
-    let h = 26.min(area.height.saturating_sub(2)).max(18);
+    let w = 84.min(area.width.saturating_sub(2));
+    let h = 26.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -1506,8 +1552,8 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
-    let w = (area.width as i32 - 8).max(50) as u16;
-    let h = (area.height as i32 - 4).max(20) as u16;
+    let w = 80.min(area.width.saturating_sub(2));
+    let h = 24.min(area.height.saturating_sub(2));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let rect = Rect {
@@ -1573,10 +1619,10 @@ pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
-    let stats = crate::stats::PlaybackStats::compute(&app.play_history, &app.library, 10);
+    let stats = &app.stats_snapshot;
 
-    let w = (area.width as i32 - 8).max(50) as u16;
-    let h = (area.height as i32 - 4).max(20) as u16;
+    let w = 80.min(area.width.saturating_sub(2));
+    let h = 24.min(area.height.saturating_sub(2));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let rect = Rect {
@@ -1656,7 +1702,7 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 60.min(area.width.saturating_sub(4)).max(30);
+    let w = 60.min(area.width.saturating_sub(2));
     let h = 14.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
@@ -1724,7 +1770,7 @@ pub fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 64.min(area.width.saturating_sub(4)).max(32);
+    let w = 64.min(area.width.saturating_sub(2));
     let h = 10.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
@@ -1794,8 +1840,8 @@ pub fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 84.min(area.width.saturating_sub(2)).max(40);
-    let h = 25.min(area.height.saturating_sub(2)).max(14);
+    let w = 84.min(area.width.saturating_sub(2));
+    let h = 25.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -2068,8 +2114,8 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
-    let w = 78.min(area.width.saturating_sub(4)).max(40);
-    let h = 18.min(area.height.saturating_sub(4)).max(10);
+    let w = 78.min(area.width.saturating_sub(2));
+    let h = 18.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 4,
@@ -2226,8 +2272,8 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
 
 pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 70.min(area.width.saturating_sub(4)).max(44);
-    let h = 18.min(area.height.saturating_sub(4)).max(12);
+    let w = 70.min(area.width.saturating_sub(2));
+    let h = 18.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -2360,8 +2406,8 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
 
 pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
     let theme = &app.theme;
-    let w = 82.min(area.width.saturating_sub(4)).max(46);
-    let h = 22.min(area.height.saturating_sub(4)).max(12);
+    let w = 82.min(area.width.saturating_sub(2));
+    let h = 22.min(area.height.saturating_sub(2));
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,

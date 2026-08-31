@@ -1,3 +1,9 @@
+use anyhow::{Context, Result};
+use lofty::{
+    config::WriteOptions,
+    file::{AudioFile, TaggedFileExt},
+    tag::{items::Timestamp, Accessor, Tag},
+};
 use std::{fs::File, path::Path, time::Duration};
 use symphonia::core::{
     formats::FormatOptions,
@@ -36,6 +42,57 @@ pub struct FullMeta {
     pub sample_rate: Option<u32>,
     pub channels: Option<u8>,
     pub bits_per_sample: Option<u32>,
+}
+
+pub fn write_tags(
+    path: &Path,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    genre: Option<&str>,
+    year: Option<u16>,
+) -> Result<()> {
+    let mut file = lofty::read_from_path(path)
+        .with_context(|| format!("reading tags from {}", path.display()))?;
+    if file.primary_tag().is_none() {
+        file.insert_tag(Tag::new(file.primary_tag_type()));
+    }
+    let tag = file
+        .primary_tag_mut()
+        .context("audio format has no writable tag")?;
+
+    if let Some(value) = title {
+        tag.set_title(value.to_string());
+    } else {
+        tag.remove_title();
+    }
+    if let Some(value) = artist {
+        tag.set_artist(value.to_string());
+    } else {
+        tag.remove_artist();
+    }
+    if let Some(value) = album {
+        tag.set_album(value.to_string());
+    } else {
+        tag.remove_album();
+    }
+    if let Some(value) = genre {
+        tag.set_genre(value.to_string());
+    } else {
+        tag.remove_genre();
+    }
+    if let Some(value) = year {
+        tag.set_date(Timestamp {
+            year: value,
+            ..Timestamp::default()
+        });
+    } else {
+        tag.remove_date();
+    }
+
+    file.save_to_path(path, WriteOptions::default())
+        .with_context(|| format!("writing tags to {}", path.display()))?;
+    Ok(())
 }
 
 pub fn probe_full(path: &Path) -> FullMeta {

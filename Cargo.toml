@@ -1,6 +1,6 @@
 [package]
 name = "noctune"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
@@ -16,6 +16,7 @@ crossterm = "0.28"
 rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
 cpal = "0.15"
 symphonia = { version = "0.5", features = ["all"] }
+lofty = "0.25"
 
 # Config & themes
 serde = { version = "1", features = ["derive"] }

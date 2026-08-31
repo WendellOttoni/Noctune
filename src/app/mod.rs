@@ -4,6 +4,7 @@ mod playback;
 mod prefetch;
 mod scan;
 mod services;
+mod tick;
 pub mod types;
 mod util;
 
@@ -19,7 +20,7 @@ use notify::Watcher as _;
 use self::prefetch::{PrefetchSlots, PreloadedTrack, SlotKind};
 use self::scan::scan_library_with_progress;
 pub use self::types::*;
-use self::util::{rg_scale, sort_tracks};
+use self::util::{frame_poll_interval, rg_scale};
 
 use crate::{
     album_art::ArtPicker,
@@ -71,6 +72,8 @@ pub struct App {
     pub endless_mode: bool,
     pub eq_preset_idx: usize,
     pub show_info: bool,
+    pub track_info: Option<TrackInfoSnapshot>,
+    pub track_info_rx: Option<std::sync::mpsc::Receiver<TrackInfoSnapshot>>,
     pub theme_names: Vec<String>,
     pub theme_idx: usize,
     pub last_drag_seek: Option<std::time::Instant>,
@@ -95,11 +98,13 @@ pub struct App {
     pub play_history_revision: u64,
     pub smart_cache: Option<SmartRowsCache>,
     pub library_view_cache: Option<LibraryViewCache>,
+    pub browser_rows_cache: Option<BrowserRowsCache>,
     pub radio_mode: crate::radio_mode::RadioMode,
     pub radio_fetch_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub radio_seed_editing: bool,
     pub radio_seed_input: String,
     pub show_stats: bool,
+    pub stats_snapshot: crate::stats::PlaybackStats,
     pub show_lastfm_panel: bool,
     pub lastfm_panel_recent: Vec<crate::lastfm::RecentTrack>,
     pub lastfm_panel_top_artists: Vec<crate::lastfm::TopArtist>,
@@ -233,6 +238,8 @@ pub struct App {
         std::sync::mpsc::Receiver<Result<Vec<crate::share::api::SharedPlaylistSummary>, String>>,
     >,
     pub(crate) share_publish_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    pub(crate) service_tx: std::sync::mpsc::Sender<ServiceEvent>,
+    pub(crate) service_rx: std::sync::mpsc::Receiver<ServiceEvent>,
 }
 
 impl App {
@@ -292,7 +299,13 @@ impl App {
         let tap = player.tap();
 
         let config_shuffle = config.playback.shuffle;
-        let config_repeat = config.playback.repeat;
+        let config_repeat = match config.playback.repeat_mode.as_deref() {
+            Some("one") => RepeatMode::One,
+            Some("all") => RepeatMode::All,
+            Some("off") => RepeatMode::Off,
+            _ if config.playback.repeat => RepeatMode::All,
+            _ => RepeatMode::Off,
+        };
         let config_endless = config.playback.endless_mode;
         let config_keybinds = config.keybinds.clone();
         let spotify_client_id = config.spotify.client_id.clone();
@@ -324,6 +337,7 @@ impl App {
             .and_then(|t| crate::spotify::SpotifyApi::new(spotify_client_id.clone(), t).ok());
 
         let (scan_tx, scan_rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let (service_tx, service_rx) = std::sync::mpsc::channel::<ServiceEvent>();
         let (progress_tx, scan_progress_rx) = std::sync::mpsc::channel::<(usize, usize)>();
         let scan_dirs = config.music_dirs.clone();
         let cache_cfg = config.cache.clone();
@@ -382,11 +396,7 @@ impl App {
             search: String::new(),
             search_editing: false,
             shuffle: config_shuffle,
-            repeat: if config_repeat {
-                RepeatMode::All
-            } else {
-                RepeatMode::Off
-            },
+            repeat: config_repeat,
             show_help: false,
             help_scroll: 0,
             sort: SortMode::Title,
@@ -411,6 +421,8 @@ impl App {
             endless_mode: config_endless,
             eq_preset_idx: 0,
             show_info: false,
+            track_info: None,
+            track_info_rx: None,
             theme_names: Vec::new(),
             theme_idx: 0,
             last_drag_seek: None,
@@ -435,11 +447,13 @@ impl App {
             play_history_revision: 0,
             smart_cache: None,
             library_view_cache: None,
+            browser_rows_cache: None,
             radio_mode: crate::radio_mode::RadioMode::default(),
             radio_fetch_rx: None,
             radio_seed_editing: false,
             radio_seed_input: String::new(),
             show_stats: false,
+            stats_snapshot: crate::stats::PlaybackStats::default(),
             show_lastfm_panel: false,
             lastfm_panel_recent: Vec::new(),
             lastfm_panel_top_artists: Vec::new(),
@@ -566,6 +580,8 @@ impl App {
             browse_row: 0,
             browse_rx: None,
             share_publish_rx: None,
+            service_tx,
+            service_rx,
         };
 
         if let Some(tokens) = crate::spotify::load_tokens() {
@@ -625,7 +641,8 @@ impl App {
             terminal.draw(|f| ui::render(f, self))?;
             self.render_overlay_art();
             self.tick()?;
-            if event::poll(Duration::from_millis(33))? {
+            let playback_active = self.player.current().is_some() && !self.player.is_paused();
+            if event::poll(frame_poll_interval(playback_active))? {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
                     Event::Mouse(m) => self.on_mouse(m),
@@ -636,7 +653,8 @@ impl App {
         self.config.playback.default_volume = self.player.volume();
         self.config.playback.shuffle = self.shuffle;
         self.config.playback.repeat = matches!(self.repeat, RepeatMode::All | RepeatMode::One);
-        let _ = self.config.save();
+        self.config.playback.repeat_mode = Some(self.repeat.label().to_string());
+        self.config.save()?;
         Ok(())
     }
 
@@ -644,187 +662,12 @@ impl App {
         self.tick_count = self.tick_count.wrapping_add(1);
 
         crate::media_session::pump_messages();
+        self.poll_plugins();
+        self.poll_service_events();
 
-        let (p_msgs, p_acts) = if let Some(engine) = &self.plugins {
-            engine.set_state(self.player.current(), self.player.volume());
-            (engine.drain_messages(), engine.drain_actions())
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        for msg in p_msgs {
-            self.set_info(msg);
-        }
-        for act in p_acts {
-            self.run_action(act);
-        }
-
-        if self.tick_count.is_multiple_of(30) {
-            self.sys_stats.refresh();
-        }
-
-        if let Some(rx) = &self.scan_progress_rx {
-            while let Ok(p) = rx.try_recv() {
-                self.scan_progress = Some(p);
-            }
-        }
-
-        if let Some(rx) = &self.scan_rx {
-            match rx.try_recv() {
-                Ok(mut tracks) => {
-                    sort_tracks(&mut tracks, self.sort);
-                    let prev_n = self.library.len();
-                    let n = tracks.len();
-                    let live_paths: std::collections::HashSet<PathBuf> =
-                        tracks.iter().map(|t| t.path.clone()).collect();
-                    let before_queue = self.queue.len();
-                    self.queue.retain(|t| {
-                        let p = t.path.to_string_lossy();
-                        p.starts_with("http://")
-                            || p.starts_with("https://")
-                            || p.starts_with("spotify:")
-                            || live_paths.contains(&t.path)
-                    });
-                    let removed_from_queue = before_queue - self.queue.len();
-                    self.library = tracks;
-                    self.library_revision = self.library_revision.wrapping_add(1);
-                    self.library_state.select(if self.library.is_empty() {
-                        None
-                    } else {
-                        Some(0)
-                    });
-                    self.set_info(match (n as i64 - prev_n as i64, removed_from_queue) {
-                        (0, 0) if prev_n > 0 => format!("Library: {n} tracks (unchanged)."),
-                        (d, 0) if d > 0 => format!("Library: +{d} → {n} tracks."),
-                        (d, 0) if d < 0 => format!("Library: {d} → {n} tracks."),
-                        (_, r) if r > 0 => format!("Library: {n} tracks ({r} dropped from queue)."),
-                        _ => format!("Library: {n} tracks."),
-                    });
-                    self.scan_rx = None;
-                    self.scan_progress_rx = None;
-                    self.scan_progress = None;
-                    if let Some(db) = &self.db {
-                        let tracks_clone = self.library.clone();
-                        let db_clone = db.clone();
-                        std::thread::spawn(move || {
-                            let _ = db_clone.sync_tracks(&tracks_clone);
-                        });
-                    }
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.set_error(
-                        "Library: scan failed — check permissions on music_dirs in config.toml",
-                    );
-                    self.scan_rx = None;
-                    self.scan_progress_rx = None;
-                    self.scan_progress = None;
-                }
-            }
-        }
-
-        if let Some(rx) = &self.fs_event_rx {
-            loop {
-                match rx.try_recv() {
-                    Ok(Ok(event)) => {
-                        let relevant = matches!(
-                            event.kind,
-                            notify::EventKind::Create(_)
-                                | notify::EventKind::Remove(_)
-                                | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
-                        );
-                        if relevant {
-                            self.rescan_debounce_until = Some(
-                                std::time::Instant::now()
-                                    + Duration::from_millis(self.config.library.watch_debounce_ms),
-                            );
-                        }
-                    }
-                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                }
-            }
-        }
-
-        if let Some(rx) = &self.config_watcher_rx {
-            let mut reload_config = false;
-            let mut reload_theme = false;
-            let mut reload_presets = false;
-
-            while let Ok(res) = rx.try_recv() {
-                if let Ok(event) = res {
-                    for path in event.paths {
-                        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        if fname == "config.toml" {
-                            reload_config = true;
-                        } else if fname == "eq_presets.toml" {
-                            reload_presets = true;
-                        } else if fname.ends_with(".toml") {
-                            reload_theme = true;
-                        }
-                    }
-                }
-            }
-
-            if reload_config {
-                if let Ok((new_cfg, warnings)) = crate::config::Config::load_or_default() {
-                    for w in &warnings {
-                        tracing::warn!(target: "config", "hot-reload warning: {w}");
-                    }
-                    if new_cfg.theme != self.theme.name {
-                        if let Ok(t) = crate::theme::Theme::load(&new_cfg.theme) {
-                            self.theme = t;
-                            self.set_info(format!("Config & Tema: 🎨 {}", new_cfg.theme));
-                        }
-                    } else {
-                        self.set_info("Configuração recarregada (config.toml)");
-                    }
-                    let (bindings, _) = Bindings::from_config(&new_cfg.keybinds);
-                    self.bindings = bindings;
-                    self.player.crossfade_secs = new_cfg.playback.crossfade_secs;
-                    self.config = new_cfg;
-                }
-            } else if reload_theme {
-                let name = self.theme.name.clone();
-                if let Ok(t) = crate::theme::Theme::load(&name) {
-                    self.theme = t;
-                    self.set_info(format!("Tema recarregado: 🎨 {name}"));
-                }
-                // Refresh cached theme names list
-                if let Ok(dir) = crate::config::themes_dir() {
-                    let mut names: Vec<String> = std::fs::read_dir(&dir)
-                        .ok()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|e| e.ok())
-                        .filter_map(|e| {
-                            let p = e.path();
-                            if p.extension().and_then(|s| s.to_str()) == Some("toml") {
-                                p.file_stem()
-                                    .and_then(|s| s.to_str())
-                                    .map(|s| s.to_string())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    names.sort();
-                    if !names.is_empty() {
-                        self.theme_names = names;
-                    }
-                }
-            } else if reload_presets {
-                self.custom_eq_presets = crate::config::EqPresets::load().presets;
-                self.set_info("Presets de equalização recarregados");
-            }
-        }
-
-        if let Some(until) = self.rescan_debounce_until {
-            if std::time::Instant::now() >= until && self.scan_rx.is_none() {
-                self.rescan_debounce_until = None;
-                self.start_async_scan();
-                self.set_info("Library changed — rescanning…");
-            }
-        }
+        self.sys_stats.refresh();
+        self.poll_library_scan();
+        self.poll_watchers();
 
         if let Some(rx) = &self.spotify_search_rx {
             match rx.try_recv() {
@@ -842,6 +685,19 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.spotify_search_rx = None;
+                }
+            }
+        }
+
+        if let Some(rx) = &self.track_info_rx {
+            match rx.try_recv() {
+                Ok(snapshot) => {
+                    self.track_info = Some(snapshot);
+                    self.track_info_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.track_info_rx = None;
                 }
             }
         }
@@ -1137,7 +993,11 @@ impl App {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let entry = (song.clone(), artist.clone(), now);
-            if !self.radio_history.iter().any(|(s, a, _)| s == &song && a == &artist) {
+            if !self
+                .radio_history
+                .iter()
+                .any(|(s, a, _)| s == &song && a == &artist)
+            {
                 self.radio_history.insert(0, entry);
                 if self.radio_history.len() > 30 {
                     self.radio_history.pop();
