@@ -53,6 +53,8 @@ pub struct App {
     pub search: String,
     pub search_editing: bool,
     pub shuffle: bool,
+    pub(crate) shuffle_played: std::collections::HashSet<PathBuf>,
+    pub(crate) shuffle_next_path: Option<PathBuf>,
     pub repeat: RepeatMode,
     pub show_help: bool,
     pub help_scroll: u16,
@@ -396,6 +398,8 @@ impl App {
             search: String::new(),
             search_editing: false,
             shuffle: config_shuffle,
+            shuffle_played: std::collections::HashSet::new(),
+            shuffle_next_path: None,
             repeat: config_repeat,
             show_help: false,
             help_scroll: 0,
@@ -860,17 +864,14 @@ impl App {
                         self.play_current();
                     } else {
                         self.stream_reconnect_attempts = 0;
+                        self.stop_playback();
                         self.set_error(format!("Playlist/Stream: falha ao carregar — {e}"));
-                        self.load_rx = None;
-                        self.loading_track = None;
-                        self.pending_seek_offset = None;
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.load_rx = None;
-                    self.loading_track = None;
-                    self.pending_seek_offset = None;
+                    self.stop_playback();
+                    self.set_error("Playback loader disconnected.");
                 }
             }
         }
@@ -1081,7 +1082,9 @@ impl App {
                     if track_path.exists() && !track_path.to_string_lossy().starts_with("http") {
                         let lrc_path = track_path.with_extension("lrc");
                         if !lrc_path.exists() {
-                            let _ = lyrics.save_to_file(&lrc_path);
+                            if let Err(error) = lyrics.save_to_file(&lrc_path) {
+                                self.set_error(format!("Could not save lyrics: {error}"));
+                            }
                         }
                     }
                     if self
@@ -1227,7 +1230,7 @@ impl App {
                     format!("OK: Prev track -> {title}")
                 }
                 C::Stop => {
-                    self.player.stop();
+                    self.stop_playback();
                     "OK: Stopped".to_string()
                 }
                 C::Volume(arg) => {
@@ -1309,7 +1312,7 @@ impl App {
 
         if let Some(when) = self.sleep_until {
             if std::time::Instant::now() >= when {
-                self.player.stop();
+                self.stop_playback();
                 self.sleep_until = None;
                 self.set_info("Sleep timer reached — playback stopped.");
                 return Ok(());
@@ -1356,29 +1359,8 @@ impl App {
                     self.queue_index = Some(idx);
                     self.queue_state.select(Some(idx));
                 }
-                self.lyrics = crate::lyrics::Lyrics::for_track(&next_track.path);
-                self.set_info(format!("Playing: {}", next_track.display()));
                 self.current_play_recorded = false;
-                let artist = next_track.artist.clone().unwrap_or_default();
-                let title = next_track.title.clone();
-                let ts = crate::lastfm::now_unix();
-                self.lastfm_scrobble_info = Some((artist.clone(), title.clone(), ts));
-                self.lastfm_scrobbled = false;
-                if let Some(lfm) = self.lastfm.clone() {
-                    let a = artist.clone();
-                    let ti = title.clone();
-                    std::thread::spawn(move || {
-                        let _ = lfm.update_now_playing(&a, &ti);
-                    });
-                }
-                if let Some(tx) = &self.discord_tx {
-                    let _ = tx.send(crate::discord::Cmd::Update {
-                        title,
-                        artist,
-                        start_secs: ts as i64,
-                    });
-                }
-                self.push_history(next_track);
+                self.on_track_started(next_track);
             }
         }
 
@@ -1462,7 +1444,7 @@ impl App {
             }
         }
 
-        if self.player.is_empty() && self.player.current().is_some() {
+        if self.load_rx.is_none() && self.player.is_empty() && self.player.current().is_some() {
             if let Some(cur) = self.player.current() {
                 if Self::track_is_live_radio(cur)
                     && self.stream_reconnect_attempts < 3

@@ -13,6 +13,21 @@ use super::{
 };
 
 impl App {
+    pub(crate) fn cancel_pending_playback(&mut self) {
+        self.load_rx = None;
+        self.loading_track = None;
+        self.pending_seek_offset = None;
+        self.pending_crossfade_idx = None;
+        self.pending_gapless_idx = None;
+        self.player.cancel_transition();
+        self.prefetch.invalidate();
+    }
+
+    pub(crate) fn stop_playback(&mut self) {
+        self.cancel_pending_playback();
+        self.player.stop();
+    }
+
     pub(crate) fn adjust_viz_sensitivity(&mut self, delta: f32) {
         let new_val = self.tap.adjust_sensitivity(delta);
         self.config.visualizer.sensitivity = new_val;
@@ -149,6 +164,70 @@ impl App {
             && t.duration.is_none()
     }
 
+    pub(crate) fn reset_shuffle_cycle(&mut self) {
+        self.shuffle_played.clear();
+        self.shuffle_next_path = None;
+        if let Some(path) = self
+            .queue_index
+            .and_then(|index| self.queue.get(index))
+            .map(|track| track.path.clone())
+        {
+            self.shuffle_played.insert(path);
+        }
+        self.refresh_shuffle_plan();
+    }
+
+    pub(crate) fn refresh_shuffle_plan(&mut self) {
+        if !self.shuffle {
+            self.shuffle_played.clear();
+            self.shuffle_next_path = None;
+            return;
+        }
+
+        let current_path = self
+            .queue_index
+            .and_then(|index| self.queue.get(index))
+            .map(|track| track.path.clone());
+        if let Some(path) = &current_path {
+            self.shuffle_played.insert(path.clone());
+        }
+
+        let planned_is_valid = self.shuffle_next_path.as_ref().is_some_and(|planned| {
+            current_path.as_ref() != Some(planned)
+                && !self.shuffle_played.contains(planned)
+                && self.queue.iter().any(|track| &track.path == planned)
+        });
+        if planned_is_valid {
+            return;
+        }
+
+        let mut candidates: Vec<PathBuf> = self
+            .queue
+            .iter()
+            .filter(|track| !self.shuffle_played.contains(&track.path))
+            .map(|track| track.path.clone())
+            .collect();
+        if candidates.is_empty() && matches!(self.repeat, RepeatMode::All) {
+            self.shuffle_played.clear();
+            if let Some(path) = &current_path {
+                self.shuffle_played.insert(path.clone());
+            }
+            candidates = self
+                .queue
+                .iter()
+                .filter(|track| !self.shuffle_played.contains(&track.path))
+                .map(|track| track.path.clone())
+                .collect();
+        }
+
+        self.shuffle_next_path = if candidates.is_empty() {
+            None
+        } else {
+            let index = pseudo_random(candidates.len());
+            Some(candidates.swap_remove(index))
+        };
+    }
+
     pub(crate) fn seek_relative_async(&mut self, delta_secs: i64) {
         let Some(track) = self.player.current().cloned() else {
             return;
@@ -220,11 +299,21 @@ impl App {
             return None;
         }
         if self.shuffle && self.queue.len() > 1 {
-            let mut idx = pseudo_random(self.queue.len());
-            if idx == current {
-                idx = (idx + 1) % self.queue.len();
-            }
-            Some(idx)
+            self.shuffle_next_path
+                .as_ref()
+                .and_then(|path| self.queue.iter().position(|track| &track.path == path))
+                .or_else(|| {
+                    let candidates: Vec<usize> = self
+                        .queue
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, track)| {
+                            *index != current && !self.shuffle_played.contains(&track.path)
+                        })
+                        .map(|(index, _)| index)
+                        .collect();
+                    (!candidates.is_empty()).then(|| candidates[pseudo_random(candidates.len())])
+                })
         } else {
             next_queue_index(
                 self.queue.len(),
@@ -239,7 +328,11 @@ impl App {
             return;
         }
         let i = self.queue_index.unwrap_or(0);
-        let new = self.pick_next_index(i).unwrap_or(0);
+        let Some(new) = self.pick_next_index(i) else {
+            self.stop_playback();
+            self.queue_index = None;
+            return;
+        };
         self.queue_index = Some(new);
         self.queue_state.select(Some(new));
 
@@ -383,9 +476,8 @@ impl App {
                         }
                     }
                 }
-                self.player.stop();
+                self.stop_playback();
                 self.queue_index = None;
-                self.prefetch.invalidate();
             }
         }
     }
@@ -732,6 +824,9 @@ impl App {
                 if i < self.queue.len() {
                     let label = format!("removed '{}'", self.queue[i].display());
                     self.push_undo_snapshot(label);
+                    if self.queue_index == Some(i) {
+                        self.stop_playback();
+                    }
                     self.queue.remove(i);
                     if self.queue_index == Some(i) {
                         self.queue_index = None;
@@ -772,8 +867,7 @@ impl App {
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
-        self.prefetch.invalidate();
-        self.player.stop();
+        self.stop_playback();
         self.album_art = None;
         self.art_generation = self.art_generation.wrapping_add(1);
         self.art_picker.invalidate();
@@ -808,14 +902,11 @@ impl App {
     }
 
     pub(crate) fn play_instant(&mut self, source: crate::audio::SymphoniaSource, track: Track) {
+        self.cancel_pending_playback();
         self.current_play_recorded = false;
         self.lastfm_scrobbled = false;
         self.lastfm_scrobble_info = None;
         self.undo_stack.clear();
-        self.load_rx = None;
-        self.loading_track = None;
-        self.pending_seek_offset = None;
-
         self.player.rg_scale = rg_scale(&track, self.replaygain_mode);
 
         match self.player.play_prepared(source, &track, Duration::ZERO) {
@@ -830,6 +921,7 @@ impl App {
     }
 
     pub(crate) fn play_current(&mut self) {
+        self.cancel_pending_playback();
         self.current_play_recorded = false;
         self.lastfm_scrobbled = false;
         self.lastfm_scrobble_info = None;

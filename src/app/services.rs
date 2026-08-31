@@ -1141,6 +1141,13 @@ impl App {
 
     pub(crate) fn on_track_started(&mut self, t: Track) {
         self.stream_reconnect_attempts = 0;
+        if self.shuffle {
+            self.shuffle_played.insert(t.path.clone());
+            if self.shuffle_next_path.as_ref() == Some(&t.path) {
+                self.shuffle_next_path = None;
+            }
+            self.refresh_shuffle_plan();
+        }
         self.album_art = None;
         self.art_generation = self.art_generation.wrapping_add(1);
         self.art_picker.invalidate();
@@ -1196,6 +1203,7 @@ impl App {
     }
 
     pub(crate) fn update_prefetch_slots(&mut self) {
+        self.refresh_shuffle_plan();
         let Some(cur_idx) = self.queue_index else {
             self.prefetch.invalidate();
             return;
@@ -1299,7 +1307,7 @@ impl App {
             E::Toggle => self.player.toggle(),
             E::Next => self.next(),
             E::Previous => self.prev(),
-            E::Stop => self.player.stop(),
+            E::Stop => self.stop_playback(),
             _ => {}
         }
     }

@@ -27,6 +27,7 @@ const SECTIONS: &[ShortcutSection] = &[
             ("s", "Parar áudio e descarregar"),
             ("← / →", "Buscar -5s / +5s na faixa"),
             ("+ / -", "Aumentar / Diminuir volume"),
+            ("S", "Alternar ordem Sequencial / Aleatória"),
             ("m", "Alternar Mini Player"),
             ("Ctrl+P / :", "Paleta de Comandos unificada"),
         ],
@@ -63,6 +64,7 @@ const SECTIONS: &[ShortcutSection] = &[
         shortcuts: &[
             ("e", "Painel de Áudio & EQ 10-Bandas"),
             ("0 / Shift+E", "Ciclar presets de EQ (Rock, Bass...)"),
+            ("Ctrl+E", "Equalizador gráfico de 10 bandas"),
             ("v", "Ciclar visualizador FFT (Spectrum, VU...)"),
             ("[ / ]", "Ajustar sensibilidade do VU"),
             ("y", "Letras sincronizadas (Karaokê LRC)"),
@@ -92,6 +94,7 @@ const SECTIONS: &[ShortcutSection] = &[
             ("X", "Publicar playlist na comunidade"),
             ("C", "Explorar & importar playlists públicas"),
             ("T", "Editor de tags ID3 e metadados"),
+            ("Ctrl+T", "Sleep Timer de 30 minutos"),
             (":endless", "Alternar Auto-Play Infinito (♾️)"),
             ("R", "Reescanear diretórios de música"),
             ("U / Shift+U", "Verificar atualizações no GitHub"),

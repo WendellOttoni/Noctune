@@ -56,7 +56,7 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
             Span::styled(format!("{state_sym}  "), Style::default().fg(accent)),
             Span::styled(title, Style::default().fg(fg).add_modifier(Modifier::BOLD)),
             Span::styled(queue_pos, Style::default().fg(muted)),
-            Span::styled("  [m] full", Style::default().fg(muted)),
+            Span::styled("  [S] order  [m] full", Style::default().fg(muted)),
         ])),
         rows[0],
     );
@@ -77,7 +77,7 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     // Row 2: time / volume / modes
     let total_str = total.map(format_duration).unwrap_or_else(|| "--:--".into());
     let vol_pct = (app.player.volume() * 100.0).round() as u32;
-    let shuf = if app.shuffle { " shuf" } else { "" };
+    let order = if app.shuffle { " random" } else { " sequence" };
     let rep = match app.repeat {
         crate::app::RepeatMode::Off => "",
         crate::app::RepeatMode::All => " rep:all",
@@ -91,7 +91,7 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
             format!(
-                " {} / {}  vol:{}%{shuf}{rep}{rg}",
+                " {} / {}  vol:{}%{order}{rep}{rg}",
                 format_duration(elapsed),
                 total_str,
                 vol_pct
@@ -706,7 +706,7 @@ pub fn render_status(f: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(Span::styled(status_text, status_style(app))).wrap(Wrap { trim: true });
     f.render_widget(status, chunks[0]);
 
-    let shuf = if app.shuffle { "shuf " } else { "" };
+    let order = if app.shuffle { "random " } else { "sequence " };
     let rep = match app.repeat {
         crate::app::RepeatMode::Off => "",
         crate::app::RepeatMode::All => "rep:all ",
@@ -726,7 +726,7 @@ pub fn render_status(f: &mut Frame, area: Rect, app: &App) {
         crate::app::ReplayGainMode::Album => "rg:album ".to_string(),
     };
     let hints = Paragraph::new(Span::styled(
-        format!("{sleep}{shuf}{rep}{rg}{sort}[?] help [q] quit "),
+        format!("{sleep}{order}{rep}{rg}{sort}[S] order [?] help [q] quit "),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     ))
     .alignment(Alignment::Right);

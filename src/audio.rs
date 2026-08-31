@@ -486,6 +486,12 @@ impl Player {
         self.crossfade_start = None;
         self.crossfade_load_rx = None;
         self.crossfade_pending = None;
+        self.sink.set_volume(self.volume * self.rg_scale);
+    }
+
+    pub fn cancel_transition(&mut self) {
+        self.cancel_crossfade();
+        self.gapless_queued = None;
     }
 
     pub fn is_crossfading(&self) -> bool {

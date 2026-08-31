@@ -390,17 +390,23 @@ impl App {
             Action::Next => self.next(),
             Action::Prev => self.prev(),
             Action::Stop => {
-                self.player.stop();
+                self.stop_playback();
                 if let Some(tx) = &self.discord_tx {
                     let _ = tx.send(crate::discord::Cmd::Clear);
                 }
             }
             Action::Shuffle => {
                 self.shuffle = !self.shuffle;
+                self.config.playback.shuffle = self.shuffle;
+                self.reset_shuffle_cycle();
                 self.update_prefetch_slots();
                 self.set_info(format!(
-                    "Shuffle: {}",
-                    if self.shuffle { "on" } else { "off" }
+                    "Ordem: {}",
+                    if self.shuffle {
+                        "aleatória"
+                    } else {
+                        "sequencial"
+                    }
                 ));
             }
             Action::Repeat => {
@@ -483,11 +489,13 @@ impl App {
                 let v = (self.player.volume() + 0.05).min(1.5);
                 self.player.set_volume(v);
                 self.config.playback.default_volume = v;
+                self.set_info(format!("Volume: {}%", (v * 100.0).round() as u32));
             }
             Action::VolumeDown => {
                 let v = (self.player.volume() - 0.05).max(0.0);
                 self.player.set_volume(v);
                 self.config.playback.default_volume = v;
+                self.set_info(format!("Volume: {}%", (v * 100.0).round() as u32));
             }
             Action::SeekBack => {
                 self.seek_relative_async(-5);
@@ -1549,15 +1557,23 @@ impl App {
                 self.set_info("Profile name (Enter to save, Esc to cancel):");
             }
             KeyCode::Char('D') if self.profile_browser_row < self.profiles.len() => {
-                let removed = self.profiles.remove(self.profile_browser_row);
-                if self.profile_browser_row > 0 {
-                    self.profile_browser_row -= 1;
-                }
+                let mut profiles = self.profiles.clone();
+                let removed = profiles.remove(self.profile_browser_row);
                 let store = crate::config::Profiles {
-                    profiles: self.profiles.clone(),
+                    profiles: profiles.clone(),
                 };
-                let _ = store.save();
-                self.set_info(format!("Profile '{}' deleted.", removed.name));
+                match store.save() {
+                    Ok(()) => {
+                        self.profiles = profiles;
+                        if self.profile_browser_row > 0 {
+                            self.profile_browser_row -= 1;
+                        }
+                        self.set_info(format!("Profile '{}' deleted.", removed.name));
+                    }
+                    Err(error) => {
+                        self.set_error(format!("Could not delete profile: {error}"));
+                    }
+                }
             }
             _ => {}
         }

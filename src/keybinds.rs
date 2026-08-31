@@ -233,9 +233,15 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('S')), Action::Shuffle),
             (KeyChord::new(KeyCode::Char('r')), Action::Repeat),
             (KeyChord::new(KeyCode::Char('o')), Action::Sort),
-            (KeyChord::new(KeyCode::Char('T')), Action::SleepTimer),
+            (
+                KeyChord::with_mods(KeyCode::Char('t'), KeyModifiers::CONTROL),
+                Action::SleepTimer,
+            ),
             (KeyChord::new(KeyCode::Char('w')), Action::SavePlaylist),
             (KeyChord::new(KeyCode::Char('L')), Action::LoadPlaylist),
+            (KeyChord::new(KeyCode::Char('+')), Action::VolumeUp),
+            (KeyChord::new(KeyCode::Char('=')), Action::VolumeUp),
+            (KeyChord::new(KeyCode::Char('-')), Action::VolumeDown),
             (KeyChord::new(KeyCode::Left), Action::SeekBack),
             (KeyChord::new(KeyCode::Right), Action::SeekForward),
             (KeyChord::new(KeyCode::Up), Action::SelectionUp),
@@ -278,7 +284,10 @@ impl Bindings {
             (KeyChord::new(KeyCode::Char('m')), Action::ToggleMini),
             (KeyChord::new(KeyCode::Char('F')), Action::LastfmLogin),
             (KeyChord::new(KeyCode::Char('D')), Action::SelectDevice),
-            (KeyChord::new(KeyCode::Char('E')), Action::EqTuner),
+            (
+                KeyChord::with_mods(KeyCode::Char('e'), KeyModifiers::CONTROL),
+                Action::EqTuner,
+            ),
             (KeyChord::new(KeyCode::Char('O')), Action::Profiles),
             (KeyChord::new(KeyCode::Char('B')), Action::SpotifyBrowser),
             (KeyChord::new(KeyCode::Char('T')), Action::EditTags),
@@ -435,6 +444,26 @@ mod tests {
         assert_eq!(
             bindings.lookup(KeyCode::Char('n'), KeyModifiers::CONTROL),
             Some(Action::SubsonicBrowser)
+        );
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('+'), KeyModifiers::SHIFT),
+            Some(Action::VolumeUp)
+        );
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('='), KeyModifiers::SHIFT),
+            Some(Action::VolumeUp)
+        );
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('e'), KeyModifiers::CONTROL),
+            Some(Action::EqTuner)
+        );
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('t'), KeyModifiers::CONTROL),
+            Some(Action::SleepTimer)
+        );
+        assert_eq!(
+            bindings.lookup(KeyCode::Char('T'), KeyModifiers::SHIFT),
+            Some(Action::EditTags)
         );
     }
 }
