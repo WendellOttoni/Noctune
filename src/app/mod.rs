@@ -20,6 +20,7 @@ use notify::Watcher as _;
 use self::prefetch::{PrefetchSlots, PreloadedTrack, SlotKind};
 use self::scan::scan_library_with_progress;
 pub use self::types::*;
+pub(crate) use self::util::progress_fraction;
 use self::util::{frame_poll_interval, rg_scale};
 
 use crate::{
@@ -78,7 +79,7 @@ pub struct App {
     pub track_info_rx: Option<std::sync::mpsc::Receiver<TrackInfoSnapshot>>,
     pub theme_names: Vec<String>,
     pub theme_idx: usize,
-    pub last_drag_seek: Option<std::time::Instant>,
+    pub pending_drag_seek: Option<f32>,
     pub clear_confirm_until: Option<std::time::Instant>,
     pub url_rx: Option<std::sync::mpsc::Receiver<Result<Vec<Track>, String>>>,
     pub download_rx: Option<std::sync::mpsc::Receiver<Result<PathBuf, String>>>,
@@ -429,7 +430,7 @@ impl App {
             track_info_rx: None,
             theme_names: Vec::new(),
             theme_idx: 0,
-            last_drag_seek: None,
+            pending_drag_seek: None,
             clear_confirm_until: None,
             url_rx: None,
             download_rx: None,
@@ -811,10 +812,12 @@ impl App {
                     }
                     self.set_info(format!("Added {n} track(s) to queue."));
                     self.url_rx = None;
+                    self.url_input.clear();
                 }
                 Ok(Err(e)) => {
                     self.set_error(format!("Playlist: load failed — {e}"));
                     self.url_rx = None;
+                    self.url_input.clear();
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -822,6 +825,7 @@ impl App {
                         "yt-dlp: worker disconnected — check yt-dlp install (see README)",
                     );
                     self.url_rx = None;
+                    self.url_input.clear();
                 }
             }
         }
@@ -847,12 +851,20 @@ impl App {
                     }
                 }
                 Ok(Err(e)) => {
+                    let was_seek = self.pending_seek_offset.is_some();
                     let is_stream = self
                         .loading_track
                         .as_ref()
                         .map(Self::track_is_stream)
                         .unwrap_or(false);
-                    if is_stream && self.stream_reconnect_attempts < 3 {
+                    if was_seek {
+                        // The old sink is still valid while a seek is prepared.
+                        // Keep it playing if the replacement source could not load.
+                        self.load_rx = None;
+                        self.loading_track = None;
+                        self.pending_seek_offset = None;
+                        self.set_error(format!("Seek: {e}"));
+                    } else if is_stream && self.stream_reconnect_attempts < 3 {
                         self.stream_reconnect_attempts += 1;
                         self.set_info(format!(
                             "⏳ Conexão com a rádio oscilou. Reconectando ({}/3)…",
@@ -870,8 +882,16 @@ impl App {
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.stop_playback();
-                    self.set_error("Playback loader disconnected.");
+                    let was_seek = self.pending_seek_offset.is_some();
+                    self.load_rx = None;
+                    self.loading_track = None;
+                    self.pending_seek_offset = None;
+                    if was_seek {
+                        self.set_error("Seek loader disconnected.");
+                    } else {
+                        self.stop_playback();
+                        self.set_error("Playback loader disconnected.");
+                    }
                 }
             }
         }

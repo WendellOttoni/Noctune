@@ -51,20 +51,21 @@ impl App {
                 && !crate::ytdlp::is_youtube_url(&url);
 
         if is_playlist_file {
+            let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<Vec<Track>, String>>();
+            self.url_rx = Some(rx);
             self.set_info("Loading radio playlist…");
-            match crate::radio::fetch_playlist(&url) {
-                Ok(tracks) if !tracks.is_empty() => {
-                    let n = tracks.len();
-                    let was_empty = self.queue.is_empty();
-                    self.queue.extend(tracks);
-                    if was_empty {
-                        self.queue_state.select(Some(0));
-                    }
-                    self.set_info(format!("Added {n} stream(s) from playlist."));
-                }
-                Ok(_) => self.set_info("Playlist contained no playable streams."),
-                Err(e) => self.set_info(format!("Playlist error: {e}")),
-            }
+            std::thread::spawn(move || {
+                let result = crate::radio::fetch_playlist(&url)
+                    .map_err(|error| error.to_string())
+                    .and_then(|tracks| {
+                        if tracks.is_empty() {
+                            Err("Playlist contained no playable streams.".into())
+                        } else {
+                            Ok(tracks)
+                        }
+                    });
+                let _ = tx.send(result);
+            });
             return;
         }
 

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     album_art,
-    app::{App, Pane},
+    app::{progress_fraction, App, Pane},
     theme::parse_color,
     ui::util::{
         build_eq_row, build_progress, build_volume_bar, format_duration, highlight_match,
@@ -535,7 +535,7 @@ pub fn render_now_playing(f: &mut Frame, area: Rect, app: &mut App) {
                 return None;
             }
             let total_dur = total?;
-            let frac = (hx.saturating_sub(prog.x)) as f32 / prog.width as f32;
+            let frac = progress_fraction(prog, hx);
             let secs = (total_dur.as_secs_f32() * frac.clamp(0.0, 1.0)) as u64;
             Some(format!("  → {:02}:{:02}", secs / 60, secs % 60))
         })
@@ -688,8 +688,6 @@ pub fn render_status(f: &mut Frame, area: Rect, app: &App) {
         format!(" Profile name> {}_", app.profile_name_input)
     } else if app.playlist_name_editing {
         format!(" Name> {}_", app.playlist_name_input)
-    } else if app.url_editing {
-        format!(" URL> {}_", app.url_input)
     } else if app.search_active() {
         format!(" /{}", app.search_query())
     } else if app.is_loading() {

@@ -1,20 +1,21 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use std::time::Duration;
-
 use crate::{
     app::{
         types::{LibraryRow, Pane, SpotifyTab, ViewMode},
-        util::{rect_contains, sort_tracks_with_ratings},
+        util::{progress_fraction, rect_contains, sort_tracks_with_ratings},
         App,
     },
     keybinds::Action,
     ui::util::format_duration,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 impl App {
     pub(crate) fn on_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
             self.should_quit = true;
+            return;
+        }
+        if self.url_rx.is_some() {
             return;
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('d')) {
@@ -233,10 +234,12 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let url = self.url_input.trim().to_string();
-                    self.url_input.clear();
                     self.url_editing = false;
                     if !url.is_empty() {
                         self.start_url_load(url);
+                    }
+                    if self.url_rx.is_none() {
+                        self.url_input.clear();
                     }
                 }
                 KeyCode::Backspace => {
@@ -2038,6 +2041,9 @@ impl App {
     }
 
     pub(crate) fn on_mouse(&mut self, m: MouseEvent) {
+        if self.url_editing || self.url_rx.is_some() {
+            return;
+        }
         if self.show_help {
             match m.kind {
                 MouseEventKind::ScrollUp => {
@@ -2114,13 +2120,23 @@ impl App {
             MouseEventKind::ScrollUp => self.move_selection(-1),
             MouseEventKind::ScrollDown => self.move_selection(1),
             MouseEventKind::Down(MouseButton::Left) => {
-                self.handle_click(m.column, m.row);
+                let progress = self.layout.progress;
+                if rect_contains(progress, m.column, m.row) && progress.width > 0 {
+                    self.pending_drag_seek = Some(progress_fraction(progress, m.column));
+                    self.hover_x = Some(m.column);
+                } else {
+                    self.handle_click(m.column, m.row);
+                }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 self.handle_drag(m.column, m.row);
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                self.last_drag_seek = None;
+                if let Some(frac) = self.pending_drag_seek.take() {
+                    if let Err(e) = self.seek_fraction_async(frac) {
+                        self.set_info(format!("Seek error: {e}"));
+                    }
+                }
             }
             MouseEventKind::Moved => {
                 let prog = self.layout.progress;
@@ -2139,17 +2155,8 @@ impl App {
         if !rect_contains(prog, x, y) || prog.width == 0 {
             return;
         }
-        let now = std::time::Instant::now();
-        if let Some(last) = self.last_drag_seek {
-            if now.duration_since(last) < Duration::from_millis(50) {
-                return;
-            }
-        }
-        let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
-        if let Err(e) = self.seek_fraction_async(frac) {
-            self.set_info(format!("Seek error: {e}"));
-        }
-        self.last_drag_seek = Some(now);
+        self.pending_drag_seek = Some(progress_fraction(prog, x));
+        self.hover_x = Some(x);
     }
 
     pub(crate) fn handle_click(&mut self, x: u16, y: u16) {
@@ -2208,7 +2215,7 @@ impl App {
             return;
         }
         if rect_contains(prog, x, y) && prog.width > 0 {
-            let frac = (x.saturating_sub(prog.x)) as f32 / prog.width as f32;
+            let frac = progress_fraction(prog, x);
             if let Err(e) = self.seek_fraction_async(frac) {
                 self.set_info(format!("Seek error: {e}"));
             }

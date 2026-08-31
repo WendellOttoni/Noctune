@@ -47,6 +47,9 @@ pub struct SymphoniaSource {
     buf: Vec<f32>,
     buf_pos: usize,
     sample_buf: Option<SampleBuffer<f32>>,
+    // After an accurate container seek, decode preroll packets but do not expose
+    // them to rodio until the requested timestamp has been reached.
+    seek_ts: Option<u64>,
     // Holds the yt-dlp child process so it's killed when the source is dropped.
     _child: Option<Child>,
 }
@@ -107,6 +110,7 @@ impl SymphoniaSource {
             buf: Vec::new(),
             buf_pos: 0,
             sample_buf: None,
+            seek_ts: None,
             _child: child,
         })
     }
@@ -173,9 +177,10 @@ impl SymphoniaSource {
         use symphonia::core::units::Time;
         let secs = time.as_secs();
         let frac = f64::from(time.subsec_nanos()) / 1_000_000_000.0;
-        self.format
+        let seeked_to = self
+            .format
             .seek(
-                SeekMode::Coarse,
+                SeekMode::Accurate,
                 SeekTo::Time {
                     time: Time {
                         seconds: secs,
@@ -188,7 +193,28 @@ impl SymphoniaSource {
         self.decoder.reset();
         self.buf.clear();
         self.buf_pos = 0;
+        self.seek_ts = Some(seeked_to.required_ts);
         Ok(())
+    }
+
+    /// Seek using the container index when available. If the format cannot seek,
+    /// consume decoded samples as a compatibility fallback.
+    pub fn seek_to_or_skip(&mut self, time: Duration) {
+        if self.seek_to(time).is_ok() {
+            // Decode preroll now, while build_source is on its worker thread,
+            // so attaching the prepared source does not stall the audio thread.
+            let _ = self.fill_buf();
+            return;
+        }
+
+        let rate = self.sample_rate() as u64;
+        let channels = self.channels() as u64;
+        let to_skip = (time.as_millis() as u64 * rate / 1000) * channels;
+        for _ in 0..to_skip {
+            if self.next().is_none() {
+                break;
+            }
+        }
     }
 
     fn fill_buf(&mut self) -> bool {
@@ -209,8 +235,16 @@ impl SymphoniaSource {
             if packet.track_id() != self.track_id {
                 continue;
             }
+            let packet_ts = packet.ts();
             match self.decoder.decode(&packet) {
                 Ok(decoded) => {
+                    if self
+                        .seek_ts
+                        .is_some_and(|required_ts| packet_ts < required_ts)
+                    {
+                        continue;
+                    }
+                    self.seek_ts = None;
                     let spec = *decoded.spec();
                     let cap = decoded.capacity() as u64;
                     let sbuf = match &mut self.sample_buf {
@@ -850,6 +884,11 @@ pub fn build_source(
             // Issue #57: pass the seek offset down to yt-dlp/ffmpeg so the stream
             // starts at the requested position instead of from zero.
             crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)?
+        } else if offset > Duration::ZERO {
+            // A plain HTTP response is a forward-only reader. For on-demand
+            // media, delegate non-zero starts to yt-dlp/ffmpeg instead of
+            // pretending that reopening the URL performed a seek.
+            crate::ytdlp::spawn_yt_dlp_at(&path_str, offset, stream_err)?
         } else {
             // Try direct HTTP stream first with proper headers and MIME hints
             match open_http_stream(&path_str, stream_title) {
@@ -875,17 +914,7 @@ pub fn build_source(
         // to scanning otherwise. Either way it avoids the per-sample loop used before
         // (issue #59). Streams (yt-dlp/HTTP) handle seek by respawning with a start
         // offset — handled at the caller layer (#57).
-        if source.seek_to(offset).is_err() {
-            // Fallback: skip frames the slow way if container seek is unsupported.
-            let rate = source.sample_rate() as u64;
-            let ch = source.channels() as u64;
-            let to_skip = (offset.as_millis() as u64 * rate / 1000) * ch;
-            for _ in 0..to_skip {
-                if source.next().is_none() {
-                    break;
-                }
-            }
-        }
+        source.seek_to_or_skip(offset);
     }
     Ok(source)
 }

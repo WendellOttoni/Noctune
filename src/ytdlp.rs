@@ -166,24 +166,25 @@ pub fn spawn_yt_dlp(
 }
 
 /// Same as `spawn_yt_dlp` but starts playback at `start_offset`. Used by seek in
-/// streams (#57). Requires ffmpeg for non-zero offsets; falls back to a regular
-/// (start-from-zero) spawn when ffmpeg is missing.
+/// streams (#57). Non-zero piped seeks require ffmpeg; Windows can additionally
+/// fall back to downloading the complete file and seeking within the local copy.
 pub fn spawn_yt_dlp_at(
     youtube_url: &str,
     start_offset: Duration,
     stream_err: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
     let offset_secs = start_offset.as_secs();
-    let want_offset = offset_secs > 0 && ffmpeg_available();
+    let wants_offset = offset_secs > 0;
+    let has_ffmpeg = ffmpeg_available();
+    if !cfg!(target_os = "windows") && wants_offset && !has_ffmpeg {
+        return Err(anyhow!("remote seek requires ffmpeg"));
+    }
+    let want_offset = wants_offset && has_ffmpeg;
     // #69: wrap the spawn in a backoff retry — transient network errors no longer kill
     // playback. Permanent errors (video removed, private) short-circuit immediately.
     with_retry(|| {
         if cfg!(target_os = "windows") {
-            download_via_tempfile(
-                youtube_url,
-                want_offset.then_some(offset_secs),
-                stream_err.clone(),
-            )
+            download_via_tempfile(youtube_url, start_offset, stream_err.clone())
         } else {
             pipe_from_yt_dlp(
                 youtube_url,
@@ -236,7 +237,7 @@ fn pipe_from_yt_dlp(
 
 fn download_via_tempfile(
     youtube_url: &str,
-    start_secs: Option<u64>,
+    start_offset: Duration,
     _stream_err: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
     let cache_dir = crate::config::audio_cache_dir().unwrap_or_else(|_| std::env::temp_dir());
@@ -245,31 +246,36 @@ fn download_via_tempfile(
     let hash: u64 = youtube_url
         .bytes()
         .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    let is_seek = start_secs.is_some_and(|s| s > 0);
+    let offset_secs = start_offset.as_secs();
+    let is_seek = offset_secs > 0;
+    let use_section_download = is_seek && ffmpeg_available();
+    let cache_base_path = cache_dir.join(format!("noctune_{hash}"));
 
-    let base_dir = if is_seek {
-        std::env::temp_dir()
-    } else {
-        cache_dir
-    };
-    let base_path = base_dir.join(format!("noctune_{hash}"));
-
-    // Check if full track is already cached
-    if !is_seek {
-        for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
-            let path = base_path.with_extension(ext);
-            if path.exists() {
-                if let Ok(bytes) = std::fs::read(&path) {
-                    if !bytes.is_empty() {
-                        let hint = symphonia::core::probe::Hint::new();
-                        if let Ok(src) = SymphoniaSource::from_bytes(bytes, hint) {
-                            return Ok(src);
+    // A complete YouTube track is already cached after its first playback on
+    // Windows. Reuse it and seek locally instead of downloading the tail again.
+    for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
+        let path = cache_base_path.with_extension(ext);
+        if path.exists() {
+            if let Ok(bytes) = std::fs::read(&path) {
+                if !bytes.is_empty() {
+                    let hint = symphonia::core::probe::Hint::new();
+                    if let Ok(mut source) = SymphoniaSource::from_bytes(bytes, hint) {
+                        if is_seek {
+                            source.seek_to_or_skip(start_offset);
                         }
+                        return Ok(source);
                     }
                 }
             }
         }
     }
+
+    let base_dir = if use_section_download {
+        std::env::temp_dir()
+    } else {
+        cache_dir
+    };
+    let base_path = base_dir.join(format!("noctune_{hash}"));
 
     // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
     let format_selector = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=ogg]/18/bestaudio";
@@ -286,9 +292,9 @@ fn download_via_tempfile(
         "-o".into(),
         pattern,
     ];
-    if let Some(secs) = start_secs {
+    if use_section_download {
         args.push("--download-sections".into());
-        args.push(format!("*{secs}-inf"));
+        args.push(format!("*{offset_secs}-inf"));
         args.push("--force-keyframes-at-cuts".into());
     }
     args.push(youtube_url.into());
@@ -314,11 +320,18 @@ fn download_via_tempfile(
         if path.exists() {
             let bytes =
                 std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-            if is_seek {
+            if use_section_download {
                 let _ = std::fs::remove_file(&path);
             }
             let hint = symphonia::core::probe::Hint::new();
-            return SymphoniaSource::from_bytes(bytes, hint).map_err(|e| anyhow!("decode: {e}"));
+            let mut source =
+                SymphoniaSource::from_bytes(bytes, hint).map_err(|e| anyhow!("decode: {e}"))?;
+            // Without ffmpeg we downloaded the complete track. Seek within that
+            // cached copy so the audio and UI still start at the same position.
+            if is_seek && !use_section_download {
+                source.seek_to_or_skip(start_offset);
+            }
+            return Ok(source);
         }
     }
 

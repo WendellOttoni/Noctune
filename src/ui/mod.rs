@@ -24,6 +24,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
         if app.show_help {
             render_help(f, area, app.help_scroll, &app.theme);
         }
+        if app.url_editing || app.url_rx.is_some() {
+            render_url_input(f, area, app);
+        }
         return;
     }
 
@@ -101,5 +104,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
     if app.show_command_palette {
         render_command_palette(f, area, app);
+    }
+    if app.url_editing || app.url_rx.is_some() {
+        render_url_input(f, area, app);
     }
 }

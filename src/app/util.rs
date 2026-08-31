@@ -73,6 +73,19 @@ pub fn rect_contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
         && y < r.y.saturating_add(r.height)
 }
 
+/// Convert a terminal column to a fraction of the visible progress bar.
+/// `build_progress` reserves one leading and one trailing cell inside the
+/// layout rectangle, so mouse hit-testing must use the same inner geometry.
+pub fn progress_fraction(r: ratatui::layout::Rect, x: u16) -> f32 {
+    let start = r.x.saturating_add(1);
+    let visible_width = r.width.saturating_sub(2);
+    if visible_width <= 1 {
+        return 0.0;
+    }
+    let position = x.saturating_sub(start).min(visible_width - 1);
+    position as f32 / (visible_width - 1) as f32
+}
+
 pub fn pseudo_random(modulo: usize) -> usize {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -120,7 +133,8 @@ pub fn sort_tracks_with_ratings(
 
 #[cfg(test)]
 mod tests {
-    use super::{frame_poll_interval, next_queue_index, previous_queue_index};
+    use super::{frame_poll_interval, next_queue_index, previous_queue_index, progress_fraction};
+    use ratatui::layout::Rect;
     use std::time::Duration;
 
     #[test]
@@ -150,5 +164,14 @@ mod tests {
         assert_eq!(previous_queue_index(3, 0), Some(2));
         assert_eq!(previous_queue_index(3, 2), Some(1));
         assert_eq!(previous_queue_index(0, 0), None);
+    }
+
+    #[test]
+    fn progress_fraction_matches_visible_bar_cells() {
+        let rect = Rect::new(10, 2, 12, 1);
+        assert_eq!(progress_fraction(rect, 11), 0.0);
+        assert!((progress_fraction(rect, 15) - 4.0 / 9.0).abs() < f32::EPSILON);
+        assert_eq!(progress_fraction(rect, 20), 1.0);
+        assert_eq!(progress_fraction(rect, 21), 1.0);
     }
 }

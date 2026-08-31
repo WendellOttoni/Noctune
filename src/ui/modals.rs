@@ -1,10 +1,122 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
+
+pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
+    let width = 74.min(area.width.saturating_sub(2));
+    let height = 9.min(area.height.saturating_sub(2));
+    if width < 20 || height < 7 {
+        return;
+    }
+
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    f.render_widget(Clear, popup);
+
+    let loading = app.url_rx.is_some();
+    let accent = parse_color(&app.theme.colors.accent);
+    let foreground = parse_color(&app.theme.colors.foreground);
+    let muted = parse_color(&app.theme.colors.muted);
+    let input_capacity = width.saturating_sub(10) as usize;
+    let input_chars: Vec<char> = app.url_input.chars().collect();
+    let visible_input = if input_chars.len() > input_capacity {
+        format!(
+            "…{}",
+            input_chars[input_chars
+                .len()
+                .saturating_sub(input_capacity.saturating_sub(1))..]
+                .iter()
+                .collect::<String>()
+        )
+    } else {
+        app.url_input.clone()
+    };
+
+    let lines = if loading {
+        const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let spinner = SPINNER[(app.tick_count as usize / 3) % SPINNER.len()];
+        let bar_width = width.saturating_sub(16).max(1) as usize;
+        let marker = (app.tick_count as usize / 2) % bar_width;
+        let bar = format!(
+            "{}●{}",
+            "─".repeat(marker),
+            "─".repeat(bar_width.saturating_sub(marker + 1))
+        );
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("{spinner}  Carregando todas as músicas da playlist…"),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(visible_input, Style::default().fg(muted))),
+            Line::from(Span::styled(bar, Style::default().fg(accent))),
+            Line::from(Span::styled(
+                "Aguarde a leitura completa antes de adicionar à fila.",
+                Style::default().fg(foreground),
+            )),
+        ]
+    } else {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Cole ou digite o link da música ou playlist",
+                Style::default().fg(foreground),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  › ", Style::default().fg(accent)),
+                Span::styled(
+                    format!("{visible_input}_"),
+                    Style::default().fg(foreground).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(Span::styled(
+                "YouTube • Spotify • SoundCloud • M3U / PLS",
+                Style::default().fg(muted),
+            )),
+        ]
+    };
+
+    let title = if loading {
+        " ⏳ Importando playlist "
+    } else {
+        " 🔗 Adicionar por link "
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(app.theme.border(true))
+        .title(Span::styled(title, app.theme.accent()))
+        .title_bottom(Line::from(vec![
+            Span::styled(
+                if loading {
+                    " Processando… "
+                } else {
+                    " [Enter] "
+                },
+                app.theme.accent(),
+            ),
+            Span::styled(
+                if loading {
+                    ""
+                } else {
+                    "Carregar   [Esc] Cancelar "
+                },
+                Style::default().fg(muted),
+            ),
+        ]));
+    let paragraph = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .block(block);
+    f.render_widget(paragraph, popup);
+}
 use std::collections::HashSet;
 
 use crate::{

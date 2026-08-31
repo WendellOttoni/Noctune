@@ -232,10 +232,8 @@ impl App {
         let Some(track) = self.player.current().cloned() else {
             return;
         };
-        if !Self::track_is_stream(&track) {
-            if let Err(e) = self.player.seek_relative(delta_secs) {
-                self.set_info(format!("Seek error: {e}"));
-            }
+        if Self::track_is_live_radio(&track) {
+            self.set_info("Seek is unavailable for live radio.");
             return;
         }
         let cur_ms = self.player.elapsed().as_millis() as i64;
@@ -256,9 +254,6 @@ impl App {
         let Some(track) = self.player.current().cloned() else {
             return Ok(());
         };
-        if !Self::track_is_stream(&track) {
-            return self.player.seek_absolute_fraction(frac);
-        }
         let Some(total) = track.duration else {
             return Ok(());
         };
@@ -271,10 +266,6 @@ impl App {
         let Some(track) = self.player.current().cloned() else {
             return;
         };
-        if !Self::track_is_stream(&track) {
-            let _ = self.player.seek_to(target);
-            return;
-        }
         self.spawn_seek_load(track, target);
     }
 
