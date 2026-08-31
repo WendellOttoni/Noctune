@@ -1,6 +1,6 @@
 use anyhow::Result;
 use notify::Watcher as _;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use crate::audio::Track;
 
