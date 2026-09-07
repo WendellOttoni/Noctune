@@ -11,6 +11,7 @@ pub struct SpotifyApi {
     client_id: String,
     client: reqwest::blocking::Client,
     tokens: Tokens,
+    legacy_playlist_api: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,7 +48,13 @@ impl SpotifyApi {
             client_id,
             client,
             tokens,
+            legacy_playlist_api: false,
         })
+    }
+
+    pub fn with_legacy_playlists(mut self, enabled: bool) -> Self {
+        self.legacy_playlist_api = enabled;
+        self
     }
 
     fn ensure_fresh(&mut self) -> Result<()> {
@@ -84,9 +91,7 @@ impl SpotifyApi {
             return Ok(None);
         }
         if !resp.status().is_success() {
-            let s = resp.status();
-            let body = resp.text().unwrap_or_default();
-            return Err(anyhow!("currently-playing failed ({s}): {body}"));
+            return Err(response_error(resp));
         }
         let parsed: CurrentlyPlaying = resp.json()?;
         Ok(Some(parsed))
@@ -120,7 +125,7 @@ impl SpotifyApi {
             .send()
             .with_context(|| format!("PUT {path}"))?;
         if !resp.status().is_success() && resp.status().as_u16() != 204 {
-            return Err(anyhow!("{path} returned {}", resp.status()));
+            return Err(response_error(resp));
         }
         Ok(())
     }
@@ -141,9 +146,7 @@ impl SpotifyApi {
             .send()
             .context("PUT /me/player/play")?;
         if !resp.status().is_success() && resp.status().as_u16() != 204 {
-            let s = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(anyhow!("play_uri failed ({s}): {text}"));
+            return Err(response_error(resp));
         }
         Ok(())
     }
@@ -169,7 +172,7 @@ impl SpotifyApi {
             .send()
             .with_context(|| format!("GET /tracks/{id}"))?;
         if !resp.status().is_success() {
-            return Err(anyhow!("tracks/{id} returned {}", resp.status()));
+            return Err(response_error(resp));
         }
         let t: SpTrack = resp.json()?;
         let artist = t.artists.first().map(|a| a.name.clone());
@@ -191,29 +194,21 @@ impl SpotifyApi {
     pub fn playlist_tracks(&mut self, playlist_id: &str) -> Result<Vec<crate::audio::Track>> {
         self.ensure_fresh()?;
         let mut tracks = Vec::new();
-        let mut url = Some(format!("{API_BASE}/playlists/{playlist_id}/tracks?limit=50&fields=next,items(track(uri,name,duration_ms,artists,album))"));
+        let endpoint_kind = if self.legacy_playlist_api {
+            "tracks"
+        } else {
+            "items"
+        };
+        let mut url = Some(format!(
+            "{API_BASE}/playlists/{playlist_id}/{endpoint_kind}?limit=50"
+        ));
+        let mut visited = std::collections::HashSet::new();
         while let Some(endpoint) = url {
-            #[derive(Deserialize)]
-            struct Page {
-                next: Option<String>,
-                items: Vec<Item>,
-            }
-            #[derive(Deserialize)]
-            struct Item {
-                track: Option<SpSimpleTrack>,
-            }
-            #[derive(Deserialize)]
-            struct SpSimpleTrack {
-                uri: String,
-                name: String,
-                duration_ms: u64,
-                artists: Vec<ArtistRef>,
-                album: SpAlbum,
-            }
-            #[derive(Deserialize)]
-            struct SpAlbum {
-                name: String,
-            }
+            validate_page_url(&endpoint)?;
+            anyhow::ensure!(
+                visited.insert(endpoint.clone()),
+                "Spotify returned a pagination loop"
+            );
             let resp = self
                 .client
                 .get(&endpoint)
@@ -221,9 +216,11 @@ impl SpotifyApi {
                 .send()
                 .with_context(|| format!("GET {endpoint}"))?;
             if !resp.status().is_success() {
-                return Err(anyhow!("playlist tracks returned {}", resp.status()));
+                return Err(response_error(resp));
             }
-            let page: Page = resp.json()?;
+            let page: PlaylistPage = resp
+                .json()
+                .context("Spotify playlist response is incompatible")?;
             url = page.next;
             for item in page.items {
                 let Some(t) = item.track else { continue };
@@ -253,6 +250,7 @@ impl SpotifyApi {
         let mut tracks = Vec::new();
         let mut url = Some(format!("{API_BASE}/albums/{album_id}/tracks?limit=50"));
         while let Some(endpoint) = url {
+            validate_page_url(&endpoint)?;
             #[derive(Deserialize)]
             struct Page {
                 next: Option<String>,
@@ -272,7 +270,7 @@ impl SpotifyApi {
                 .send()
                 .with_context(|| format!("GET {endpoint}"))?;
             if !resp.status().is_success() {
-                return Err(anyhow!("album tracks returned {}", resp.status()));
+                return Err(response_error(resp));
             }
             let page: Page = resp.json()?;
             url = page.next;
@@ -306,7 +304,7 @@ impl SpotifyApi {
             .send()
             .with_context(|| format!("POST {path}"))?;
         if !resp.status().is_success() && resp.status().as_u16() != 204 {
-            return Err(anyhow!("{path} returned {}", resp.status()));
+            return Err(response_error(resp));
         }
         Ok(())
     }
@@ -342,12 +340,12 @@ impl SpotifyApi {
             .query(&[
                 ("q", query),
                 ("type", "track"),
-                ("limit", &limit.to_string()),
+                ("limit", &limit.clamp(1, 10).to_string()),
             ])
             .send()
             .context("GET /search")?;
         if !resp.status().is_success() {
-            return Err(anyhow!("search failed: {}", resp.status()));
+            return Err(response_error(resp));
         }
         let result: SearchResult = resp.json()?;
         Ok(result
@@ -376,6 +374,7 @@ impl SpotifyApi {
         let mut tracks = Vec::new();
         let mut url = Some(format!("{API_BASE}/me/tracks?limit={limit}"));
         while let Some(endpoint) = url {
+            validate_page_url(&endpoint)?;
             #[derive(Deserialize)]
             struct Page {
                 next: Option<String>,
@@ -405,7 +404,7 @@ impl SpotifyApi {
                 .send()
                 .context("GET /me/tracks")?;
             if !resp.status().is_success() {
-                return Err(anyhow!("liked tracks failed: {}", resp.status()));
+                return Err(response_error(resp));
             }
             let page: Page = resp.json()?;
             url = page.next;
@@ -435,6 +434,7 @@ impl SpotifyApi {
         let mut playlists = Vec::new();
         let mut url = Some(format!("{API_BASE}/me/playlists?limit=50"));
         while let Some(endpoint) = url {
+            validate_page_url(&endpoint)?;
             #[derive(Deserialize)]
             struct Page {
                 next: Option<String>,
@@ -444,9 +444,10 @@ impl SpotifyApi {
             struct SpPlaylist {
                 id: String,
                 name: String,
+                #[serde(rename = "items", alias = "tracks", default)]
                 tracks: TrackCount,
             }
-            #[derive(Deserialize)]
+            #[derive(Deserialize, Default)]
             struct TrackCount {
                 total: u32,
             }
@@ -458,7 +459,7 @@ impl SpotifyApi {
                 .send()
                 .context("GET /me/playlists")?;
             if !resp.status().is_success() {
-                return Err(anyhow!("my_playlists failed: {}", resp.status()));
+                return Err(response_error(resp));
             }
             let page: Page = resp.json()?;
             url = page.next;
@@ -482,7 +483,7 @@ impl SpotifyApi {
             .send()
             .context("PUT /me/player/volume")?;
         if !resp.status().is_success() && resp.status().as_u16() != 204 {
-            return Err(anyhow!("set_volume failed: {}", resp.status()));
+            return Err(response_error(resp));
         }
         Ok(())
     }
@@ -527,5 +528,95 @@ impl SpotifyApi {
             ));
         }
         None
+    }
+}
+
+#[derive(Deserialize)]
+struct PlaylistPage {
+    next: Option<String>,
+    items: Vec<PlaylistItem>,
+}
+#[derive(Deserialize)]
+struct PlaylistItem {
+    #[serde(rename = "item", alias = "track", default)]
+    track: Option<PlaylistTrack>,
+}
+#[derive(Deserialize)]
+struct PlaylistTrack {
+    uri: String,
+    name: String,
+    duration_ms: u64,
+    #[serde(default)]
+    artists: Vec<ArtistRef>,
+    #[serde(default)]
+    album: PlaylistAlbum,
+}
+#[derive(Default, Deserialize)]
+struct PlaylistAlbum {
+    #[serde(default)]
+    name: String,
+}
+
+fn validate_page_url(endpoint: &str) -> Result<()> {
+    let parsed = url::Url::parse(endpoint)?;
+    anyhow::ensure!(
+        parsed.scheme() == "https"
+            && parsed.host_str() == Some("api.spotify.com")
+            && parsed.port_or_known_default() == Some(443)
+            && parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.path().starts_with("/v1/"),
+        "Spotify returned an untrusted pagination URL"
+    );
+    Ok(())
+}
+
+fn response_error(response: reqwest::blocking::Response) -> anyhow::Error {
+    let code = response.status().as_u16();
+    let wait = response
+        .headers()
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    let hint = match code {
+        401 => "Session expired; sign in again.",
+        403 => "Permission denied; check scopes, app allowlist and Development Mode Premium requirement.",
+        404 => "Resource or active Connect device unavailable; open Spotify and select a device.",
+        429 => "Spotify quota reached; wait before retrying.",
+        _ => "Spotify request failed; try again later.",
+    };
+    if let Some(seconds) = wait {
+        anyhow!("Spotify HTTP {code}: {hint} Retry after {seconds}s.")
+    } else {
+        anyhow!("Spotify HTTP {code}: {hint}")
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    #[test]
+    fn playlist_accepts_new_and_legacy_items_and_unavailable_tracks() {
+        for field in ["item", "track"] {
+            let json = format!(
+                r#"{{"next":null,"items":[{{"{field}":{{"uri":"spotify:track:a","name":"A","duration_ms":1000,"artists":[],"album":{{"name":"B"}}}}}},{{"{field}":null}}]}}"#
+            );
+            let page: PlaylistPage = serde_json::from_str(&json).unwrap();
+            assert_eq!(page.items[0].track.as_ref().unwrap().name, "A");
+            assert!(page.items[1].track.is_none());
+        }
+        assert!(serde_json::from_str::<PlaylistPage>(r#"{"error":"denied"}"#).is_err());
+    }
+    #[test]
+    fn pagination_never_sends_token_to_other_hosts() {
+        assert!(validate_page_url("https://api.spotify.com/v1/me/playlists?offset=50").is_ok());
+        for url in [
+            "https://example.com/v1/me",
+            "http://api.spotify.com/v1/me",
+            "https://api.spotify.com.evil.test/v1/me",
+            "https://user@api.spotify.com/v1/me",
+        ] {
+            assert!(validate_page_url(url).is_err());
+        }
     }
 }

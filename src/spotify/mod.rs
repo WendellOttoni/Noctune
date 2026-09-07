@@ -62,11 +62,13 @@ pub fn load_tokens() -> Option<Tokens> {
 
 pub fn save_tokens(tokens: &Tokens) -> Result<()> {
     let text = serde_json::to_string(tokens)?;
-    crate::secrets::store(SECRETS_SERVICE, SECRETS_KEY, &text);
+    crate::secrets::store(SECRETS_SERVICE, SECRETS_KEY, &text)?;
     Ok(())
 }
 
 #[allow(dead_code)]
 pub fn delete_tokens() {
-    crate::secrets::delete(SECRETS_SERVICE, SECRETS_KEY);
+    if let Err(error) = crate::secrets::delete(SECRETS_SERVICE, SECRETS_KEY) {
+        tracing::warn!(target: "spotify", "Could not delete credentials: {error}");
+    }
 }

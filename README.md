@@ -14,7 +14,7 @@ A fully customizable terminal music player in Rust. ASCII-art TUI, multi-format 
 https://github.com/user-attachments/assets/6c468eff-b23e-4064-b64a-c916262e46b4
 
 
-> Status: early MVP — plays local files, queue/library navigation, themable UI.
+> Development hardening is not yet released. See [implementation status](docs/implementation-status.md).
 
 ## Installation
 
@@ -52,7 +52,7 @@ Or clone and build locally:
 ```sh
 git clone https://github.com/WendellOttoni/Noctune
 cd Noctune
-cargo build --release
+cargo build --release --locked
 ./target/release/noctune
 ```
 
@@ -80,38 +80,28 @@ Pre-compiled binaries for Windows, Linux, and macOS (ARM) are available on the [
 
 ## Keybindings
 
-| Key                     | Action                                       |
-| ----------------------- | -------------------------------------------- |
-| `q` / `Ctrl+C`          | Quit                                         |
-| `?`                     | Help overlay                                 |
-| `Tab`                   | Switch focus                                 |
-| `↑`/`↓` or `j`/`k`     | Move selection                               |
-| `Enter`                 | Play selection                               |
-| `a`                     | Add to queue                                 |
-| `d`                     | Remove from queue                            |
-| `c`                     | Clear queue + stop                           |
-| `/`                     | Search library (Enter confirms, Esc clears)  |
-| `Space`                 | Play / pause                                 |
-| `n` / `p`               | Next / previous                              |
-| `s`                     | Stop                                         |
-| `←` / `→`               | Seek -5s / +5s                               |
-| `+` / `-`               | Volume up / down                             |
-| `Shift+S`               | Toggle shuffle                               |
-| `r`                     | Cycle repeat mode (off / all / one)          |
-| `w`                     | Save queue as `.m3u`                         |
-| `Shift+L`               | Load most recent `.m3u` from playlists dir   |
-| `o`                     | Cycle sort mode (title / artist / album)     |
-| `Shift+T`               | Toggle 30-min sleep timer                    |
-| `Mouse wheel`           | Scroll selection                             |
-| `Mouse click`           | Play library / queue row, seek on progress   |
-| `Shift+V`               | Toggle flat / album view                     |
-| `1`/`2` `3`/`4` `5`/`6` | EQ low / mid / high -/+ 1 dB               |
-| `Shift+P`               | Spotify login (OAuth PKCE)                   |
-| `@`                     | Toggle Spotify play/pause                    |
-| `v`                     | Cycle visualizer mode                        |
-| `[` / `]`               | Visualizer sensitivity down / up             |
+Press `?` for help or open the command palette. Help, palette actions and the
+`noctune commands` Markdown export share one registry and reflect your configured
+`[keybinds]` overrides.
 
-Keybinds in the `[keybinds]` section of `config.toml` override the defaults.
+## Setup and diagnostics
+
+```sh
+noctune setup --music "/path/to/music"
+noctune doctor
+noctune doctor --json
+noctune commands
+```
+
+Interactive first launch offers setup. `doctor --test-audio` optionally plays a short
+tone; normal diagnostics do not play audio. JSON diagnostics omit credentials,
+URLs, usernames and local paths.
+
+In your existing configuration, set `language = "pt-BR"` (or `"en"`) and
+`simple_symbols = true` under `[ui]` for the core UI. Some integration messages
+remain untranslated. Audio downloads have separate `[cache]` settings:
+`audio_max_size_mb = 1024` and `audio_expire_days = 30`.
+Cache status and cleanup are available in the palette; active files are protected.
 
 ## Spotify integration
 
@@ -138,3 +128,14 @@ Copy `themes/default.toml` to `themes/<your-theme>.toml`, edit colors, symbols, 
 - HTTP radio streaming (Icecast/Shoutcast) — [#20](https://github.com/WendellOttoni/Noctune/issues/20)
 
 See all open issues at https://github.com/WendellOttoni/Noctune/issues
+## Release integrity
+
+The new updater and installers require a matching `.sha256` sidecar and preserve
+a backup during replacement. Older releases without that file are intentionally
+refused; build from source until a release from the new workflow is published.
+Checksums detect corruption, not a compromised publisher. The workflow also
+produces build attestations. Native Spotify audio is not implemented: use an
+active Spotify Connect device.
+
+See [the research report](docs/melhorias-noctune-2026-09-07.md) and
+[implementation status](docs/implementation-status.md) for coverage and limitations.

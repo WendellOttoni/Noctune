@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
@@ -14,8 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.0
           components: rustfmt
       - run: cargo fmt --all --check
 
@@ -33,14 +35,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev pkg-config
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.0
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
 
       - name: clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --locked --all-targets
 
       - name: test
-        run: cargo test --all
+        run: cargo test --locked --all
+
+      - name: Version consistency
+        run: python scripts/release_manifest.py --check

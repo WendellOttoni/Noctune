@@ -26,19 +26,7 @@ pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
     let foreground = parse_color(&app.theme.colors.foreground);
     let muted = parse_color(&app.theme.colors.muted);
     let input_capacity = width.saturating_sub(10) as usize;
-    let input_chars: Vec<char> = app.url_input.chars().collect();
-    let visible_input = if input_chars.len() > input_capacity {
-        format!(
-            "…{}",
-            input_chars[input_chars
-                .len()
-                .saturating_sub(input_capacity.saturating_sub(1))..]
-                .iter()
-                .collect::<String>()
-        )
-    } else {
-        app.url_input.clone()
-    };
+    let visible_input = super::util::input_tail(&app.url_input, input_capacity);
 
     let lines = if loading {
         const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -53,13 +41,22 @@ pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                format!("{spinner}  Carregando todas as músicas da playlist…"),
+                format!(
+                    "{spinner}  {}",
+                    app.config.ui.language.text(
+                        "Loading playlist tracks…",
+                        "Carregando músicas da playlist…"
+                    )
+                ),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(visible_input, Style::default().fg(muted))),
             Line::from(Span::styled(bar, Style::default().fg(accent))),
             Line::from(Span::styled(
-                "Aguarde a leitura completa antes de adicionar à fila.",
+                app.config.ui.language.text(
+                    "Wait for the playlist to finish loading.",
+                    "Aguarde a leitura completa antes de adicionar à fila.",
+                ),
                 Style::default().fg(foreground),
             )),
         ]
@@ -67,7 +64,10 @@ pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                "Cole ou digite o link da música ou playlist",
+                app.config.ui.language.text(
+                    "Paste a track or playlist URL",
+                    "Cole ou digite o link da música ou playlist",
+                ),
                 Style::default().fg(foreground),
             )),
             Line::from(""),
@@ -86,9 +86,15 @@ pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let title = if loading {
-        " ⏳ Importando playlist "
+        app.config
+            .ui
+            .language
+            .text(" Importing playlist ", " ⏳ Importando playlist ")
     } else {
-        " 🔗 Adicionar por link "
+        app.config
+            .ui
+            .language
+            .text(" Add URL ", " 🔗 Adicionar por link ")
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -97,7 +103,10 @@ pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
         .title_bottom(Line::from(vec![
             Span::styled(
                 if loading {
-                    " Processando… "
+                    app.config
+                        .ui
+                        .language
+                        .text(" Processing… ", " Processando… ")
                 } else {
                     " [Enter] "
                 },
@@ -107,7 +116,10 @@ pub fn render_url_input(f: &mut Frame, area: Rect, app: &App) {
                 if loading {
                     ""
                 } else {
-                    "Carregar   [Esc] Cancelar "
+                    app.config
+                        .ui
+                        .language
+                        .text("Load   [Esc] Cancel ", "Carregar   [Esc] Cancelar ")
                 },
                 Style::default().fg(muted),
             ),
@@ -2245,7 +2257,10 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_style(app.theme.border(true))
         .title(Span::styled(
-            " 🔍 Command Palette [Ctrl+P / Esc: fechar · Enter: executar · ↑↓: navegar] ",
+            app.config.ui.language.text(
+                " Command palette | Esc: close | Enter: run | Up/Down: select ",
+                " 🔍 Command Palette [Ctrl+P / Esc: fechar · Enter: executar · ↑↓: navegar] ",
+            ),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(popup);
@@ -2273,13 +2288,19 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled(" 🔍 ", Style::default().fg(secondary))
     };
     let input_text = Span::styled(
-        &app.command_palette_input,
+        super::util::input_tail(
+            &app.command_palette_input,
+            chunks[0].width.saturating_sub(5) as usize,
+        ),
         Style::default().fg(fg).add_modifier(Modifier::BOLD),
     );
     let cursor = Span::styled("█", Style::default().fg(accent));
     let placeholder = if app.command_palette_input.is_empty() {
         Span::styled(
-            " Digite para buscar comandos, músicas, temas ou '>' para ações…",
+            app.config.ui.language.text(
+                " Search tracks, themes or type '>' for commands…",
+                " Digite para buscar comandos, músicas, temas ou '>' para ações…",
+            ),
             Style::default().fg(muted),
         )
     } else {
@@ -2312,7 +2333,10 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
         let empty_msg = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "   Nenhum resultado correspondente para a busca.",
+                app.config.ui.language.text(
+                    "   No matching results.",
+                    "   Nenhum resultado correspondente para a busca.",
+                ),
                 Style::default().fg(muted),
             )),
         ];
@@ -2334,8 +2358,12 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
             .take(max_visible)
         {
             let is_sel = i == selected;
-            let icon = item.category.icon();
-            let cat_label = item.category.label();
+            let icon = if app.config.ui.simple_symbols {
+                ""
+            } else {
+                item.category.icon()
+            };
+            let cat_label = item.category.localized_label(app.config.ui.language);
 
             let (prefix, title_style, desc_style) = if is_sel {
                 (

@@ -3,8 +3,12 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::path::PathBuf;
+use sha2::{Digest, Sha256};
 use std::time::Duration;
+use std::{
+    io::{Read, Write},
+    path::Path,
+};
 
 #[derive(Debug, Clone)]
 pub struct UpdateInfo {
@@ -49,7 +53,8 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>> {
     let latest_version = release.tag_name.trim_start_matches('v');
 
     if is_newer_version(latest_version, current_version) {
-        let target_artifact = current_target_artifact();
+        let target_artifact = target_artifact(std::env::consts::OS, std::env::consts::ARCH)
+            .context("No release artifact for this OS/architecture")?;
         let download_url = release
             .assets
             .into_iter()
@@ -69,88 +74,151 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>> {
 
 /// Downloads and replaces the current running binary in-place.
 pub fn apply_update(download_url: &str) -> Result<()> {
-    let current_exe =
-        std::env::current_exe().context("Could not determine current executable path")?;
+    let expected_name = target_artifact(std::env::consts::OS, std::env::consts::ARCH)
+        .context("Unsupported operating system/architecture")?;
+    let url = url::Url::parse(download_url)?;
+    anyhow::ensure!(
+        url.scheme() == "https"
+            && url.host_str() == Some("github.com")
+            && url
+                .path()
+                .starts_with("/WendellOttoni/Noctune/releases/download/")
+            && url.path_segments().and_then(|mut s| s.next_back()) == Some(expected_name)
+            && url.query().is_none()
+            && url.fragment().is_none(),
+        "Unexpected release artifact URL"
+    );
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .user_agent(format!("Noctune/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(90))
+        .user_agent("Noctune-Updater")
         .build()?;
-
-    let resp = client
+    let mut digest_bytes = Vec::new();
+    client
+        .get(format!("{download_url}.sha256"))
+        .send()?
+        .error_for_status()?
+        .take(4097)
+        .read_to_end(&mut digest_bytes)?;
+    anyhow::ensure!(digest_bytes.len() <= 4096, "Invalid checksum file");
+    let checksum = String::from_utf8(digest_bytes)?;
+    let expected = parse_checksum(&checksum, expected_name)?;
+    let mut bytes = Vec::new();
+    client
         .get(download_url)
-        .send()
-        .context("Failed to download release binary")?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("Download failed with HTTP {}", resp.status()));
-    }
-
-    let bytes = resp.bytes().context("Failed to read binary data")?;
-    if bytes.is_empty() {
-        return Err(anyhow!("Downloaded binary is empty"));
-    }
-
-    replace_binary(&current_exe, &bytes)
+        .send()?
+        .error_for_status()?
+        .take(200 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() <= 200 * 1024 * 1024,
+        "Release exceeds size limit"
+    );
+    install_verified(&std::env::current_exe()?, &bytes, expected)
 }
 
-fn current_target_artifact() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        "noctune-windows-x64.exe"
-    }
-    #[cfg(target_os = "linux")]
-    {
-        "noctune-linux-x64"
-    }
-    #[cfg(target_os = "macos")]
-    {
-        "noctune-macos-arm64"
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-    {
-        "noctune"
+fn install_verified(path: &Path, bytes: &[u8], expected: &str) -> Result<()> {
+    verify_download(bytes, expected)?;
+    validate_binary(bytes, std::env::consts::OS, std::env::consts::ARCH)?;
+    replace_binary(path, bytes)
+}
+
+pub fn target_artifact(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
+        ("windows", "x86_64") => Some("noctune-windows-x64.exe"),
+        ("linux", "x86_64") => Some("noctune-linux-x64"),
+        ("macos", "aarch64") => Some("noctune-macos-arm64"),
+        ("macos", "x86_64") => Some("noctune-macos-x64"),
+        _ => None,
     }
 }
 
-fn replace_binary(exe_path: &PathBuf, new_bytes: &[u8]) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        let old_exe = exe_path.with_extension("exe.old");
-        // Remove any preexisting .old file if left from previous update
-        let _ = std::fs::remove_file(&old_exe);
+fn parse_checksum<'a>(text: &'a str, name: &str) -> Result<&'a str> {
+    let mut parts = text.split_whitespace();
+    let digest = parts.next().context("Missing digest")?;
+    anyhow::ensure!(
+        digest.len() == 64
+            && digest.bytes().all(|b| b.is_ascii_hexdigit())
+            && parts.next().map(|s| s.trim_start_matches('*')) == Some(name)
+            && parts.next().is_none(),
+        "Invalid release checksum manifest"
+    );
+    Ok(digest)
+}
+fn verify_download(bytes: &[u8], expected: &str) -> Result<()> {
+    anyhow::ensure!(!bytes.is_empty(), "Empty release");
+    anyhow::ensure!(
+        format!("{:x}", Sha256::digest(bytes)).eq_ignore_ascii_case(expected),
+        "Release checksum mismatch; installed version preserved"
+    );
+    Ok(())
+}
 
-        // Rename running exe to .old (Windows allows renaming open files)
-        std::fs::rename(exe_path, &old_exe)
-            .context("Failed to rename running executable to .old")?;
-
-        // Write new binary in place
-        if let Err(e) = std::fs::write(exe_path, new_bytes) {
-            // Restore original executable if write fails
-            let _ = std::fs::rename(&old_exe, exe_path);
-            return Err(e).context("Failed to write new executable");
+fn validate_binary(bytes: &[u8], os: &str, arch: &str) -> Result<()> {
+    let valid = match (os, arch) {
+        ("windows", "x86_64") if bytes.len() >= 64 && &bytes[..2] == b"MZ" => {
+            let offset = u32::from_le_bytes(bytes[60..64].try_into().unwrap()) as usize;
+            bytes.get(offset..offset.saturating_add(6)) == Some(&b"PE\0\0\x64\x86"[..])
         }
-    }
+        ("linux", "x86_64") => {
+            bytes.len() >= 20
+                && &bytes[..4] == b"\x7fELF"
+                && bytes[4] == 2
+                && bytes[5] == 1
+                && bytes[18..20] == [62, 0]
+        }
+        ("macos", "aarch64" | "x86_64") => {
+            bytes.len() >= 8
+                && bytes[..4] == [0xcf, 0xfa, 0xed, 0xfe]
+                && u32::from_le_bytes(bytes[4..8].try_into().unwrap())
+                    == if arch == "aarch64" {
+                        0x0100000c
+                    } else {
+                        0x01000007
+                    }
+        }
+        _ => false,
+    };
+    anyhow::ensure!(valid, "Release binary does not match this OS/architecture");
+    Ok(())
+}
 
+fn replace_binary(exe_path: &Path, new_bytes: &[u8]) -> Result<()> {
+    let parent = exe_path
+        .parent()
+        .context("Executable has no parent directory")?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    staged.write_all(new_bytes)?;
+    staged.as_file().sync_all()?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let temp_path = exe_path.with_extension("tmp");
-        std::fs::write(&temp_path, new_bytes).context("Failed to write temp executable")?;
-        let mut perms = std::fs::metadata(&temp_path)?.permissions();
-        perms.set_mode(0o755);
-        let _ = std::fs::set_permissions(&temp_path, perms);
-
-        std::fs::rename(&temp_path, exe_path).context("Failed to swap executable in place")?;
+        staged
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o755))?;
     }
-
-    #[cfg(not(any(target_os = "windows", unix)))]
-    {
-        let _ = (exe_path, new_bytes);
-        return Err(anyhow!(
-            "Unsupported operating system for in-place self-update"
-        ));
+    // A unique backup avoids overwriting an older recoverable installation.
+    let backup = tempfile::Builder::new()
+        .prefix("noctune-backup-")
+        .suffix(".old")
+        .tempfile_in(parent)?;
+    let backup_path = backup.path().to_path_buf();
+    backup.close()?;
+    std::fs::rename(exe_path, &backup_path).context("Could not preserve current executable")?;
+    match staged.persist(exe_path) {
+        Ok(_) => {
+            tracing::info!(backup = %backup_path.display(), "Update installed; backup retained");
+            Ok(())
+        }
+        Err(error) => {
+            std::fs::rename(&backup_path, exe_path).with_context(|| {
+                format!(
+                    "Update failed; recover original from {}",
+                    backup_path.display()
+                )
+            })?;
+            Err(error.error).context("Update failed; original restored")
+        }
     }
-
-    Ok(())
 }
 
 fn is_newer_version(remote: &str, current: &str) -> bool {
@@ -173,4 +241,40 @@ fn is_newer_version(remote: &str, current: &str) -> bool {
     }
 
     r_parts.len() > c_parts.len()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn invalid_download_leaves_installation_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("noctune");
+        std::fs::write(&exe, b"original").unwrap();
+        assert!(install_verified(&exe, b"truncated", &"0".repeat(64)).is_err());
+        assert_eq!(std::fs::read(exe).unwrap(), b"original");
+    }
+    #[test]
+    fn checksum_names_and_architectures_must_match() {
+        assert!(parse_checksum(&format!("{}  wrong", "a".repeat(64)), "noctune").is_err());
+        assert_eq!(
+            target_artifact("macos", "x86_64"),
+            Some("noctune-macos-x64")
+        );
+        assert_eq!(target_artifact("linux", "aarch64"), None);
+        assert!(validate_binary(b"<html>error</html>", "windows", "x86_64").is_err());
+    }
+    #[test]
+    fn successful_replacement_retains_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("noctune");
+        std::fs::write(&exe, b"old").unwrap();
+        replace_binary(&exe, b"new").unwrap();
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new");
+        let backup = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .find(|entry| entry.path().extension().is_some_and(|e| e == "old"))
+            .unwrap();
+        assert_eq!(std::fs::read(backup.path()).unwrap(), b"old");
+    }
 }

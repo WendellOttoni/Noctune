@@ -117,7 +117,15 @@ pub fn render_mini(f: &mut Frame, area: Rect, app: &mut App) {
             scan_progress_suffix(app)
         )
     } else {
-        format!(" {}", app.status)
+        format!(
+            " [{}] {}",
+            match app.status_kind {
+                crate::app::StatusKind::Error => "!",
+                crate::app::StatusKind::Warning => "?",
+                crate::app::StatusKind::Info => "i",
+            },
+            app.status
+        )
     };
     f.render_widget(
         Paragraph::new(Span::styled(status_text, status_style(app))),
@@ -723,8 +731,11 @@ pub fn render_status(f: &mut Frame, area: Rect, app: &App) {
         crate::app::ReplayGainMode::Track => "rg:track ".to_string(),
         crate::app::ReplayGainMode::Album => "rg:album ".to_string(),
     };
+    let help_key = app.bindings.shortcut(crate::keybinds::Action::Help);
+    let quit_key = app.bindings.shortcut(crate::keybinds::Action::Quit);
+    let hint = app.config.ui.language.text("help / quit", "ajuda / sair");
     let hints = Paragraph::new(Span::styled(
-        format!("{sleep}{order}{rep}{rg}{sort}[S] order [?] help [q] quit "),
+        format!("{sleep}{order}{rep}{rg}{sort}[{help_key}] / [{quit_key}] {hint}"),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     ))
     .alignment(Alignment::Right);

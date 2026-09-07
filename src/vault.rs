@@ -70,7 +70,9 @@ impl VaultClient {
         if !res.status().is_success() {
             return Err(anyhow!("Vault retornou status {}", res.status()));
         }
-        let items: Vec<VaultTrack> = res.json().unwrap_or_default();
+        let items: Vec<VaultTrack> = res
+            .json()
+            .context("Vault returned an invalid catalog response")?;
         Ok(items.iter().map(|v| v.to_track(&self.server_url)).collect())
     }
 
@@ -84,7 +86,43 @@ impl VaultClient {
         if !res.status().is_success() {
             return Err(anyhow!("Vault retornou status {}", res.status()));
         }
-        let items: Vec<VaultTrack> = res.json().unwrap_or_default();
+        let items: Vec<VaultTrack> = res
+            .json()
+            .context("Vault returned an invalid recent-tracks response")?;
         Ok(items.iter().map(|v| v.to_track(&self.server_url)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn malformed_catalog_is_an_error_but_empty_catalog_is_valid() {
+        for (body, valid) in [
+            ("[]", true),
+            ("{broken", false),
+            ("{\"error\":\"denied\"}", false),
+        ] {
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            let url = format!("http://{}", server.server_addr());
+            let thread = std::thread::spawn(move || {
+                let request = server
+                    .recv_timeout(Duration::from_secs(3))
+                    .unwrap()
+                    .unwrap();
+                request
+                    .respond(tiny_http::Response::from_string(body))
+                    .unwrap();
+            });
+            let config = VaultConfig {
+                server_url: url,
+                ..Default::default()
+            };
+            assert_eq!(
+                VaultClient::new(&config).unwrap().search("test").is_ok(),
+                valid
+            );
+            thread.join().unwrap();
+        }
     }
 }

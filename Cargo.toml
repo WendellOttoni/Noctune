@@ -1,7 +1,8 @@
 [package]
 name = "noctune"
-version = "1.0.6"
+version = "1.0.7"
 edition = "2021"
+rust-version = "1.98"
 authors = ["wendellocf <wendellocf@gmail.com>"]
 description = "A fully customizable terminal music player with ASCII art TUI"
 license = "MIT"
@@ -60,10 +61,20 @@ tracing-appender = "0.2"
 # Token storage (#98). Wraps Secret Service / Keychain / Credential Manager
 # with a file fallback for headless systems.
 keyring = "3"
+tempfile = "3"
+fs2 = "0.4"
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 
 # souvlaki on Windows needs a real HWND. We create a hidden HWND_MESSAGE window
 # ourselves via the `windows` crate and pass the handle into PlatformConfig.
 [target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
 raw-window-handle = "0.6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",

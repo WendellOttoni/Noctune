@@ -10,7 +10,9 @@ impl App {
             match event {
                 crate::app::ServiceEvent::SpotifyLogin(result) => match result {
                     Ok(api) => {
-                        self.spotify = Some(api);
+                        self.spotify = Some(
+                            api.with_legacy_playlists(self.config.spotify.legacy_playlist_api),
+                        );
                         self.set_info("Spotify login complete.");
                     }
                     Err(error) => self.set_error(format!("Spotify login failed: {error}")),
@@ -129,20 +131,43 @@ impl App {
 
         if let Some(receiver) = &self.scan_rx {
             match receiver.try_recv() {
-                Ok(mut tracks) => {
+                Ok(scan) => {
+                    let mut tracks = scan.tracks;
+                    let discovered: HashSet<_> = tracks.iter().map(|t| t.path.clone()).collect();
+                    tracks.extend(
+                        self.library
+                            .iter()
+                            .filter(|t| {
+                                !discovered.contains(&t.path)
+                                    && scan
+                                        .unavailable_roots
+                                        .iter()
+                                        .any(|root| t.path.starts_with(root))
+                            })
+                            .cloned(),
+                    );
                     sort_tracks(&mut tracks, self.sort);
                     let previous_count = self.library.len();
                     let track_count = tracks.len();
                     let live_paths: HashSet<PathBuf> =
                         tracks.iter().map(|track| track.path.clone()).collect();
                     let queue_count = self.queue.len();
-                    self.queue.retain(|track| {
-                        let path = track.path.to_string_lossy();
-                        path.starts_with("http://")
-                            || path.starts_with("https://")
-                            || path.starts_with("spotify:")
-                            || live_paths.contains(&track.path)
-                    });
+                    let keep: Vec<bool> = self
+                        .queue
+                        .iter()
+                        .map(|track| {
+                            let path = track.path.to_string_lossy();
+                            path.starts_with("http://")
+                                || path.starts_with("https://")
+                                || path.starts_with("spotify:")
+                                || live_paths.contains(&track.path)
+                                || scan
+                                    .unavailable_roots
+                                    .iter()
+                                    .any(|root| track.path.starts_with(root))
+                        })
+                        .collect();
+                    self.retain_queue_entries(&keep);
                     let removed_from_queue = queue_count - self.queue.len();
                     self.library = tracks;
                     self.library_revision = self.library_revision.wrapping_add(1);
@@ -172,8 +197,20 @@ impl App {
                         },
                     );
                     self.scan_rx = None;
+                    if !scan.unavailable_roots.is_empty() {
+                        self.set_error(format!("Library: {} root(s) unavailable; existing entries preserved. Reconnect and rescan.", scan.unavailable_roots.len()));
+                    }
                     self.scan_progress_rx = None;
                     self.scan_progress = None;
+                    if self.first_run_autoplay {
+                        self.first_run_autoplay = false;
+                        if let Some(track) = self.library.first().cloned() {
+                            self.queue.push(track);
+                            self.queue_index = Some(self.queue.len() - 1);
+                            self.queue_state.select(self.queue_index);
+                            self.play_current();
+                        }
+                    }
                     if let Some(database) = &self.db {
                         let tracks = self.library.clone();
                         let database = database.clone();

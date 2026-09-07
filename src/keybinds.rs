@@ -4,6 +4,10 @@ use crate::config::Keybinds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
+    CacheStatus,
+    ClearAudioCache,
+    ToggleLanguage,
+    ToggleSymbols,
     Quit,
     Help,
     Search,
@@ -174,6 +178,36 @@ pub struct Bindings {
 }
 
 impl Bindings {
+    pub fn shortcut(&self, action: Action) -> String {
+        let labels: Vec<_> = self
+            .table
+            .iter()
+            .filter(|(_, a)| *a == action)
+            .map(|(chord, _)| {
+                let key = match chord.code {
+                    KeyCode::Char(' ') => "Space".into(),
+                    KeyCode::Char(c) => c.to_string(),
+                    other => format!("{other:?}"),
+                };
+                let mut prefix = String::new();
+                if chord.mods.contains(KeyModifiers::CONTROL) {
+                    prefix.push_str("Ctrl+");
+                }
+                if chord.mods.contains(KeyModifiers::ALT) {
+                    prefix.push_str("Alt+");
+                }
+                if chord.mods.contains(KeyModifiers::SHIFT) {
+                    prefix.push_str("Shift+");
+                }
+                format!("{prefix}{key}")
+            })
+            .collect();
+        if labels.is_empty() {
+            ":".into()
+        } else {
+            labels.join(" / ")
+        }
+    }
     pub fn from_config(kb: &Keybinds) -> (Self, Vec<String>) {
         // #67: every action below can be overridden in [keybinds]. Empty strings fall
         // back to the built-in defaults further down. Conflicts (two specs binding the

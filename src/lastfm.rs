@@ -351,18 +351,16 @@ pub fn load_session() -> Option<LastfmSession> {
     serde_json::from_str(&text).ok()
 }
 
-pub fn save_session(s: &LastfmSession) {
-    match serde_json::to_string(s) {
-        Ok(text) => {
-            crate::secrets::store(SECRETS_SERVICE, SECRETS_KEY, &text);
-        }
-        Err(e) => tracing::warn!(target: "lastfm", "failed to serialize session: {e}"),
-    }
+pub fn save_session(s: &LastfmSession) -> Result<()> {
+    crate::secrets::store(SECRETS_SERVICE, SECRETS_KEY, &serde_json::to_string(s)?)?;
+    Ok(())
 }
 
 #[allow(dead_code)]
 pub fn delete_session() {
-    crate::secrets::delete(SECRETS_SERVICE, SECRETS_KEY);
+    if let Err(error) = crate::secrets::delete(SECRETS_SERVICE, SECRETS_KEY) {
+        tracing::warn!(target: "lastfm", "Could not delete session: {error}");
+    }
 }
 
 pub fn now_unix() -> u64 {

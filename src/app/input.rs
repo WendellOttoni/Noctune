@@ -390,6 +390,38 @@ impl App {
                 };
             }
             Action::PlayPause => self.player.toggle(),
+            Action::ToggleLanguage => {
+                self.config.ui.language = match self.config.ui.language {
+                    crate::i18n::Language::En => crate::i18n::Language::PtBr,
+                    _ => crate::i18n::Language::En,
+                };
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!("Config: {error}"));
+                }
+            }
+            Action::ToggleSymbols => {
+                self.config.ui.simple_symbols = !self.config.ui.simple_symbols;
+                if let Ok(mut theme) = crate::theme::Theme::load(&self.config.theme) {
+                    if self.config.ui.simple_symbols {
+                        theme.use_simple_symbols();
+                    }
+                    self.theme = theme;
+                }
+                if let Err(error) = self.config.save() {
+                    self.set_error(format!("Config: {error}"));
+                }
+            }
+            Action::CacheStatus | Action::ClearAudioCache => {
+                match crate::audio_cache::maintain(matches!(action, Action::ClearAudioCache)) {
+                    Ok(usage) => self.set_info(format!(
+                        "Cache: {:.1} MiB, {} files, {} removed; active audio preserved.",
+                        usage.bytes as f64 / 1048576.0,
+                        usage.files,
+                        usage.removed
+                    )),
+                    Err(error) => self.set_error(format!("Cache: {error}")),
+                }
+            }
             Action::Next => self.next(),
             Action::Prev => self.prev(),
             Action::Stop => {
@@ -840,185 +872,13 @@ impl App {
         let mut items: Vec<PaletteItem> = Vec::new();
 
         // 1. Built-in Commands
-        let cmds = [
-            (
-                "play",
-                "Play / Pause",
-                "Alternar reprodução e pausa",
-                Action::PlayPause,
-            ),
-            (
-                "next",
-                "Próxima Música",
-                "Avançar para a próxima faixa da fila",
-                Action::Next,
-            ),
-            (
-                "prev",
-                "Música Anterior",
-                "Voltar para a faixa anterior",
-                Action::Prev,
-            ),
-            (
-                "stop",
-                "Parar Reprodução",
-                "Parar áudio e descarregar sink",
-                Action::Stop,
-            ),
-            (
-                "shuffle",
-                "Alternar Shuffle",
-                "Ativar ou desativar modo aleatório",
-                Action::Shuffle,
-            ),
-            (
-                "repeat",
-                "Alternar Repeat",
-                "Ciclar modos de repetição (off/all/one)",
-                Action::Repeat,
-            ),
-            (
-                "mini",
-                "Alternar Mini Player",
-                "Alternar modo compacto",
-                Action::ToggleMini,
-            ),
-            (
-                "eq",
-                "Equalizador Tuner",
-                "Abrir calibrador de frequências de áudio",
-                Action::EqTuner,
-            ),
-            (
-                "audio",
-                "Painel de Áudio & Compressor",
-                "Ajustar dinâmica e ganho",
-                Action::ShowAudioPanel,
-            ),
-            (
-                "viz",
-                "Ciclar Visualizador FFT",
-                "Mudar modo: spectrum, waveform, vu-meter...",
-                Action::CycleVizMode,
-            ),
-            (
-                "lyrics",
-                "Letras / Karaokê",
-                "Abrir modal de letras sincronizadas (LRC)",
-                Action::ShowLyrics,
-            ),
-            (
-                "radio",
-                "Rádios Online",
-                "Explorar diretório mundial de web rádios",
-                Action::RadioBrowser,
-            ),
-            (
-                "spotify",
-                "Spotify Browser",
-                "Buscar e navegar nas playlists do Spotify",
-                Action::SpotifyBrowser,
-            ),
-            (
-                "subsonic",
-                "Subsonic / Navidrome Cloud",
-                "Streaming pessoal da sua nuvem privada",
-                Action::SubsonicBrowser,
-            ),
-            (
-                "vault",
-                "Cloud Audio Vault",
-                "Catálogo compartilhado de áudio em nuvem privada",
-                Action::VaultBrowser,
-            ),
-            (
-                "playlists",
-                "Gerenciador de Playlists",
-                "Salvar e carregar arquivos .m3u",
-                Action::LoadPlaylist,
-            ),
-            (
-                "share",
-                "Compartilhar Playlist",
-                "Publicar a fila/playlist atual na rede pública",
-                Action::SharePlaylist,
-            ),
-            (
-                "browse",
-                "Explorar Playlists Públicas",
-                "Buscar e importar playlists da comunidade",
-                Action::BrowsePlaylists,
-            ),
-            (
-                "endless",
-                "Alternar Modo Infinito (Auto-Play)",
-                "Tocar músicas similares ao fim da fila",
-                Action::ToggleEndlessMode,
-            ),
-            (
-                "download",
-                "Salvar Faixa Atual Offline",
-                "Baixar áudio de streaming para biblioteca local",
-                Action::DownloadCurrent,
-            ),
-            (
-                "rescan",
-                "Reescanear Biblioteca",
-                "Procurar novos arquivos de música no disco",
-                Action::Rescan,
-            ),
-            (
-                "stats",
-                "Estatísticas de Audição",
-                "Ver artistas e gêneros mais tocados",
-                Action::ShowStats,
-            ),
-            (
-                "lastfm",
-                "Painel Last.fm",
-                "Ver histórico de scrobbling e tops",
-                Action::LastfmPanel,
-            ),
-            (
-                "fav",
-                "Favoritar Música Atual (♥)",
-                "Adicionar/remover dos favoritos",
-                Action::ToggleFavorite,
-            ),
-            (
-                "sleep",
-                "Sleep Timer",
-                "Temporizador de 30min para desligamento",
-                Action::SleepTimer,
-            ),
-            (
-                "tags",
-                "Editor de Tags ID3",
-                "Editar título, artista e álbum do arquivo",
-                Action::EditTags,
-            ),
-            (
-                "help",
-                "Ajuda & Atalhos",
-                "Ver lista completa de atalhos do teclado",
-                Action::Help,
-            ),
-            (
-                "update",
-                "Verificar Atualizações",
-                "Checar nova versão no GitHub",
-                Action::SelfUpdate,
-            ),
-            ("quit", "Sair do Noctune", "Fechar o player", Action::Quit),
-        ];
-
-        for (id, title, desc, act) in cmds {
+        for command in crate::commands::COMMANDS {
             items.push(PaletteItem {
-                id: id.to_string(),
-                title: title.to_string(),
-                description: desc.to_string(),
+                id: command.id.to_string(),
+                title: command.title(self.config.ui.language).to_string(),
+                description: self.bindings.shortcut(command.action),
                 category: PaletteCategory::Command,
-                action: PaletteAction::Execute(act),
+                action: PaletteAction::Execute(command.action),
             });
         }
 

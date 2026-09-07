@@ -16,7 +16,7 @@ impl App {
             return;
         }
         let dirs = self.config.music_dirs.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let (tx, rx) = std::sync::mpsc::channel::<super::scan::ScanResult>();
         let (ptx, prx) = std::sync::mpsc::channel::<(usize, usize)>();
         self.scan_rx = Some(rx);
         self.scan_progress_rx = Some(prx);
@@ -1104,7 +1104,7 @@ impl App {
                     .map_err(|error| error.to_string())
                     .and_then(|session| {
                         let username = session.username.clone();
-                        crate::lastfm::save_session(&session);
+                        crate::lastfm::save_session(&session).map_err(|error| error.to_string())?;
                         crate::lastfm::LastfmClient::new(api_key, api_secret, session)
                             .map(|client| (client, username))
                             .map_err(|error| error.to_string())
@@ -1234,11 +1234,13 @@ impl App {
                     if !already_ready && !already_building {
                         self.prefetch.next = None;
                         self.prefetch.building_next = Some(path.clone());
+                        self.prefetch.next_request = self.prefetch.next_request.wrapping_add(1);
+                        let generation = self.prefetch.next_request;
                         if let Some(tx) = &self.prefetch.tx {
                             let tx = tx.clone();
                             let stream_err = self.player.stream_err_handle();
                             let stream_title = self.player.stream_title_handle();
-                            std::thread::spawn(move || {
+                            let _ = self.prefetch.next_worker.submit(move || {
                                 let res = crate::audio::build_source(
                                     &target,
                                     Duration::ZERO,
@@ -1246,7 +1248,9 @@ impl App {
                                     stream_title,
                                 )
                                 .map_err(|e| e.to_string());
-                                let _ = tx.send((SlotKind::Next, path, res));
+                                if crate::worker::checkpoint().is_ok() {
+                                    let _ = tx.send((SlotKind::Next, generation, path, res));
+                                }
                             });
                         }
                     }
@@ -1269,11 +1273,13 @@ impl App {
                     if !already_ready && !already_building {
                         self.prefetch.prev = None;
                         self.prefetch.building_prev = Some(path.clone());
+                        self.prefetch.prev_request = self.prefetch.prev_request.wrapping_add(1);
+                        let generation = self.prefetch.prev_request;
                         if let Some(tx) = &self.prefetch.tx {
                             let tx = tx.clone();
                             let stream_err = self.player.stream_err_handle();
                             let stream_title = self.player.stream_title_handle();
-                            std::thread::spawn(move || {
+                            let _ = self.prefetch.prev_worker.submit(move || {
                                 let res = crate::audio::build_source(
                                     &target,
                                     Duration::ZERO,
@@ -1281,7 +1287,9 @@ impl App {
                                     stream_title,
                                 )
                                 .map_err(|e| e.to_string());
-                                let _ = tx.send((SlotKind::Prev, path, res));
+                                if crate::worker::checkpoint().is_ok() {
+                                    let _ = tx.send((SlotKind::Prev, generation, path, res));
+                                }
                             });
                         }
                     }

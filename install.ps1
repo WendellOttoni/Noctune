@@ -2,6 +2,9 @@ $ErrorActionPreference = 'Stop'
 
 $repo       = "WendellOttoni/Noctune"
 $installDir = "$env:LOCALAPPDATA\Programs\noctune"
+if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
+    throw 'Only Windows x64 is currently supported.'
+}
 
 Write-Host "Fetching latest release..."
 $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
@@ -16,7 +19,21 @@ if (-not $asset) {
 Write-Host "Downloading noctune $version..."
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 $dest = "$installDir\noctune.exe"
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $dest
+$stage = Join-Path $installDir ("noctune-" + [guid]::NewGuid().ToString('N') + '.tmp')
+try {
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $stage
+    $checksum = (Invoke-WebRequest -Uri ($asset.browser_download_url + '.sha256')).Content.Trim()
+    if ($checksum -notmatch '^([a-fA-F0-9]{64})\s+noctune-windows-x64\.exe$') { throw 'Invalid checksum manifest' }
+    if ((Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash -ne $Matches[1]) { throw 'Checksum mismatch; installation preserved' }
+    if (Test-Path -LiteralPath $dest) {
+        $backup = Join-Path $installDir ("noctune-" + [guid]::NewGuid().ToString('N') + '.old')
+        Move-Item -LiteralPath $dest -Destination $backup
+        try { Move-Item -LiteralPath $stage -Destination $dest }
+        catch { Move-Item -LiteralPath $backup -Destination $dest; throw }
+    } else { Move-Item -LiteralPath $stage -Destination $dest }
+} finally {
+    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage }
+}
 
 # Add install dir to user PATH if not already present
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -27,10 +44,10 @@ if ($userPath -notlike "*$installDir*") {
     Write-Host "noctune $version installed."
 }
 
-# yt-dlp — required for YouTube/playlist playback
+# yt-dlp - required for YouTube/playlist playback
 Write-Host ""
 if (Get-Command yt-dlp -ErrorAction SilentlyContinue) {
-    Write-Host "yt-dlp found — YouTube playback is ready."
+    Write-Host "yt-dlp found - YouTube playback is ready."
 } else {
     Write-Host "yt-dlp is not installed."
     Write-Host "It is required to add YouTube links and playlists."

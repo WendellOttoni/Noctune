@@ -21,8 +21,15 @@ pub struct PrefetchSlots {
     pub prev: Option<PreloadedTrack>,
     pub building_next: Option<PathBuf>,
     pub building_prev: Option<PathBuf>,
-    pub rx: Option<std::sync::mpsc::Receiver<(SlotKind, PathBuf, Result<SymphoniaSource, String>)>>,
-    pub tx: Option<std::sync::mpsc::Sender<(SlotKind, PathBuf, Result<SymphoniaSource, String>)>>,
+    pub next_worker: crate::worker::LatestWorker,
+    pub prev_worker: crate::worker::LatestWorker,
+    pub next_request: u64,
+    pub prev_request: u64,
+    pub rx: Option<
+        std::sync::mpsc::Receiver<(SlotKind, u64, PathBuf, Result<SymphoniaSource, String>)>,
+    >,
+    pub tx:
+        Option<std::sync::mpsc::Sender<(SlotKind, u64, PathBuf, Result<SymphoniaSource, String>)>>,
 }
 
 impl PrefetchSlots {
@@ -33,12 +40,20 @@ impl PrefetchSlots {
             prev: None,
             building_next: None,
             building_prev: None,
+            next_worker: crate::worker::LatestWorker::new(),
+            prev_worker: crate::worker::LatestWorker::new(),
+            next_request: 0,
+            prev_request: 0,
             rx: Some(rx),
             tx: Some(tx),
         }
     }
 
     pub fn invalidate(&mut self) {
+        self.next_worker.cancel();
+        self.prev_worker.cancel();
+        self.next_request = self.next_request.wrapping_add(1);
+        self.prev_request = self.prev_request.wrapping_add(1);
         self.next = None;
         self.prev = None;
         self.building_next = None;

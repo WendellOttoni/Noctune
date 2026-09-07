@@ -7,9 +7,14 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
   build:
+    needs: checks
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -30,6 +35,11 @@ jobs:
             artifact: noctune-macos-arm64
             binary: target/release/noctune
 
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: noctune-macos-x64
+            binary: target/release/noctune
+
     steps:
       - uses: actions/checkout@v4
 
@@ -37,14 +47,15 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev pkg-config
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.0
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
@@ -54,7 +65,31 @@ jobs:
         if: runner.os == 'Windows'
         run: copy target\${{ matrix.target }}\release\noctune.exe ${{ matrix.artifact }}
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      - name: Generate digest and manifest
+        run: python scripts/release_manifest.py --artifact ${{ matrix.artifact }} --target ${{ matrix.target }} --tag ${{ github.ref_name }}
+
+      - uses: actions/attest-build-provenance@v3
         with:
-          files: ${{ matrix.artifact }}
+          subject-path: ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.sha256
+            ${{ matrix.artifact }}.json
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          body_path: docs/releases/${{ github.ref_name }}.md

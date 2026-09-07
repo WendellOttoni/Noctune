@@ -8,6 +8,8 @@ use std::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub ui: UiConfig,
     pub music_dirs: Vec<PathBuf>,
     pub theme: String,
     pub keybinds: Keybinds,
@@ -56,6 +58,10 @@ impl Default for YtdlpConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
+    #[serde(default = "default_audio_budget")]
+    pub audio_max_size_mb: u64,
+    #[serde(default = "default_audio_expiry")]
+    pub audio_expire_days: u64,
     /// 0 = no limit. (#70)
     pub max_size_mb: u64,
     /// Delete entries older than N days. 0 = never expire.
@@ -66,11 +72,27 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
+            audio_max_size_mb: default_audio_budget(),
+            audio_expire_days: default_audio_expiry(),
             max_size_mb: 500,
             expire_days: 30,
             album_art_max_mb: 100,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct UiConfig {
+    pub language: crate::i18n::Language,
+    pub simple_symbols: bool,
+}
+
+fn default_audio_budget() -> u64 {
+    1024
+}
+fn default_audio_expiry() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +140,8 @@ impl Default for VisualizerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpotifyConfig {
+    #[serde(default)]
+    pub legacy_playlist_api: bool,
     pub client_id: String,
     pub redirect_port: u16,
 }
@@ -127,6 +151,7 @@ impl Default for SpotifyConfig {
         Self {
             client_id: String::new(),
             redirect_port: 8888,
+            legacy_playlist_api: false,
         }
     }
 }
@@ -289,6 +314,7 @@ fn default_eq_preset() -> String {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            ui: UiConfig::default(),
             music_dirs: default_music_dirs(),
             theme: "default".to_string(),
             keybinds: Keybinds {

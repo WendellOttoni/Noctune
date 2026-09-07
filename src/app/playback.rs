@@ -13,7 +13,34 @@ use super::{
 };
 
 impl App {
+    /// Remap by original entry position, never by path (duplicates are intentional).
+    pub(crate) fn retain_queue_entries(&mut self, keep: &[bool]) {
+        let current = self.queue_index;
+        let selected = self.queue_state.selected();
+        let mapping = super::util::retained_indices(keep);
+        self.queue_index = current.and_then(|i| mapping.get(i).copied().flatten());
+        self.queue_state
+            .select(selected.and_then(|i| mapping.get(i).copied().flatten()));
+        let mut index = 0;
+        self.queue.retain(|_| {
+            let retain = keep[index];
+            index += 1;
+            retain
+        });
+        if keep.iter().any(|retain| !retain) {
+            self.cancel_pending_playback();
+            if current.is_some() && self.queue_index.is_none() {
+                self.player.stop();
+            }
+            if self.queue_state.selected().is_none() && !self.queue.is_empty() {
+                self.queue_state.select(Some(0));
+            }
+            self.reset_shuffle_cycle();
+        }
+    }
+
     pub(crate) fn cancel_pending_playback(&mut self) {
+        self.loader.cancel();
         self.load_rx = None;
         self.loading_track = None;
         self.pending_seek_offset = None;
@@ -117,7 +144,10 @@ impl App {
         self.theme_idx = (self.theme_idx + 1) % self.theme_names.len();
         let name = self.theme_names[self.theme_idx].clone();
         match crate::theme::Theme::load(&name) {
-            Ok(theme) => {
+            Ok(mut theme) => {
+                if self.config.ui.simple_symbols {
+                    theme.use_simple_symbols();
+                }
                 self.config.theme = name.clone();
                 self.theme = theme;
                 if let Err(error) = self.config.save() {
@@ -236,18 +266,13 @@ impl App {
             self.set_info("Seek is unavailable for live radio.");
             return;
         }
-        let cur_ms = self.player.elapsed().as_millis() as i64;
-        let mut new_ms = cur_ms + delta_secs * 1000;
-        if new_ms < 0 {
-            new_ms = 0;
-        }
-        if let Some(total) = track.duration {
-            let max_ms = total.as_millis().saturating_sub(500) as i64;
-            if new_ms > max_ms {
-                new_ms = max_ms;
-            }
-        }
-        self.spawn_seek_load(track, Duration::from_millis(new_ms as u64));
+        let target = super::util::seek_target(
+            self.player.elapsed(),
+            self.pending_seek_offset,
+            delta_secs,
+            track.duration,
+        );
+        self.spawn_seek_load(track, target);
     }
 
     pub(crate) fn seek_fraction_async(&mut self, frac: f32) -> Result<()> {
@@ -272,12 +297,10 @@ impl App {
     pub(crate) fn spawn_seek_load(&mut self, track: Track, offset: Duration) {
         let stream_err = self.player.stream_err_handle();
         let stream_title = self.player.stream_title_handle();
-        let (tx, rx) = std::sync::mpsc::channel();
         let t_clone = track.clone();
-        std::thread::spawn(move || {
-            let result = crate::audio::build_source(&t_clone, offset, stream_err, stream_title)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(result);
+        let rx = self.loader.submit(move || {
+            crate::audio::build_source(&t_clone, offset, stream_err, stream_title)
+                .map_err(|e| e.to_string())
         });
         self.load_rx = Some(rx);
         self.loading_track = Some(track);
@@ -415,6 +438,7 @@ impl App {
             return 0;
         }
 
+        super::util::deduplicate_tracks(&mut candidates);
         let count = 4.min(candidates.len());
         let mut added = 0;
         for _ in 0..count {
@@ -944,17 +968,15 @@ impl App {
 
         let stream_err = self.player.stream_err_handle();
         let stream_title = self.player.stream_title_handle();
-        let (tx, rx) = std::sync::mpsc::channel();
         let t_clone = t.clone();
-        std::thread::spawn(move || {
-            let result = crate::audio::build_source(
+        let rx = self.loader.submit(move || {
+            crate::audio::build_source(
                 &t_clone,
                 std::time::Duration::ZERO,
                 stream_err,
                 stream_title,
             )
-            .map_err(|e| e.to_string());
-            let _ = tx.send(result);
+            .map_err(|e| e.to_string())
         });
         self.load_rx = Some(rx);
         self.loading_track = Some(t.clone());

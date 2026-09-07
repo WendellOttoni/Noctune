@@ -36,6 +36,7 @@ use crate::{
 };
 
 pub struct App {
+    pub first_run_autoplay: bool,
     #[allow(dead_code)]
     pub config: Config,
     pub theme: Theme,
@@ -86,8 +87,9 @@ pub struct App {
     pub load_rx: Option<std::sync::mpsc::Receiver<Result<crate::audio::SymphoniaSource, String>>>,
     pub loading_track: Option<Track>,
     pub pending_seek_offset: Option<Duration>,
+    pub loader: crate::worker::LatestWorker,
     pub prefetch: PrefetchSlots,
-    pub scan_rx: Option<std::sync::mpsc::Receiver<Vec<Track>>>,
+    pub scan_rx: Option<std::sync::mpsc::Receiver<scan::ScanResult>>,
     pub scan_progress_rx: Option<std::sync::mpsc::Receiver<(usize, usize)>>,
     pub scan_progress: Option<(usize, usize)>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
@@ -293,6 +295,7 @@ impl App {
 
     pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
         crate::ytdlp::configure_retries(config.ytdlp.clone());
+        crate::audio_cache::configure(config.cache.clone());
         let history_cfg = config.history.clone();
         let mut player = Player::new(
             config.playback.default_volume,
@@ -337,9 +340,10 @@ impl App {
 
         let spotify = crate::spotify::load_tokens()
             .filter(|_| !spotify_client_id.is_empty())
-            .and_then(|t| crate::spotify::SpotifyApi::new(spotify_client_id.clone(), t).ok());
+            .and_then(|t| crate::spotify::SpotifyApi::new(spotify_client_id.clone(), t).ok())
+            .map(|api| api.with_legacy_playlists(config.spotify.legacy_playlist_api));
 
-        let (scan_tx, scan_rx) = std::sync::mpsc::channel::<Vec<Track>>();
+        let (scan_tx, scan_rx) = std::sync::mpsc::channel::<scan::ScanResult>();
         let (service_tx, service_rx) = std::sync::mpsc::channel::<ServiceEvent>();
         let (progress_tx, scan_progress_rx) = std::sync::mpsc::channel::<(usize, usize)>();
         let scan_dirs = config.music_dirs.clone();
@@ -433,10 +437,12 @@ impl App {
             pending_drag_seek: None,
             clear_confirm_until: None,
             url_rx: None,
+            first_run_autoplay: false,
             download_rx: None,
             load_rx: None,
             loading_track: None,
             pending_seek_offset: None,
+            loader: crate::worker::LatestWorker::new(),
             prefetch: PrefetchSlots::new(),
             scan_rx: Some(scan_rx),
             scan_progress_rx: Some(scan_progress_rx),
@@ -838,7 +844,11 @@ impl App {
                     self.load_rx = None;
                     if let Some(t) = track {
                         let offset = seek_offset.unwrap_or(Duration::ZERO);
-                        match self.player.play_prepared(source, &t, offset) {
+                        let keep_paused = seek_offset.is_some() && self.player.is_paused();
+                        match self
+                            .player
+                            .play_prepared_state(source, &t, offset, keep_paused)
+                        {
                             Ok(_) => {
                                 if seek_offset.is_some() {
                                     self.set_info(format!("Playing: {}", t.display()));
@@ -897,9 +907,12 @@ impl App {
         }
 
         if let Some(rx) = &self.prefetch.rx {
-            while let Ok((kind, path, res)) = rx.try_recv() {
+            while let Ok((kind, generation, path, res)) = rx.try_recv() {
                 match kind {
                     SlotKind::Next => {
+                        if generation != self.prefetch.next_request {
+                            continue;
+                        }
                         self.prefetch.building_next = None;
                         if let Ok(source) = res {
                             let cur = self.queue_index.unwrap_or(0);
@@ -911,6 +924,9 @@ impl App {
                         }
                     }
                     SlotKind::Prev => {
+                        if generation != self.prefetch.prev_request {
+                            continue;
+                        }
                         self.prefetch.building_prev = None;
                         if let Ok(source) = res {
                             let cur = self.queue_index.unwrap_or(0);

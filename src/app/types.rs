@@ -280,6 +280,18 @@ pub enum PaletteCategory {
 }
 
 impl PaletteCategory {
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
+        let en = match self {
+            Self::Command => "Command",
+            Self::Theme => "Theme",
+            Self::EqPreset => "Equalizer",
+            Self::Track => "Track",
+            Self::Radio => "Radio",
+            Self::View => "View",
+            Self::Plugin => "Plugin",
+        };
+        language.text(en, self.label())
+    }
     pub fn label(self) -> &'static str {
         match self {
             PaletteCategory::Command => "Comando",

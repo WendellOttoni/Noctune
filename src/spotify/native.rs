@@ -23,9 +23,10 @@ impl NativeSpotifySession {
     }
 
     pub fn start(&mut self, _token: &str) -> Result<()> {
-        self.is_active = true;
-        tracing::info!(target: "spotify_native", "Native Spotify PCM streaming module active for device '{}'", self.device_name);
-        Ok(())
+        self.is_active = false;
+        anyhow::bail!(
+            "Native Spotify audio is not available. Use an active Spotify Connect device."
+        )
     }
 
     pub fn stop(&mut self) {

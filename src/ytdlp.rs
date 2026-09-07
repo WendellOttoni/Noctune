@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use std::{
     path::PathBuf,
@@ -92,6 +92,7 @@ where
     let mut backoff = cfg.backoff_secs.max(1);
     let mut attempt: u32 = 0;
     loop {
+        crate::worker::checkpoint()?;
         attempt += 1;
         match op() {
             Ok(v) => return Ok(v),
@@ -106,7 +107,10 @@ where
                 } else {
                     backoff
                 };
-                std::thread::sleep(Duration::from_secs(wait));
+                for _ in 0..wait.saturating_mul(10) {
+                    crate::worker::checkpoint()?;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
                 backoff = backoff.saturating_mul(2);
             }
         }
@@ -173,8 +177,8 @@ pub fn spawn_yt_dlp_at(
     start_offset: Duration,
     stream_err: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
-    let offset_secs = start_offset.as_secs();
-    let wants_offset = offset_secs > 0;
+    let offset_secs = start_offset.as_secs_f64();
+    let wants_offset = start_offset > Duration::ZERO;
     let has_ffmpeg = ffmpeg_available();
     if !cfg!(target_os = "windows") && wants_offset && !has_ffmpeg {
         return Err(anyhow!("remote seek requires ffmpeg"));
@@ -197,7 +201,7 @@ pub fn spawn_yt_dlp_at(
 
 fn pipe_from_yt_dlp(
     youtube_url: &str,
-    start_secs: Option<u64>,
+    start_secs: Option<f64>,
     stream_err: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
     let format_selector = if ffmpeg_available() {
@@ -224,7 +228,9 @@ fn pipe_from_yt_dlp(
     }
     args.push(youtube_url.into());
 
-    let child = Command::new(yt_dlp_executable())
+    let mut command = Command::new(yt_dlp_executable());
+    crate::process::configure(&mut command);
+    let child = command
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -246,8 +252,8 @@ fn download_via_tempfile(
     let hash: u64 = youtube_url
         .bytes()
         .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    let offset_secs = start_offset.as_secs();
-    let is_seek = offset_secs > 0;
+    let offset_secs = start_offset.as_secs_f64();
+    let is_seek = start_offset > Duration::ZERO;
     let use_section_download = is_seek && ffmpeg_available();
     let cache_base_path = cache_dir.join(format!("noctune_{hash}"));
 
@@ -255,26 +261,17 @@ fn download_via_tempfile(
     // Windows. Reuse it and seek locally instead of downloading the tail again.
     for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
         let path = cache_base_path.with_extension(ext);
-        if path.exists() {
-            if let Ok(bytes) = std::fs::read(&path) {
-                if !bytes.is_empty() {
-                    let hint = symphonia::core::probe::Hint::new();
-                    if let Ok(mut source) = SymphoniaSource::from_bytes(bytes, hint) {
-                        if is_seek {
-                            source.seek_to_or_skip(start_offset);
-                        }
-                        return Ok(source);
-                    }
-                }
+        if let Ok(mut source) = crate::audio_cache::open(&path) {
+            if is_seek {
+                source.seek_to_or_skip(start_offset);
             }
+            return Ok(source);
         }
     }
-
-    let base_dir = if use_section_download {
-        std::env::temp_dir()
-    } else {
-        cache_dir
-    };
+    let staging = tempfile::Builder::new()
+        .prefix("download-")
+        .tempdir_in(&cache_dir)?;
+    let base_dir = staging.path();
     let base_path = base_dir.join(format!("noctune_{hash}"));
 
     // M4A (AAC 128kbps) is the best format symphonia reliably decodes from YouTube.
@@ -299,10 +296,7 @@ fn download_via_tempfile(
     }
     args.push(youtube_url.into());
 
-    let out = Command::new(yt_dlp_executable())
-        .args(&args)
-        .output()
-        .map_err(spawn_error)?;
+    let out = run_output(Command::new(yt_dlp_executable()).args(&args))?;
 
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -318,14 +312,20 @@ fn download_via_tempfile(
     for ext in &["mp4", "m4a", "webm", "opus", "ogg", "mp3", "aac", "wav"] {
         let path = base_path.with_extension(ext);
         if path.exists() {
-            let bytes =
-                std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
-            if use_section_download {
-                let _ = std::fs::remove_file(&path);
-            }
-            let hint = symphonia::core::probe::Hint::new();
-            let mut source =
-                SymphoniaSource::from_bytes(bytes, hint).map_err(|e| anyhow!("decode: {e}"))?;
+            crate::worker::checkpoint()?;
+            let mut source = if use_section_download {
+                let file = std::fs::File::open(&path)?;
+                let mut source =
+                    SymphoniaSource::from_file(file, symphonia::core::probe::Hint::new())?;
+                source.temp_audio_dir = Some(staging);
+                source
+            } else {
+                let destination = cache_base_path.with_extension(ext);
+                // Only completed files become visible to the cache.
+                let source = crate::audio_cache::publish(&path, &destination)?;
+                let _ = crate::audio_cache::maintain(false);
+                source
+            };
             // Without ffmpeg we downloaded the complete track. Seek within that
             // cached copy so the audio and UI still start at the same position.
             if is_seek && !use_section_download {
@@ -412,10 +412,12 @@ pub fn fetch_tracks(url: &str) -> Result<Vec<Track>> {
 
     // #69: retry transient failures (network blip, temporary 5xx) before giving up.
     let json_str = with_retry(|| {
-        let output = Command::new(yt_dlp_executable())
-            .args(["-J", "--flat-playlist", "--no-warnings", &resolved])
-            .output()
-            .map_err(spawn_error)?;
+        let output = run_output(Command::new(yt_dlp_executable()).args([
+            "-J",
+            "--flat-playlist",
+            "--no-warnings",
+            &resolved,
+        ]))?;
 
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -491,5 +493,46 @@ fn yt_info_to_track(info: YtInfo) -> Option<Track> {
         replaygain_album_db: None,
         cover_url,
         added_at: None,
+    })
+}
+
+/// Capture output to bounded temporary files while polling cancellation and timeout.
+fn run_output(command: &mut Command) -> Result<std::process::Output> {
+    use std::io::{Read, Seek};
+    crate::worker::checkpoint()?;
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
+    command
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?);
+    crate::process::configure(command);
+    let mut child = command.spawn().map_err(spawn_error)?;
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if crate::worker::checkpoint().is_err() || started.elapsed() > Duration::from_secs(180) {
+            crate::process::terminate(&mut child);
+            anyhow::bail!("Loading cancelled or timed out");
+        }
+        if stdout.metadata()?.len() >= 32 * 1024 * 1024
+            || stderr.metadata()?.len() >= 4 * 1024 * 1024
+        {
+            crate::process::terminate(&mut child);
+            anyhow::bail!("yt-dlp output limit exceeded");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    stdout.rewind()?;
+    stderr.rewind()?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    stdout.take(32 * 1024 * 1024).read_to_end(&mut out)?;
+    stderr.take(4 * 1024 * 1024).read_to_end(&mut err)?;
+    Ok(std::process::Output {
+        status,
+        stdout: out,
+        stderr: err,
     })
 }

@@ -50,6 +50,19 @@ pub struct Symbols {
 }
 
 impl Theme {
+    pub fn use_simple_symbols(&mut self) {
+        self.symbols.play = ">".into();
+        self.symbols.pause = "||".into();
+        self.symbols.stop = "[]".into();
+        self.symbols.next = ">|".into();
+        self.symbols.prev = "|<".into();
+        self.symbols.shuffle = "S".into();
+        self.symbols.repeat = "R".into();
+        self.symbols.volume = "Vol".into();
+        self.symbols.progress_fill = "=".into();
+        self.symbols.progress_empty = "-".into();
+        self.symbols.progress_head = ">".into();
+    }
     const BUILTIN_NAMES: [&'static str; 4] = ["default", "gruvbox", "mono", "synthwave"];
 
     fn builtin(name: &str) -> Option<&'static str> {

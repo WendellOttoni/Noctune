@@ -50,8 +50,11 @@ pub struct SymphoniaSource {
     // After an accurate container seek, decode preroll packets but do not expose
     // them to rodio until the requested timestamp has been reached.
     seek_ts: Option<u64>,
+    time_base: Option<symphonia::core::units::TimeBase>,
     // Holds the yt-dlp child process so it's killed when the source is dropped.
-    _child: Option<Child>,
+    _child: Option<crate::process::ProbingChild>,
+    pub(crate) cache_lease: Option<crate::audio_cache::Lease>,
+    pub(crate) temp_audio_dir: Option<tempfile::TempDir>,
 }
 
 // Safety: FormatReader/Decoder internals are not Sync, but SymphoniaSource is !Sync
@@ -59,7 +62,11 @@ pub struct SymphoniaSource {
 unsafe impl Send for SymphoniaSource {}
 
 impl SymphoniaSource {
-    fn from_mss(mss: MediaSourceStream, hint: Hint, child: Option<Child>) -> Result<Self> {
+    fn from_mss(
+        mss: MediaSourceStream,
+        hint: Hint,
+        child: Option<crate::process::ProbingChild>,
+    ) -> Result<Self> {
         let fmt_opts = FormatOptions {
             enable_gapless: true,
             ..Default::default()
@@ -76,6 +83,7 @@ impl SymphoniaSource {
             .ok_or_else(|| anyhow!("no audio track found"))?;
 
         let track_id = track.id;
+        let time_base = track.codec_params.time_base;
         let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
         let channels = track
             .codec_params
@@ -111,7 +119,10 @@ impl SymphoniaSource {
             buf_pos: 0,
             sample_buf: None,
             seek_ts: None,
+            time_base,
             _child: child,
+            cache_lease: None,
+            temp_audio_dir: None,
         })
     }
 
@@ -150,7 +161,7 @@ impl SymphoniaSource {
             std::thread::spawn(move || {
                 use std::io::{BufRead, BufReader};
                 let mut last = String::new();
-                for line in BufReader::new(stderr).lines().flatten() {
+                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                     if !line.trim().is_empty() {
                         last = line;
                     }
@@ -166,7 +177,11 @@ impl SymphoniaSource {
             Box::new(ReadOnlySource::new(SyncWrap(stdout))),
             Default::default(),
         );
-        Self::from_mss(mss, hint, Some(child))
+        let source = Self::from_mss(mss, hint, Some(crate::process::ProbingChild::new(child)))?;
+        if let Some(child) = &source._child {
+            child.ready();
+        }
+        Ok(source)
     }
 
     /// Seek the underlying container to `time`. Cheap on indexed formats (mp3/flac/ogg);
@@ -211,6 +226,9 @@ impl SymphoniaSource {
         let channels = self.channels() as u64;
         let to_skip = (time.as_millis() as u64 * rate / 1000) * channels;
         for _ in 0..to_skip {
+            if crate::worker::checkpoint().is_err() {
+                break;
+            }
             if self.next().is_none() {
                 break;
             }
@@ -238,13 +256,6 @@ impl SymphoniaSource {
             let packet_ts = packet.ts();
             match self.decoder.decode(&packet) {
                 Ok(decoded) => {
-                    if self
-                        .seek_ts
-                        .is_some_and(|required_ts| packet_ts < required_ts)
-                    {
-                        continue;
-                    }
-                    self.seek_ts = None;
                     let spec = *decoded.spec();
                     let cap = decoded.capacity() as u64;
                     let sbuf = match &mut self.sample_buf {
@@ -257,7 +268,26 @@ impl SymphoniaSource {
                     sbuf.copy_interleaved_ref(decoded);
                     self.buf.clear();
                     self.buf.extend_from_slice(sbuf.samples());
-                    self.buf_pos = 0;
+                    let skip_frames = self
+                        .seek_ts
+                        .filter(|required| *required > packet_ts)
+                        .map(|required| {
+                            let delta = required - packet_ts;
+                            if let Some(base) = self.time_base {
+                                let time = base.calc_time(delta);
+                                ((time.seconds as f64 + time.frac) * spec.rate as f64).round()
+                                    as usize
+                            } else {
+                                delta as usize
+                            }
+                        })
+                        .unwrap_or(0);
+                    let skip_samples = skip_frames.saturating_mul(spec.channels.count());
+                    if skip_samples >= self.buf.len() && !self.buf.is_empty() {
+                        continue;
+                    }
+                    self.buf_pos = skip_samples;
+                    self.seek_ts = None;
                     return !self.buf.is_empty();
                 }
                 Err(SymphoniaError::DecodeError(_)) => continue,
@@ -273,10 +303,7 @@ impl SymphoniaSource {
 
 impl Drop for SymphoniaSource {
     fn drop(&mut self) {
-        if let Some(mut child) = self._child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self._child.take();
     }
 }
 
@@ -591,6 +618,16 @@ impl Player {
         track: &Track,
         offset: Duration,
     ) -> Result<()> {
+        self.play_prepared_state(source, track, offset, false)
+    }
+
+    pub fn play_prepared_state(
+        &mut self,
+        source: SymphoniaSource,
+        track: &Track,
+        offset: Duration,
+        paused: bool,
+    ) -> Result<()> {
         self.cancel_crossfade();
         self.gapless_queued = None;
         self.current_sample_rate = source.sample_rate;
@@ -602,10 +639,10 @@ impl Player {
         let sink = Sink::try_new(&self.handle)?;
         sink.set_volume(self.volume * self.rg_scale);
         sink.set_speed(self.speed);
-        sink.append(comp);
+        append_with_state(&sink, comp, paused);
         self.sink = sink;
         self.current = Some(track.clone());
-        self.started_at = Some(Instant::now());
+        self.started_at = if paused { None } else { Some(Instant::now()) };
         self.paused_offset = offset;
         Ok(())
     }
@@ -863,6 +900,15 @@ pub fn enumerate_output_devices() -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn append_with_state(sink: &Sink, source: impl Source<Item = f32> + Send + 'static, paused: bool) {
+    if paused {
+        sink.pause();
+    } else {
+        sink.play();
+    }
+    sink.append(source);
+}
+
 pub fn default_device_name() -> Option<String> {
     cpal::default_host().default_output_device()?.name().ok()
 }
@@ -876,6 +922,7 @@ pub fn build_source(
     stream_err: Arc<Mutex<Option<String>>>,
     stream_title: Arc<Mutex<Option<String>>>,
 ) -> Result<SymphoniaSource> {
+    crate::worker::checkpoint()?;
     let path_str = track.path.to_string_lossy().to_string();
     let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
 
@@ -1238,6 +1285,30 @@ impl Track {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decoder_seek_lands_inside_packet_and_reaches_eof() {
+        let bytes = crate::test_audio::wav();
+        let mut source =
+            super::SymphoniaSource::from_bytes(bytes, symphonia::core::probe::Hint::new()).unwrap();
+        source.seek_to_or_skip(std::time::Duration::from_millis(375));
+        let sample = source.next().unwrap();
+        assert!(
+            (sample - 3000.0 / 32768.0).abs() < 0.0001,
+            "seek started at {sample}"
+        );
+        assert_eq!(source.count(), 4999);
+    }
+    #[test]
+    fn replacing_paused_source_never_starts_it() {
+        let (sink, _queue) = rodio::Sink::new_idle();
+        super::append_with_state(
+            &sink,
+            rodio::buffer::SamplesBuffer::new(1, 8000, vec![0.0; 800]),
+            true,
+        );
+        assert!(sink.is_paused());
+        assert!(!sink.empty());
+    }
     #[test]
     fn test_equal_power_crossfade_energy() {
         // Equal power curve satisfies: out_curve^2 + in_curve^2 ≈ 1.0 at all progress steps

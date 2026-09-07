@@ -10,6 +10,82 @@ use super::{ReplayGainMode, SortMode};
 const ACTIVE_FRAME_MS: u64 = 33;
 const IDLE_FRAME_MS: u64 = 100;
 
+#[cfg(test)]
+mod playback_regressions {
+    use super::*;
+    #[test]
+    fn rescan_preserves_entry_identity_including_duplicates() {
+        assert_eq!(
+            retained_indices(&[false, true, true]),
+            vec![None, Some(0), Some(1)]
+        );
+        assert_eq!(
+            retained_indices(&[true, false, true]),
+            vec![Some(0), None, Some(1)]
+        );
+        assert_eq!(retained_indices(&[false, false]), vec![None, None]);
+        assert_ne!(
+            retained_indices(&[true, true])[0],
+            retained_indices(&[true, true])[1]
+        );
+    }
+    #[test]
+    fn seeks_accumulate_pending_intent_and_clamp() {
+        use std::time::Duration as D;
+        let mut pending = None;
+        for _ in 0..3 {
+            pending = Some(seek_target(D::from_secs(10), pending, 5, None));
+        }
+        assert_eq!(pending, Some(D::from_secs(25)));
+        assert_eq!(seek_target(D::ZERO, None, -5, None), D::ZERO);
+        assert_eq!(
+            seek_target(D::from_secs(9), None, 5, Some(D::from_secs(10))),
+            D::from_millis(9500)
+        );
+    }
+    #[test]
+    fn autoplay_candidates_are_unique_even_after_fallback() {
+        let track = crate::audio::Track::from_path(std::path::PathBuf::from("candidate.mp3"));
+        let mut candidates = vec![track.clone(), track];
+        deduplicate_tracks(&mut candidates);
+        assert_eq!(candidates.len(), 1);
+    }
+}
+
+pub fn retained_indices(keep: &[bool]) -> Vec<Option<usize>> {
+    let mut next = 0;
+    keep.iter()
+        .map(|retain| {
+            if *retain {
+                let index = next;
+                next += 1;
+                Some(index)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn seek_target(
+    elapsed: std::time::Duration,
+    pending: Option<std::time::Duration>,
+    delta_secs: i64,
+    total: Option<std::time::Duration>,
+) -> std::time::Duration {
+    let base = pending.unwrap_or(elapsed).as_millis().min(i64::MAX as u128) as i64;
+    let mut target = base.saturating_add(delta_secs.saturating_mul(1000)).max(0) as u64;
+    if let Some(total) = total {
+        target = target.min(total.as_millis().saturating_sub(500).min(u64::MAX as u128) as u64);
+    }
+    std::time::Duration::from_millis(target)
+}
+
+pub fn deduplicate_tracks(tracks: &mut Vec<Track>) {
+    let mut paths = std::collections::HashSet::new();
+    tracks.retain(|track| paths.insert(track.path.clone()));
+}
+
 pub fn frame_poll_interval(playback_active: bool) -> std::time::Duration {
     std::time::Duration::from_millis(if playback_active {
         ACTIVE_FRAME_MS

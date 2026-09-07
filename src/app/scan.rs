@@ -10,16 +10,38 @@ use crate::{audio::Track, cache::MetadataCache};
 
 use super::AUDIO_EXTS;
 
+pub struct ScanResult {
+    pub tracks: Vec<Track>,
+    pub unavailable_roots: Vec<PathBuf>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn missing_root_is_distinct_from_empty_root() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("unplugged");
+        let result = scan_library_with_progress(
+            &[root.path().to_path_buf(), missing.clone()],
+            &mut MetadataCache::default(),
+            None,
+        );
+        assert!(result.tracks.is_empty());
+        assert_eq!(result.unavailable_roots, vec![missing]);
+    }
+}
+
 #[allow(dead_code)] // kept as the no-progress public entrypoint for #94 follow-ups
 pub fn scan_library(dirs: &[PathBuf], cache: &mut MetadataCache) -> Vec<Track> {
-    scan_library_with_progress(dirs, cache, None)
+    scan_library_with_progress(dirs, cache, None).tracks
 }
 
 pub fn scan_library_with_progress(
     dirs: &[PathBuf],
     cache: &mut MetadataCache,
     progress_tx: Option<std::sync::mpsc::Sender<(usize, usize)>>,
-) -> Vec<Track> {
+) -> ScanResult {
     // #88: split the scan into a cheap serial walk that collects paths and a
     // parallel probe phase. The expensive `metadata::probe` is symphonia
     // I/O — embarrassingly parallel, dominates wall time for large libraries.
@@ -27,11 +49,22 @@ pub fn scan_library_with_progress(
     // can display "Scanning library… [1234/5000]" without blocking.
 
     let mut paths: Vec<PathBuf> = Vec::new();
+    let mut unavailable_roots = Vec::new();
     for dir in dirs {
         if !dir.exists() {
+            unavailable_roots.push(dir.clone());
             continue;
         }
-        for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(dir) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    if !unavailable_roots.contains(dir) {
+                        unavailable_roots.push(dir.clone());
+                    }
+                    continue;
+                }
+            };
             if !entry.file_type().is_file() {
                 continue;
             }
@@ -114,5 +147,8 @@ pub fn scan_library_with_progress(
 
     cache.entries = cache_mtx.into_inner();
     out.sort_by_cached_key(|t| t.title.to_lowercase());
-    out
+    ScanResult {
+        tracks: out,
+        unavailable_roots,
+    }
 }

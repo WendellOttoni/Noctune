@@ -10,6 +10,56 @@ use crate::{
     theme::{parse_color, Theme},
 };
 
+pub fn bounded_popup(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    )
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    #[test]
+    fn input_uses_cell_width_and_popups_stay_inside_area() {
+        use unicode_width::UnicodeWidthStr;
+        for width in 0..16 {
+            assert!(input_tail("ação / 音楽 / long title", width).width() <= width);
+        }
+        for (width, height) in [(0, 0), (20, 8), (80, 24), (120, 30)] {
+            let area = Rect::new(3, 5, width, height);
+            let popup = bounded_popup(area, 92, 30);
+            assert!(popup.right() <= area.right() && popup.bottom() <= area.bottom());
+        }
+    }
+}
+
+/// Keep the end of editable input visible without splitting a wide character.
+pub fn input_tail(input: &str, width: usize) -> String {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if input.width() <= width {
+        return input.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut used = 1;
+    let mut chars = Vec::new();
+    for ch in input.chars().rev() {
+        let cells = ch.width().unwrap_or(0);
+        if used + cells > width {
+            break;
+        }
+        chars.push(ch);
+        used += cells;
+    }
+    format!("…{}", chars.into_iter().rev().collect::<String>())
+}
+
 pub fn format_duration(d: Duration) -> String {
     let s = d.as_secs();
     format!("{:02}:{:02}", s / 60, s % 60)
