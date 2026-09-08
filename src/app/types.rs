@@ -40,12 +40,12 @@ impl SortMode {
             SortMode::Rating => SortMode::Title,
         }
     }
-    pub fn label(self) -> &'static str {
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
         match self {
-            SortMode::Title => "title",
-            SortMode::Artist => "artist",
-            SortMode::Album => "album",
-            SortMode::Rating => "rating",
+            SortMode::Title => language.text("title", "título"),
+            SortMode::Artist => language.text("artist", "artista"),
+            SortMode::Album => language.text("album", "álbum"),
+            SortMode::Rating => language.text("rating", "avaliação"),
         }
     }
 }
@@ -72,6 +72,13 @@ impl RepeatMode {
             RepeatMode::One => "one",
         }
     }
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
+        match self {
+            RepeatMode::Off => language.text("off", "desligado"),
+            RepeatMode::All => language.text("all", "todas"),
+            RepeatMode::One => language.text("one", "uma"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,11 +96,11 @@ impl ReplayGainMode {
             ReplayGainMode::Album => ReplayGainMode::Off,
         }
     }
-    pub fn label(self) -> &'static str {
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
         match self {
-            ReplayGainMode::Off => "off",
-            ReplayGainMode::Track => "track",
-            ReplayGainMode::Album => "album",
+            ReplayGainMode::Off => language.text("off", "desligado"),
+            ReplayGainMode::Track => language.text("track", "faixa"),
+            ReplayGainMode::Album => language.text("album", "álbum"),
         }
     }
 }
@@ -119,14 +126,14 @@ impl VizMode {
             VizMode::CoverArt => VizMode::Spectrum,
         }
     }
-    pub fn label(self) -> &'static str {
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
         match self {
-            VizMode::Spectrum => "spectrum",
-            VizMode::Waveform => "waveform",
-            VizMode::VuMeter => "vu-meter",
-            VizMode::Waterfall => "waterfall",
-            VizMode::Oscilloscope => "oscilloscope",
-            VizMode::CoverArt => "cover-art",
+            VizMode::Spectrum => language.text("spectrum", "espectro"),
+            VizMode::Waveform => language.text("waveform", "forma de onda"),
+            VizMode::VuMeter => language.text("vu-meter", "medidor VU"),
+            VizMode::Waterfall => language.text("waterfall", "cascata"),
+            VizMode::Oscilloscope => language.text("oscilloscope", "osciloscópio"),
+            VizMode::CoverArt => language.text("cover-art", "capa"),
         }
     }
 }
@@ -204,6 +211,7 @@ pub enum LibraryRow {
 /// Stored on `App` and reused across frames while the fingerprint matches.
 #[derive(Debug)]
 pub struct SmartRowsCache {
+    pub language: crate::i18n::Language,
     pub library_revision: u64,
     pub history_revision: u64,
     pub play_history_revision: u64,
@@ -216,6 +224,7 @@ pub struct SmartRowsCache {
 /// the render loop skips re-filtering and re-cloning the entire library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryViewFingerprint {
+    pub language: crate::i18n::Language,
     pub library_revision: u64,
     pub history_revision: u64,
     pub view_mode: ViewMode,
@@ -256,14 +265,14 @@ impl ViewMode {
             ViewMode::RecentlyPlayed => ViewMode::Flat,
         }
     }
-    pub fn label(self) -> &'static str {
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
         match self {
-            ViewMode::Flat => "flat",
-            ViewMode::Albums => "albums",
-            ViewMode::RecentlyPlayed => "recently played",
-            ViewMode::Smart => "smart",
-            ViewMode::Browser => "browser",
-            ViewMode::Radio => "radio",
+            ViewMode::Flat => language.text("flat", "lista"),
+            ViewMode::Albums => language.text("albums", "álbuns"),
+            ViewMode::RecentlyPlayed => language.text("recently played", "tocadas recentemente"),
+            ViewMode::Smart => language.text("smart", "inteligentes"),
+            ViewMode::Browser => language.text("browser", "pastas"),
+            ViewMode::Radio => language.text("radio", "rádio"),
         }
     }
 }
@@ -345,12 +354,12 @@ pub enum SubsonicTab {
 }
 
 impl SubsonicTab {
-    pub fn label(self) -> &'static str {
+    pub fn localized_label(self, language: crate::i18n::Language) -> &'static str {
         match self {
-            SubsonicTab::Search => "Busca",
-            SubsonicTab::RecentAlbums => "Álbuns Recentes",
+            SubsonicTab::Search => language.text("Search", "Busca"),
+            SubsonicTab::RecentAlbums => language.text("Recent Albums", "Álbuns Recentes"),
             SubsonicTab::Playlists => "Playlists",
-            SubsonicTab::Random => "Músicas Aleatórias",
+            SubsonicTab::Random => language.text("Random Tracks", "Músicas Aleatórias"),
         }
     }
 }

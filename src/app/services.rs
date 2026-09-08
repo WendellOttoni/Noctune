@@ -11,8 +11,9 @@ use crate::{
 
 impl App {
     pub(crate) fn start_async_scan(&mut self) {
+        let lang = self.config.ui.language;
         if self.scan_rx.is_some() {
-            self.set_info("Scan already in progress…");
+            self.set_info(lang.text("Scan already in progress…", "Busca já em andamento…"));
             return;
         }
         let dirs = self.config.music_dirs.clone();
@@ -22,7 +23,7 @@ impl App {
         self.scan_progress_rx = Some(prx);
         self.scan_progress = None;
         self.browser_rows_cache = None;
-        self.set_info("Scanning library…");
+        self.set_info(lang.text("Scanning library…", "Buscando músicas na biblioteca…"));
         std::thread::spawn(move || {
             let cache_file = cache_path();
             let mut cache = cache_file
@@ -38,8 +39,12 @@ impl App {
     }
 
     pub(crate) fn start_url_load(&mut self, url: String) {
+        let lang = self.config.ui.language;
         if self.url_rx.is_some() {
-            self.set_info("Already loading, please wait…");
+            self.set_info(lang.text(
+                "Already loading, please wait…",
+                "Carregamento em andamento, aguarde…",
+            ));
             return;
         }
 
@@ -53,13 +58,18 @@ impl App {
         if is_playlist_file {
             let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<Vec<Track>, String>>();
             self.url_rx = Some(rx);
-            self.set_info("Loading radio playlist…");
+            self.set_info(lang.text("Loading radio playlist…", "Carregando playlist de rádio…"));
             std::thread::spawn(move || {
                 let result = crate::radio::fetch_playlist(&url)
                     .map_err(|error| error.to_string())
                     .and_then(|tracks| {
                         if tracks.is_empty() {
-                            Err("Playlist contained no playable streams.".into())
+                            Err(lang
+                                .text(
+                                    "Playlist contained no playable streams.",
+                                    "A playlist não contém transmissões reproduzíveis.",
+                                )
+                                .into())
                         } else {
                             Ok(tracks)
                         }
@@ -79,7 +89,10 @@ impl App {
                 self.queue_state
                     .select(Some(self.queue.len().saturating_sub(1)));
             }
-            self.set_info("Added stream URL to queue.");
+            self.set_info(lang.text(
+                "Added stream URL to queue.",
+                "URL da transmissão adicionada à fila.",
+            ));
             return;
         }
 
@@ -88,7 +101,11 @@ impl App {
             && !url.starts_with("spotify:")
             && !crate::ytdlp::is_youtube_url(&url)
         {
-            self.set_info(format!("Unrecognised URL scheme: {url}"));
+            self.set_info(crate::localized_format!(
+                lang,
+                "Unrecognised URL scheme: {url}",
+                "Esquema de URL desconhecido: {url}"
+            ));
             return;
         }
 
@@ -97,32 +114,52 @@ impl App {
 
         if url.contains("spotify.com") || url.starts_with("spotify:") {
             let Some(api) = self.spotify.clone() else {
-                self.set_error("Spotify: not authorized — press Shift+P to login");
+                self.set_error(lang.text(
+                    "Spotify: not authorized — press Shift+P to login",
+                    "Spotify: não autorizado — pressione Shift+P para entrar",
+                ));
                 self.url_rx = None;
                 return;
             };
             let (kind, id) = parse_spotify_url(&url);
-            self.set_info(format!("Loading Spotify {kind}…"));
+            self.set_info(crate::localized_format!(
+                lang,
+                "Loading Spotify {kind}…",
+                "Carregando Spotify {kind}…"
+            ));
             std::thread::spawn(move || {
                 let mut api = api;
                 let result = match kind.as_str() {
                     "track" => api.track_by_id(&id).map(|t| vec![t]),
                     "playlist" => api.playlist_tracks(&id),
                     "album" => api.album_tracks(&id),
-                    other => Err(anyhow::anyhow!("Unsupported Spotify type: {other}")),
+                    other => Err(anyhow::anyhow!(crate::localized_format!(
+                        lang,
+                        "Unsupported Spotify type: {other}",
+                        "Tipo do Spotify não suportado: {other}"
+                    ))),
                 };
                 let _ = tx.send(result.map_err(|e| e.to_string()));
             });
             return;
         }
 
-        self.set_info(format!("Loading {url}…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Loading {url}…",
+            "Carregando {url}…"
+        ));
         std::thread::spawn(move || {
             let result = crate::ytdlp::fetch_tracks(&url)
                 .map_err(|e| e.to_string())
                 .and_then(|tracks| {
                     if tracks.is_empty() {
-                        Err("yt-dlp returned no tracks for that URL.".into())
+                        Err(lang
+                            .text(
+                                "yt-dlp returned no tracks for that URL.",
+                                "O yt-dlp não retornou faixas para essa URL.",
+                            )
+                            .into())
                     } else {
                         Ok(tracks)
                     }
@@ -132,13 +169,20 @@ impl App {
     }
 
     pub(crate) fn spotify_login(&mut self) {
+        let lang = self.config.ui.language;
         if self.spotify_client_id.is_empty() {
-            self.set_info("Set [spotify].client_id in config.toml first.");
+            self.set_info(lang.text(
+                "Set [spotify].client_id in config.toml first.",
+                "Configure [spotify].client_id no config.toml primeiro.",
+            ));
             return;
         }
         match crate::spotify::authorize(&self.spotify_client_id, &self.spotify_redirect_uri) {
             Ok((url, session)) => {
-                self.set_info("Opening browser for Spotify login...");
+                self.set_info(lang.text(
+                    "Opening browser for Spotify login...",
+                    "Abrindo navegador para login do Spotify...",
+                ));
                 let _ = webbrowser::open(&url);
                 let port = self
                     .spotify_redirect_uri
@@ -165,23 +209,43 @@ impl App {
                     let _ = tx.send(crate::app::ServiceEvent::SpotifyLogin(result));
                 });
             }
-            Err(e) => self.set_info(format!("Spotify authorize error: {e}")),
+            Err(e) => self.set_info(crate::localized_format!(
+                lang,
+                "Spotify authorize error: {e}",
+                "Erro na autorização do Spotify: {e}"
+            )),
         }
     }
 
     pub(crate) fn spotify_toggle(&mut self) {
+        let lang = self.config.ui.language;
         let Some(mut api) = self.spotify.clone() else {
-            self.set_error("Spotify: not authorized — press Shift+P to login");
+            self.set_error(lang.text(
+                "Spotify: not authorized — press Shift+P to login",
+                "Spotify: não autorizado — pressione Shift+P para entrar",
+            ));
             return;
         };
-        self.set_info("Spotify: updating playback…");
+        self.set_info(lang.text(
+            "Spotify: updating playback…",
+            "Spotify: atualizando reprodução…",
+        ));
         let tx = self.service_tx.clone();
         std::thread::spawn(move || {
             let result = match api.currently_playing() {
-                Ok(Some(current)) if current.is_playing => {
-                    api.pause().map(|_| (api, "Spotify paused.".to_string()))
-                }
-                Ok(_) => api.play().map(|_| (api, "Spotify resumed.".to_string())),
+                Ok(Some(current)) if current.is_playing => api.pause().map(|_| {
+                    (
+                        api,
+                        lang.text("Spotify paused.", "Spotify pausado.").to_string(),
+                    )
+                }),
+                Ok(_) => api.play().map(|_| {
+                    (
+                        api,
+                        lang.text("Spotify resumed.", "Spotify retomado.")
+                            .to_string(),
+                    )
+                }),
                 Err(error) => Err(error),
             }
             .map_err(|error| error.to_string());
@@ -190,10 +254,14 @@ impl App {
     }
 
     pub(crate) fn spotify_load_my_playlists(&mut self) {
+        let lang = self.config.ui.language;
         let Some(mut api) = self.spotify.clone() else {
             return;
         };
-        self.set_info("Spotify: loading playlists…");
+        self.set_info(lang.text(
+            "Spotify: loading playlists…",
+            "Spotify: carregando playlists…",
+        ));
         let tx = self.service_tx.clone();
         std::thread::spawn(move || {
             let result = api
@@ -205,10 +273,11 @@ impl App {
     }
 
     pub(crate) fn spotify_load_liked(&mut self) {
+        let lang = self.config.ui.language;
         let Some(api) = self.spotify.clone() else {
             return;
         };
-        self.set_info("Loading liked songs…");
+        self.set_info(lang.text("Loading liked songs…", "Carregando músicas curtidas…"));
         let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<Vec<Track>, String>>();
         self.url_rx = Some(rx);
         std::thread::spawn(move || {
@@ -219,10 +288,15 @@ impl App {
     }
 
     pub(crate) fn spotify_load_playlist(&mut self, id: String, name: String) {
+        let lang = self.config.ui.language;
         let Some(api) = self.spotify.clone() else {
             return;
         };
-        self.set_info(format!("Loading playlist \"{name}\"…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Loading playlist \"{name}\"…",
+            "Carregando playlist \"{name}\"…"
+        ));
         let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<Vec<Track>, String>>();
         self.url_rx = Some(rx);
         std::thread::spawn(move || {
@@ -233,6 +307,7 @@ impl App {
     }
 
     pub(crate) fn spotify_search(&mut self) {
+        let lang = self.config.ui.language;
         let query = self.spotify_browser_query.trim().to_string();
         if query.is_empty() {
             return;
@@ -240,7 +315,11 @@ impl App {
         let Some(api) = self.spotify.clone() else {
             return;
         };
-        self.set_info(format!("Searching Spotify: \"{query}\"…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Searching Spotify: \"{query}\"…",
+            "Buscando no Spotify: \"{query}\"…"
+        ));
         self.spotify_browser_results.clear();
         let (tx, rx) = std::sync::mpsc::channel::<anyhow::Result<Vec<Track>, String>>();
         self.spotify_search_rx = Some(rx);
@@ -252,6 +331,7 @@ impl App {
     }
 
     pub(crate) fn subsonic_search(&mut self) {
+        let lang = self.config.ui.language;
         let query = self.subsonic_browser_query.trim().to_string();
         if query.is_empty() {
             return;
@@ -263,7 +343,11 @@ impl App {
                 return;
             }
         };
-        self.set_info(format!("Buscando no Subsonic: \"{query}\"…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Searching Subsonic: \"{query}\"…",
+            "Buscando no Subsonic: \"{query}\"…"
+        ));
         self.subsonic_browser_results.clear();
         let (tx, rx) = std::sync::mpsc::channel();
         self.subsonic_rx = Some(rx);
@@ -277,6 +361,7 @@ impl App {
     }
 
     pub(crate) fn subsonic_load_tab(&mut self, tab: crate::app::types::SubsonicTab) {
+        let lang = self.config.ui.language;
         self.subsonic_browser_tab = tab;
         self.subsonic_browser_row = 0;
         let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
@@ -296,7 +381,10 @@ impl App {
                 }
             }
             crate::app::types::SubsonicTab::RecentAlbums => {
-                self.set_info("Carregando álbuns recentes do Subsonic/Navidrome…");
+                self.set_info(lang.text(
+                    "Loading recent Subsonic/Navidrome albums…",
+                    "Carregando álbuns recentes do Subsonic/Navidrome…",
+                ));
                 self.subsonic_browser_albums.clear();
                 std::thread::spawn(move || {
                     let res = client
@@ -307,7 +395,10 @@ impl App {
                 });
             }
             crate::app::types::SubsonicTab::Playlists => {
-                self.set_info("Carregando playlists do Subsonic/Navidrome…");
+                self.set_info(lang.text(
+                    "Loading Subsonic/Navidrome playlists…",
+                    "Carregando playlists do Subsonic/Navidrome…",
+                ));
                 self.subsonic_browser_playlists.clear();
                 std::thread::spawn(move || {
                     let res = client
@@ -318,7 +409,10 @@ impl App {
                 });
             }
             crate::app::types::SubsonicTab::Random => {
-                self.set_info("Obtendo músicas aleatórias do Subsonic/Navidrome…");
+                self.set_info(lang.text(
+                    "Fetching random Subsonic/Navidrome tracks…",
+                    "Obtendo músicas aleatórias do Subsonic/Navidrome…",
+                ));
                 self.subsonic_browser_results.clear();
                 std::thread::spawn(move || {
                     let res = client
@@ -332,6 +426,7 @@ impl App {
     }
 
     pub(crate) fn subsonic_load_album_tracks(&mut self, album_id: &str) {
+        let lang = self.config.ui.language;
         let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
             Ok(c) => c,
             Err(e) => {
@@ -340,7 +435,7 @@ impl App {
             }
         };
         let album_id = album_id.to_string();
-        self.set_info("Carregando faixas do álbum…");
+        self.set_info(lang.text("Loading album tracks…", "Carregando faixas do álbum…"));
         let (tx, rx) = std::sync::mpsc::channel();
         self.subsonic_rx = Some(rx);
         std::thread::spawn(move || {
@@ -353,6 +448,7 @@ impl App {
     }
 
     pub(crate) fn subsonic_load_playlist_tracks(&mut self, playlist_id: &str) {
+        let lang = self.config.ui.language;
         let client = match crate::subsonic::SubsonicClient::new(&self.config.subsonic) {
             Ok(c) => c,
             Err(e) => {
@@ -361,7 +457,7 @@ impl App {
             }
         };
         let playlist_id = playlist_id.to_string();
-        self.set_info("Carregando faixas da playlist…");
+        self.set_info(lang.text("Loading playlist tracks…", "Carregando faixas da playlist…"));
         let (tx, rx) = std::sync::mpsc::channel();
         self.subsonic_rx = Some(rx);
         std::thread::spawn(move || {
@@ -374,6 +470,7 @@ impl App {
     }
 
     pub(crate) fn vault_search(&mut self) {
+        let lang = self.config.ui.language;
         let query = self.vault_query.trim().to_string();
         if query.is_empty() {
             return;
@@ -385,7 +482,11 @@ impl App {
                 return;
             }
         };
-        self.set_info(format!("Buscando no Cloud Vault: \"{query}\"…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Searching Cloud Vault: \"{query}\"…",
+            "Buscando no Cloud Vault: \"{query}\"…"
+        ));
         self.vault_results.clear();
         let (tx, rx) = std::sync::mpsc::channel();
         self.vault_rx = Some(rx);
@@ -396,6 +497,7 @@ impl App {
     }
 
     pub(crate) fn vault_load_recent(&mut self) {
+        let lang = self.config.ui.language;
         let client = match crate::vault::VaultClient::new(&self.config.vault) {
             Ok(c) => c,
             Err(e) => {
@@ -403,7 +505,10 @@ impl App {
                 return;
             }
         };
-        self.set_info("Carregando catálogo recente do Cloud Vault…");
+        self.set_info(lang.text(
+            "Loading recent Cloud Vault catalog…",
+            "Carregando catálogo recente do Cloud Vault…",
+        ));
         self.vault_results.clear();
         let (tx, rx) = std::sync::mpsc::channel();
         self.vault_rx = Some(rx);
@@ -414,16 +519,20 @@ impl App {
     }
 
     pub(crate) fn share_publish_current(&mut self) {
+        let lang = self.config.ui.language;
         let title = if self.share_playlist_title.trim().is_empty() {
             self.active_playlist_name
                 .clone()
-                .unwrap_or_else(|| "Minha Playlist".into())
+                .unwrap_or_else(|| lang.text("My Playlist", "Minha Playlist").into())
         } else {
             self.share_playlist_title.trim().to_string()
         };
 
         if self.queue.is_empty() {
-            self.set_error("A fila está vazia. Adicione músicas antes de compartilhar.");
+            self.set_error(lang.text(
+                "The queue is empty. Add tracks before sharing.",
+                "A fila está vazia. Adicione músicas antes de compartilhar.",
+            ));
             return;
         }
 
@@ -440,12 +549,19 @@ impl App {
         let client = match crate::share::api::ShareClient::new(None) {
             Ok(c) => c,
             Err(e) => {
-                self.set_error(format!("Share: {e}"));
+                self.set_error(crate::localized_format!(
+                    lang,
+                    "Share: {e}",
+                    "Compartilhamento: {e}"
+                ));
                 return;
             }
         };
 
-        self.set_info("Publicando playlist no servidor de descoberta…");
+        self.set_info(lang.text(
+            "Publishing playlist to the discovery server…",
+            "Publicando playlist no servidor de descoberta…",
+        ));
         let (tx, rx) = std::sync::mpsc::channel();
         self.share_publish_rx = Some(rx);
         std::thread::spawn(move || {
@@ -455,16 +571,25 @@ impl App {
     }
 
     pub(crate) fn browse_search_playlists(&mut self) {
+        let lang = self.config.ui.language;
         let query = self.browse_search_query.trim().to_string();
         let client = match crate::share::api::ShareClient::new(None) {
             Ok(c) => c,
             Err(e) => {
-                self.set_error(format!("Share: {e}"));
+                self.set_error(crate::localized_format!(
+                    lang,
+                    "Share: {e}",
+                    "Compartilhamento: {e}"
+                ));
                 return;
             }
         };
 
-        self.set_info(format!("Buscando playlists públicas: \"{query}\"…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Searching public playlists: \"{query}\"…",
+            "Buscando playlists públicas: \"{query}\"…"
+        ));
         self.browse_results.clear();
         let (tx, rx) = std::sync::mpsc::channel();
         self.browse_rx = Some(rx);
@@ -475,6 +600,7 @@ impl App {
     }
 
     pub(crate) fn browse_import_selected(&mut self) {
+        let lang = self.config.ui.language;
         let Some(summary) = self.browse_results.get(self.browse_row).cloned() else {
             return;
         };
@@ -482,12 +608,21 @@ impl App {
         let client = match crate::share::api::ShareClient::new(None) {
             Ok(c) => c,
             Err(e) => {
-                self.set_error(format!("Share: {e}"));
+                self.set_error(crate::localized_format!(
+                    lang,
+                    "Share: {e}",
+                    "Compartilhamento: {e}"
+                ));
                 return;
             }
         };
 
-        self.set_info(format!("Importando playlist \"{}\"…", summary.name));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Importing playlist \"{}\"…",
+            "Importando playlist \"{}\"…",
+            summary.name
+        ));
         let library = self.library.clone();
         let tx = self.service_tx.clone();
         std::thread::spawn(move || {
@@ -533,6 +668,7 @@ impl App {
     }
 
     pub(crate) fn open_tag_editor(&mut self) {
+        let lang = self.config.ui.language;
         let track = match self.focus {
             Pane::Library => self.selected_library_track(),
             Pane::Queue => self
@@ -542,11 +678,17 @@ impl App {
                 .cloned(),
         };
         let Some(t) = track else {
-            self.set_info("No track selected to edit tags.");
+            self.set_info(lang.text(
+                "No track selected to edit tags.",
+                "Nenhuma faixa selecionada para editar tags.",
+            ));
             return;
         };
         if Self::track_is_stream(&t) {
-            self.set_info("Cannot edit tags on stream URLs.");
+            self.set_info(lang.text(
+                "Cannot edit tags on stream URLs.",
+                "Não é possível editar tags de URLs de transmissão.",
+            ));
             return;
         }
 
@@ -563,8 +705,9 @@ impl App {
     }
 
     pub(crate) fn open_track_info(&mut self) {
+        let lang = self.config.ui.language;
         let Some(track) = self.player.current().cloned() else {
-            self.set_info("No track is playing.");
+            self.set_info(lang.text("No track is playing.", "Nenhuma faixa em reprodução."));
             return;
         };
         self.show_info = true;
@@ -618,6 +761,7 @@ impl App {
     }
 
     pub(crate) fn save_tag_editor(&mut self) {
+        let lang = self.config.ui.language;
         let Some(path) = self.tag_editor_path.take() else {
             return;
         };
@@ -625,7 +769,7 @@ impl App {
         let title = if title.is_empty() {
             path.file_stem()
                 .and_then(|name| name.to_str())
-                .unwrap_or("Unknown Track")
+                .unwrap_or(lang.text("Unknown Track", "Faixa desconhecida"))
                 .to_string()
         } else {
             title
@@ -655,7 +799,7 @@ impl App {
             Ok(value) => value,
             Err(_) => {
                 self.tag_editor_path = Some(path);
-                self.set_error("Year must be a number.");
+                self.set_error(lang.text("Year must be a number.", "O ano deve ser um número."));
                 return;
             }
         };
@@ -668,7 +812,11 @@ impl App {
             parsed_year,
         ) {
             self.tag_editor_path = Some(path);
-            self.set_error(format!("Could not save tags: {error}"));
+            self.set_error(crate::localized_format!(
+                lang,
+                "Could not save tags: {error}",
+                "Não foi possível salvar as tags: {error}"
+            ));
             return;
         }
 
@@ -691,7 +839,12 @@ impl App {
             }
         }
         self.library_revision = self.library_revision.wrapping_add(1);
-        self.set_info(format!("Tags updated: {}", title));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Tags updated: {}",
+            "Tags atualizadas: {}",
+            title
+        ));
     }
 
     pub(crate) fn open_radio_browser(&mut self) {
@@ -741,10 +894,15 @@ impl App {
     }
 
     pub(crate) fn trigger_radio_search(&mut self) {
+        let lang = self.config.ui.language;
         let q = self.radio_search_query.trim().to_string();
         let (tx, rx) = std::sync::mpsc::channel();
         self.radio_search_rx = Some(rx);
-        self.set_info(format!("Buscando rádios por '{q}'…"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Searching stations for '{q}'…",
+            "Buscando rádios por '{q}'…"
+        ));
         std::thread::spawn(move || {
             let res =
                 crate::radio_browser::search_radio_browser(&q, 100).map_err(|e| e.to_string());
@@ -753,17 +911,24 @@ impl App {
     }
 
     pub(crate) fn save_custom_radio_station(&mut self) {
+        let lang = self.config.ui.language;
         let name = self.radio_custom_fields[0].trim().to_string();
         let url = self.radio_custom_fields[1].trim().to_string();
         let tags = self.radio_custom_fields[2].trim().to_string();
 
         if url.is_empty() {
-            self.set_error("URL da rádio não pode ficar vazia");
+            self.set_error(lang.text(
+                "Radio URL cannot be empty",
+                "URL da rádio não pode ficar vazia",
+            ));
             return;
         }
 
         let final_name = if name.is_empty() {
-            url.split('/').last().unwrap_or("Custom Radio").to_string()
+            url.split('/')
+                .last()
+                .unwrap_or(lang.text("Custom Radio", "Rádio Personalizada"))
+                .to_string()
         } else {
             name
         };
@@ -785,7 +950,11 @@ impl App {
         };
 
         if let Err(error) = crate::radio_browser::add_custom_station(station.clone()) {
-            self.set_error(format!("Could not save custom radio: {error}"));
+            self.set_error(crate::localized_format!(
+                lang,
+                "Could not save custom radio: {error}",
+                "Não foi possível salvar a rádio personalizada: {error}"
+            ));
             return;
         }
         self.radio_curated_list.retain(|s| s.url != url);
@@ -794,7 +963,11 @@ impl App {
         self.show_radio_custom_modal = false;
         self.radio_custom_fields = [String::new(), String::new(), String::new()];
         self.radio_custom_field_idx = 0;
-        self.set_info(format!("Rádio adicionada: {final_name}"));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Station added: {final_name}",
+            "Rádio adicionada: {final_name}"
+        ));
     }
 
     pub(crate) fn play_radio_station(
@@ -802,6 +975,7 @@ impl App {
         station: &crate::radio_browser::RadioStation,
         enqueue: bool,
     ) {
+        let lang = self.config.ui.language;
         let mut track = Track::from_url(station.url.clone());
         track.title = station.name.clone();
         track.artist = Some("Radio Stream".into());
@@ -810,7 +984,11 @@ impl App {
         if enqueue {
             let name = station.name.clone();
             self.queue.push(track);
-            self.set_info(format!("Enqueued radio: {name}"));
+            self.set_info(crate::localized_format!(
+                lang,
+                "Enqueued radio: {name}",
+                "Rádio adicionada à fila: {name}"
+            ));
         } else {
             let name = station.name.clone();
             self.queue.push(track);
@@ -818,20 +996,33 @@ impl App {
             self.queue_index = Some(idx);
             self.queue_state.select(Some(idx));
             self.play_current();
-            self.set_info(format!("Playing radio: {name}"));
+            self.set_info(crate::localized_format!(
+                lang,
+                "Playing radio: {name}",
+                "Tocando rádio: {name}"
+            ));
         }
     }
 
     pub(crate) fn handle_self_update(&mut self) {
+        let lang = self.config.ui.language;
         if self.is_updating {
-            self.set_info("Update already in progress, please wait…");
+            self.set_info(lang.text(
+                "Update already in progress, please wait…",
+                "Atualização em andamento, aguarde…",
+            ));
             return;
         }
 
         if let Some(info) = &self.update_info {
             if let Some(url) = info.download_url.clone() {
                 self.is_updating = true;
-                self.set_info(format!("Downloading Noctune v{}…", info.latest_version));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Downloading Noctune v{}…",
+                    "Baixando Noctune v{}…",
+                    info.latest_version
+                ));
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.update_apply_rx = Some(rx);
                 std::thread::spawn(move || {
@@ -839,13 +1030,15 @@ impl App {
                     let _ = tx.send(res);
                 });
             } else {
-                self.set_info(format!(
-                    "No automatic binary available for this platform. Please check GitHub release v{}.",
+                self.set_info(crate::localized_format!(lang, "No automatic binary available for this platform. Please check GitHub release v{}.", "Nenhum binário automático disponível para esta plataforma. Confira a versão v{} no GitHub.",
                     info.latest_version
                 ));
             }
         } else {
-            self.set_info("Checking for new Noctune updates…");
+            self.set_info(lang.text(
+                "Checking for new Noctune updates…",
+                "Verificando atualizações do Noctune…",
+            ));
             let (tx, rx) = std::sync::mpsc::channel();
             self.update_check_rx = Some(rx);
             std::thread::spawn(move || {
@@ -1088,16 +1281,20 @@ impl App {
     }
 
     pub(crate) fn lastfm_login(&mut self) {
+        let lang = self.config.ui.language;
         let cfg = &self.config.lastfm;
         if !cfg.is_configured() {
-            self.set_info("Set [lastfm] api_key and api_secret in config.toml first.");
+            self.set_info(lang.text(
+                "Set [lastfm] api_key and api_secret in config.toml first.",
+                "Configure api_key e api_secret em [lastfm] no config.toml primeiro.",
+            ));
             return;
         }
 
         if let Some(token) = self.lastfm_pending_token.take() {
             let api_key = cfg.api_key.clone();
             let api_secret = cfg.api_secret.clone();
-            self.set_info("Last.fm: completing login…");
+            self.set_info(lang.text("Last.fm: completing login…", "Last.fm: concluindo login…"));
             let tx = self.service_tx.clone();
             std::thread::spawn(move || {
                 let result = crate::lastfm::get_session(&api_key, &api_secret, &token)
@@ -1116,7 +1313,10 @@ impl App {
 
         let api_key = cfg.api_key.clone();
         let api_secret = cfg.api_secret.clone();
-        self.set_info("Last.fm: requesting authorization…");
+        self.set_info(lang.text(
+            "Last.fm: requesting authorization…",
+            "Last.fm: solicitando autorização…",
+        ));
         let tx = self.service_tx.clone();
         std::thread::spawn(move || {
             let result =
@@ -1141,6 +1341,7 @@ impl App {
     }
 
     pub(crate) fn on_track_started(&mut self, t: Track) {
+        let lang = self.config.ui.language;
         self.stream_reconnect_attempts = 0;
         if self.shuffle {
             self.shuffle_played.insert(t.path.clone());
@@ -1164,7 +1365,12 @@ impl App {
             });
             let _ = tx.send((path, bytes));
         });
-        self.set_info(format!("Playing: {}", t.display()));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Playing: {}",
+            "Tocando: {}",
+            t.display()
+        ));
         if let Some(s) = &mut self.media_session {
             s.update_metadata(
                 &t.title,
@@ -1368,8 +1574,12 @@ impl App {
     }
 
     pub(crate) fn download_current(&mut self) {
+        let lang = self.config.ui.language;
         let Some(track) = self.player.current().cloned() else {
-            self.set_info("Nenhuma faixa em reprodução para download.");
+            self.set_info(lang.text(
+                "No playing track to download.",
+                "Nenhuma faixa em reprodução para download.",
+            ));
             return;
         };
 
@@ -1379,12 +1589,18 @@ impl App {
             && !path_str.starts_with("ytsearch:")
             && !path_str.starts_with("scsearch:")
         {
-            self.set_info("Esta faixa já é um arquivo local no disco.");
+            self.set_info(lang.text(
+                "This track is already a local file on disk.",
+                "Esta faixa já é um arquivo local no disco.",
+            ));
             return;
         }
 
         if self.download_rx.is_some() {
-            self.set_info("Já existe um download em andamento. Aguarde terminar.");
+            self.set_info(lang.text(
+                "A download is already in progress. Please wait.",
+                "Já existe um download em andamento. Aguarde terminar.",
+            ));
             return;
         }
 
@@ -1395,7 +1611,12 @@ impl App {
             .cloned()
             .unwrap_or_else(|| std::path::PathBuf::from("./Music"));
 
-        self.set_info(format!("⏳ Iniciando download de '{}'…", track.title));
+        self.set_info(crate::localized_format!(
+            lang,
+            "⏳ Starting download of '{}'…",
+            "⏳ Iniciando download de '{}'…",
+            track.title
+        ));
         let rx = crate::downloader::DownloadService::start_download(track, dest_dir);
         self.download_rx = Some(rx);
     }

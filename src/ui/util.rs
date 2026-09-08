@@ -25,6 +25,20 @@ pub fn bounded_popup(area: Rect, width: u16, height: u16) -> Rect {
 mod layout_tests {
     use super::*;
     #[test]
+    fn relative_timestamps_follow_language() {
+        use crate::i18n::Language::{En, PtBr};
+        assert_eq!(relative_time(0, En), "never");
+        assert_eq!(relative_time(0, PtBr), "nunca");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(relative_time(now, En), "just now");
+        assert_eq!(relative_time(now, PtBr), "agora");
+        assert_eq!(relative_time(now - 180, En), "3m ago");
+        assert_eq!(relative_time(now - 180, PtBr), "há 3m");
+    }
+    #[test]
     fn input_uses_cell_width_and_popups_stay_inside_area() {
         use unicode_width::UnicodeWidthStr;
         for width in 0..16 {
@@ -68,9 +82,9 @@ pub fn format_duration(d: Duration) -> String {
 /// Format a unix timestamp as a short relative duration ago — e.g. "5m", "3h",
 /// "2d", "3w". `0` (never played) returns "never" so callers can branch on it.
 /// Used by the playlist browser row hints (#84).
-pub fn relative_time(ts: u64) -> String {
+pub fn relative_time(ts: u64, language: crate::i18n::Language) -> String {
     if ts == 0 {
-        return "never".into();
+        return language.text("never", "nunca").into();
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -78,22 +92,22 @@ pub fn relative_time(ts: u64) -> String {
         .unwrap_or(0);
     let secs = now.saturating_sub(ts);
     if secs < 60 {
-        return "just now".into();
+        return language.text("just now", "agora").into();
     }
     let m = secs / 60;
     if m < 60 {
-        return format!("{m}m ago");
+        return crate::localized_format!(language, "{m}m ago", "há {m}m");
     }
     let h = m / 60;
     if h < 24 {
-        return format!("{h}h ago");
+        return crate::localized_format!(language, "{h}h ago", "há {h}h");
     }
     let d = h / 24;
     if d < 14 {
-        return format!("{d}d ago");
+        return crate::localized_format!(language, "{d}d ago", "há {d}d");
     }
     let w = d / 7;
-    format!("{w}w ago")
+    crate::localized_format!(language, "{w}w ago", "há {w}sem")
 }
 
 /// `" [done/total]"` if a scan is reporting progress, else empty (#104).

@@ -252,7 +252,7 @@ Optionally display what you are listening to through Discord Rich Presence.
 
 ### 🌎 Language support
 
-Core interface flows support:
+The interface, dialogs, command palette, notifications, CLI help and diagnostics support:
 
 ```text
 English
@@ -273,7 +273,14 @@ or:
 language = "en"
 ```
 
-Some integration-specific messages may still remain untranslated.
+English is the default. Open the command palette with `Ctrl+P` and run
+`:language` to switch languages and save the preference. Library headings and
+other interface labels update without restarting, including after editing
+`[ui].language` in `config.toml`.
+
+Track metadata, station names, user-created names, technical error details from
+services/libraries, and log output retain their original text. Configuration
+keys, command IDs, and JSON output stay stable in both languages.
 
 ---
 

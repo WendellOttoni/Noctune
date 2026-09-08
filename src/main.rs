@@ -46,6 +46,7 @@ mod worker;
 mod ytdlp;
 
 fn main() -> Result<()> {
+    let lang = i18n::Language::configured();
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {
         let first = args[1].as_str();
@@ -58,15 +59,16 @@ fn main() -> Result<()> {
             }
             "commands" => return diagnostics::commands(),
             "setup" => {
-                let music = args
-                    .iter()
-                    .position(|a| a == "--music")
-                    .map(|i| {
-                        args.get(i + 1)
-                            .map(String::as_str)
-                            .ok_or_else(|| anyhow::anyhow!("--music requires a folder"))
-                    })
-                    .transpose()?;
+                let music =
+                    args.iter()
+                        .position(|a| a == "--music")
+                        .map(|i| {
+                            args.get(i + 1).map(String::as_str).ok_or_else(|| {
+                                anyhow::anyhow!(lang
+                                    .text("--music requires a folder", "--music exige uma pasta"))
+                            })
+                        })
+                        .transpose()?;
                 diagnostics::setup(music)?;
                 return Ok(());
             }
@@ -111,26 +113,107 @@ fn main() -> Result<()> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Noctune — Modern Terminal Music Player (v{})",
-                    env!("CARGO_PKG_VERSION")
+                    "{}",
+                    crate::localized_format!(
+                        lang,
+                        "Noctune — Modern Terminal Music Player (v{})",
+                        "Noctune — Reprodutor de Música para Terminal (v{})",
+                        env!("CARGO_PKG_VERSION")
+                    )
                 );
-                println!("\nUsage:");
-                println!("  noctune setup [--music <folder>]  Configure a music folder");
-                println!("  noctune doctor [--json] [--test-audio]  Diagnose setup");
-                println!("  noctune commands         Export current shortcuts as Markdown");
-                println!("  noctune                  Launch interactive TUI player");
-                println!("  noctune play             Resume playback");
-                println!("  noctune pause            Pause playback");
-                println!("  noctune toggle           Toggle play / pause");
-                println!("  noctune next             Skip to next track");
-                println!("  noctune prev             Skip to previous track");
-                println!("  noctune stop             Stop playback");
-                println!("  noctune volume [val]     Get / adjust volume (e.g. +10, -10, 80)");
-                println!("  noctune status           Show currently playing track info");
+                println!("{}", lang.text("\nUsage:", "\nUso:"));
                 println!(
-                    "  noctune status --json    Show status formatted as JSON for polybar/waybar"
+                    "{}",
+                    lang.text(
+                        "  noctune setup [--music <folder>]  Configure a music folder",
+                        "  noctune setup [--music <folder>]  Configurar uma pasta de músicas"
+                    )
                 );
-                println!("  noctune --help           Show this help");
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune doctor [--json] [--test-audio]  Diagnose setup",
+                        "  noctune doctor [--json] [--test-audio]  Diagnosticar a configuração"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune commands         Export current shortcuts as Markdown",
+                        "  noctune commands         Exportar atalhos atuais em Markdown"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune                  Launch interactive TUI player",
+                        "  noctune                  Abrir o reprodutor interativo"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune play             Resume playback",
+                        "  noctune play             Retomar reprodução"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune pause            Pause playback",
+                        "  noctune pause            Pausar reprodução"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune toggle           Toggle play / pause",
+                        "  noctune toggle           Alternar reprodução / pausa"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune next             Skip to next track",
+                        "  noctune next             Ir para a próxima faixa"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune prev             Skip to previous track",
+                        "  noctune prev             Ir para a faixa anterior"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune stop             Stop playback",
+                        "  noctune stop             Parar reprodução"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune volume [val]     Get / adjust volume (e.g. +10, -10, 80)",
+                        "  noctune volume [val]     Consultar / ajustar volume (ex.: +10, -10, 80)"
+                    )
+                );
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune status           Show currently playing track info",
+                        "  noctune status           Mostrar informações da faixa atual"
+                    )
+                );
+                println!("{}", lang.text("  noctune status --json    Show status formatted as JSON for polybar/waybar", "  noctune status --json    Mostrar estado em JSON para polybar/waybar"));
+                println!(
+                    "{}",
+                    lang.text(
+                        "  noctune --help           Show this help",
+                        "  noctune --help           Mostrar esta ajuda"
+                    )
+                );
                 return Ok(());
             }
             _ => {}
@@ -145,7 +228,13 @@ fn main() -> Result<()> {
     let _instance_guard = match single_instance::SingleInstanceGuard::acquire()? {
         Some(g) => g,
         None => {
-            eprintln!("noctune is already running. Exiting.");
+            eprintln!(
+                "{}",
+                lang.text(
+                    "noctune is already running. Exiting.",
+                    "O noctune já está em execução. Encerrando."
+                )
+            );
             tracing::warn!("another noctune instance is already running; exiting");
             return Ok(());
         }

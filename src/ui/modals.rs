@@ -138,6 +138,7 @@ use crate::{
 };
 
 pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let Some(track) = app.player.current() else {
         return;
     };
@@ -179,7 +180,7 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
         })
         .unwrap_or_else(|| {
             if !is_local {
-                "Live Stream".to_string()
+                lang.text("Live Stream", "Ao vivo").to_string()
             } else {
                 dash.clone()
             }
@@ -201,21 +202,21 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
         .channels
         .map(|c| {
             if c == 2 {
-                "Stereo (2ch)".into()
+                lang.text("Stereo (2ch)", "Estéreo (2 canais)").into()
             } else if c == 1 {
-                "Mono (1ch)".into()
+                lang.text("Mono (1ch)", "Mono (1 canal)").into()
             } else {
-                format!("{c} canais")
+                crate::localized_format!(lang, "{c} channels", "{c} canais")
             }
         })
         .unwrap_or_else(|| {
             let c = app.player.current_channels;
             if c == 2 {
-                "Stereo (2ch)".into()
+                lang.text("Stereo (2ch)", "Estéreo (2 canais)").into()
             } else if c == 1 {
-                "Mono (1ch)".into()
+                lang.text("Mono (1ch)", "Mono (1 canal)").into()
             } else {
-                format!("{c} canais")
+                crate::localized_format!(lang, "{c} channels", "{c} canais")
             }
         });
 
@@ -236,7 +237,7 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             } else if p.contains(".ogg") {
                 "Ogg Vorbis".into()
             } else {
-                "Audio Stream".into()
+                lang.text("Audio Stream", "Transmissão de áudio").into()
             }
         }
     });
@@ -251,83 +252,117 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{size} B")
         };
-        ("Arquivo Local", sz_str)
+        (lang.text("Local File", "Arquivo Local"), sz_str)
     } else if path_str.starts_with("https://www.youtube.com")
         || path_str.starts_with("https://youtu.be")
         || path_str.starts_with("ytsearch:")
     {
         let cached = snapshot.map(|info| info.youtube_cached).unwrap_or(false);
         if cached {
-            ("YouTube (Cache Local)", "Em cache no disco".into())
+            (
+                lang.text("YouTube (Local Cache)", "YouTube (Cache Local)"),
+                lang.text("Cached on disk", "Em cache no disco").into(),
+            )
         } else {
-            ("YouTube (Streaming)", "Stream online".into())
+            (
+                "YouTube (Streaming)",
+                lang.text("Online stream", "Stream online").into(),
+            )
         }
     } else if path_str.starts_with("http") {
-        ("Rádio Online / Web Stream", "Transmissão contínua".into())
+        (
+            lang.text("Online Radio / Web Stream", "Rádio Online / Web Stream"),
+            lang.text("Continuous broadcast", "Transmissão contínua")
+                .into(),
+        )
     } else {
         ("Streaming", dash.clone())
     };
 
     let lrc_status = if snapshot.map(|info| info.has_local_lrc).unwrap_or(false) {
-        "Disponível (.lrc local)"
+        lang.text("Available (local .lrc)", "Disponível (.lrc local)")
     } else if app.lyrics.is_some() {
-        "Disponível (LRCLIB online)"
+        lang.text("Available (online LRCLIB)", "Disponível (LRCLIB online)")
     } else {
-        "Não disponível"
+        lang.text("Unavailable", "Não disponível")
     };
 
     let rg_str = if let Some(t_db) = track.replaygain_track_db {
-        format!("{t_db:+.2} dB (escala: {:.2}x)", app.player.rg_scale)
+        crate::localized_format!(
+            lang,
+            "{t_db:+.2} dB (scale: {:.2}x)",
+            "{t_db:+.2} dB (escala: {:.2}x)",
+            app.player.rg_scale
+        )
     } else if let Some(a_db) = track.replaygain_album_db {
-        format!(
+        crate::localized_format!(
+            lang,
+            "{a_db:+.2} dB (album gain, scale: {:.2}x)",
             "{a_db:+.2} dB (album gain, escala: {:.2}x)",
             app.player.rg_scale
         )
     } else {
-        format!("Desativado (escala: {:.2}x)", app.player.rg_scale)
+        crate::localized_format!(
+            lang,
+            "Disabled (scale: {:.2}x)",
+            "Desativado (escala: {:.2}x)",
+            app.player.rg_scale
+        )
     };
 
     let lines: Vec<Line> = vec![
-        section_header("Metadados"),
-        row("Título", meta.title.unwrap_or_else(|| track.title.clone())),
+        section_header(lang.text("Metadata", "Metadados")),
         row(
-            "Artista",
+            lang.text("Title", "Título"),
+            meta.title.unwrap_or_else(|| track.title.clone()),
+        ),
+        row(
+            lang.text("Artist", "Artista"),
             meta.artist
                 .or_else(|| track.artist.clone())
                 .unwrap_or_else(|| dash.clone()),
         ),
         row(
-            "Álbum",
+            lang.text("Album", "Álbum"),
             meta.album
                 .or_else(|| track.album.clone())
                 .unwrap_or_else(|| dash.clone()),
         ),
         row(
-            "Ano",
+            lang.text("Year", "Ano"),
             meta.year
                 .or_else(|| track.year.clone())
                 .unwrap_or_else(|| dash.clone()),
         ),
         row(
-            "Gênero",
+            lang.text("Genre", "Gênero"),
             meta.genre
                 .or_else(|| track.genre.clone())
                 .unwrap_or_else(|| dash.clone()),
         ),
         Line::from(""),
-        section_header("Ficha Técnica de Áudio"),
+        section_header(lang.text("Audio Details", "Ficha Técnica de Áudio")),
         row("Codec", codec_str),
-        row("Taxa de Amostragem", rate_str),
-        row("Canais", chans_str),
-        row("Duração", dur_str),
+        row(lang.text("Sample Rate", "Taxa de Amostragem"), rate_str),
+        row(lang.text("Channels", "Canais"), chans_str),
+        row(lang.text("Duration", "Duração"), dur_str),
         row("ReplayGain", rg_str),
-        row("Velocidade", format!("{:.2}x", app.player.speed)),
-        row("Letras (LRC)", lrc_status.to_string()),
+        row(
+            lang.text("Speed", "Velocidade"),
+            format!("{:.2}x", app.player.speed),
+        ),
+        row(
+            lang.text("Lyrics (LRC)", "Letras (LRC)"),
+            lrc_status.to_string(),
+        ),
         Line::from(""),
-        section_header("Origem & Armazenamento"),
-        row("Tipo de Fonte", source_type.to_string()),
-        row("Tamanho", file_size_str),
-        row("Localização", path_str),
+        section_header(lang.text("Source & Storage", "Origem & Armazenamento")),
+        row(
+            lang.text("Source Type", "Tipo de Fonte"),
+            source_type.to_string(),
+        ),
+        row(lang.text("Size", "Tamanho"), file_size_str),
+        row(lang.text("Location", "Localização"), path_str),
     ];
 
     let w = 76.min(area.width.saturating_sub(2));
@@ -344,7 +379,10 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
             .borders(Borders::ALL)
             .border_style(app.theme.border(true))
             .title(Span::styled(
-                " ℹ Inspetor Técnico da Faixa — Pressione qualquer tecla ",
+                lang.text(
+                    " ℹ Track Inspector — Press any key ",
+                    " ℹ Inspetor Técnico da Faixa — Pressione qualquer tecla ",
+                ),
                 app.theme.accent(),
             )),
     );
@@ -352,6 +390,7 @@ pub fn render_track_info(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let entries = &app.playlist_browser_entries;
 
@@ -390,16 +429,25 @@ pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
                 .playlist_record(&crate::history::PlaylistRef::Local {
                     path: e.path.clone(),
                 })
-                .map(|r| format!(" · played {}", relative_time(r.last_played)))
+                .map(|r| {
+                    crate::localized_format!(
+                        lang,
+                        " · played {}",
+                        " · reproduzida {}",
+                        relative_time(r.last_played, lang)
+                    )
+                })
                 .unwrap_or_default();
-            let label = format!(
+            let label = crate::localized_format!(
+                lang,
                 " {}{} ({} tracks){}{}",
+                " {}{} ({} faixas){}{}",
                 if selected { "▶ " } else { "  " },
                 e.name,
                 e.track_count,
                 recency,
                 if deleting {
-                    "  ← confirm Shift+D"
+                    lang.text("  ← confirm Shift+D", "  ← confirme Shift+D")
                 } else {
                     ""
                 },
@@ -414,12 +462,12 @@ pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " load  ",
+            lang.text(" load  ", " carregar  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled("a", Style::default().fg(parse_color(&theme.colors.accent))),
         Span::styled(
-            " append  ",
+            lang.text(" append  ", " adicionar  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled(
@@ -427,7 +475,7 @@ pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " delete  ",
+            lang.text(" delete  ", " excluir  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled(
@@ -435,7 +483,7 @@ pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " close",
+            lang.text(" close", " fechar"),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
     ]);
@@ -460,6 +508,7 @@ pub fn render_playlist_browser(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let profiles = &app.profiles;
 
@@ -477,7 +526,10 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let items: Vec<ListItem> = if profiles.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "  No profiles yet. Press n to save current settings.",
+            lang.text(
+                "  No profiles yet. Press n to save current settings.",
+                "  Nenhum perfil. Pressione n para salvar as configurações atuais.",
+            ),
             Style::default().fg(parse_color(&theme.colors.muted)),
         )))]
     } else {
@@ -493,8 +545,10 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
                 } else {
                     Style::default().fg(parse_color(&theme.colors.muted))
                 };
-                let label = format!(
+                let label = crate::localized_format!(
+                    lang,
                     " {}{}  vol:{:.0}%  EQ:{:+.0}/{:+.0}/{:+.0}  theme:{}",
+                    " {}{}  vol:{:.0}%  EQ:{:+.0}/{:+.0}/{:+.0}  tema:{}",
                     if selected { "▶ " } else { "  " },
                     p.name,
                     p.volume * 100.0,
@@ -514,12 +568,12 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " load  ",
+            lang.text(" load  ", " carregar  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled("n", Style::default().fg(parse_color(&theme.colors.accent))),
         Span::styled(
-            " save current  ",
+            lang.text(" save current  ", " salvar atual  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled(
@@ -527,7 +581,7 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " delete  ",
+            lang.text(" delete  ", " excluir  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled(
@@ -535,7 +589,7 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " close",
+            lang.text(" close", " fechar"),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
     ]);
@@ -545,7 +599,10 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
-                .title(Span::styled(" Profiles ", theme.accent()))
+                .title(Span::styled(
+                    lang.text(" Profiles ", " Perfis "),
+                    theme.accent(),
+                ))
                 .title_bottom(hint),
         )
         .highlight_style(
@@ -564,6 +621,7 @@ pub fn render_profile_browser(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let accent = parse_color(&theme.colors.accent);
     let muted = parse_color(&theme.colors.muted);
@@ -585,9 +643,9 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
     let tab_line = Line::from(vec![
         Span::styled(
             if app.spotify_browser_tab == SpotifyTab::Search {
-                " [Search] "
+                lang.text(" [Search] ", " [Busca] ")
             } else {
-                "  Search  "
+                lang.text("  Search  ", "  Busca  ")
             },
             if app.spotify_browser_tab == SpotifyTab::Search {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -597,9 +655,9 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
         ),
         Span::styled(
             if app.spotify_browser_tab == SpotifyTab::MyPlaylists {
-                " [My Playlists] "
+                lang.text(" [My Playlists] ", " [Minhas Playlists] ")
             } else {
-                "  My Playlists  "
+                lang.text("  My Playlists  ", "  Minhas Playlists  ")
             },
             if app.spotify_browser_tab == SpotifyTab::MyPlaylists {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -609,9 +667,9 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
         ),
         Span::styled(
             if app.spotify_browser_tab == SpotifyTab::LikedSongs {
-                " [Liked Songs] "
+                lang.text(" [Liked Songs] ", " [Músicas Curtidas] ")
             } else {
-                "  Liked Songs  "
+                lang.text("  Liked Songs  ", "  Músicas Curtidas  ")
             },
             if app.spotify_browser_tab == SpotifyTab::LikedSongs {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -623,15 +681,24 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let hint = Line::from(vec![
         Span::styled("  Tab", Style::default().fg(accent)),
-        Span::styled(" switch  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" switch  ", " alternar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("/", Style::default().fg(accent)),
-        Span::styled(" search  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" search  ", " buscar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Enter", Style::default().fg(accent)),
-        Span::styled(" play  ", Style::default().fg(muted)),
+        Span::styled(lang.text(" play  ", " tocar  "), Style::default().fg(muted)),
         Span::styled("a", Style::default().fg(accent)),
-        Span::styled(" enqueue  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" enqueue  ", " enfileirar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Esc", Style::default().fg(accent)),
-        Span::styled(" close", Style::default().fg(muted)),
+        Span::styled(lang.text(" close", " fechar"), Style::default().fg(muted)),
     ]);
 
     let block = Block::default()
@@ -657,11 +724,20 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
 
     // Search bar
     let query_display = if app.spotify_browser_query_editing {
-        format!(" Search: {}█", app.spotify_browser_query)
+        crate::localized_format!(
+            lang,
+            " Search: {}█",
+            " Busca: {}█",
+            app.spotify_browser_query
+        )
     } else if app.spotify_browser_query.is_empty() {
-        " Press / to search tracks…".to_string()
+        lang.text(
+            " Press / to search tracks…",
+            " Pressione / para buscar músicas…",
+        )
+        .to_string()
     } else {
-        format!(" Search: {}", app.spotify_browser_query)
+        crate::localized_format!(lang, " Search: {}", " Busca: {}", app.spotify_browser_query)
     };
     f.render_widget(
         Paragraph::new(Span::styled(
@@ -685,9 +761,12 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
             let results = &app.spotify_browser_results;
             if results.is_empty() {
                 let msg = if app.spotify_browser_tab == SpotifyTab::LikedSongs {
-                    "  Loading liked songs…"
+                    lang.text("  Loading liked songs…", "  Carregando músicas curtidas…")
                 } else {
-                    "  No results. Type a query and press Enter."
+                    lang.text(
+                        "  No results. Type a query and press Enter.",
+                        "  Nenhum resultado. Digite o termo de busca e pressione Enter.",
+                    )
                 };
                 f.render_widget(
                     Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
@@ -739,7 +818,7 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
             if app.spotify_my_playlists.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
-                        "  Loading playlists…",
+                        lang.text("  Loading playlists…", "  Carregando playlists…"),
                         Style::default().fg(muted),
                     )),
                     list_area,
@@ -751,8 +830,10 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
                     .enumerate()
                     .map(|(i, (_, name, count))| {
                         let selected = i == app.spotify_playlist_row;
-                        let label = format!(
+                        let label = crate::localized_format!(
+                            lang,
                             " {} {:<50} {} tracks",
+                            " {} {:<50} {} faixas",
                             if selected { "▶" } else { " " },
                             name.chars().take(48).collect::<String>(),
                             count,
@@ -778,6 +859,7 @@ pub fn render_spotify_browser(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     use crate::app::types::SubsonicTab;
     let theme = &app.theme;
     let w = 78.min(area.width.saturating_sub(2));
@@ -799,9 +881,9 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
     let tab_line = Line::from(vec![
         Span::styled(
             if app.subsonic_browser_tab == SubsonicTab::Search {
-                " [🔍 Busca] "
+                lang.text(" [🔍 Search] ", " [🔍 Busca] ")
             } else {
-                "  🔍 Busca  "
+                lang.text("  🔍 Search  ", "  🔍 Busca  ")
             },
             if app.subsonic_browser_tab == SubsonicTab::Search {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -811,9 +893,9 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
         ),
         Span::styled(
             if app.subsonic_browser_tab == SubsonicTab::RecentAlbums {
-                " [💿 Álbuns Recentes] "
+                lang.text(" [💿 Recent Albums] ", " [💿 Álbuns Recentes] ")
             } else {
-                "  💿 Álbuns Recentes  "
+                lang.text("  💿 Recent Albums  ", "  💿 Álbuns Recentes  ")
             },
             if app.subsonic_browser_tab == SubsonicTab::RecentAlbums {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -835,9 +917,9 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
         ),
         Span::styled(
             if app.subsonic_browser_tab == SubsonicTab::Random {
-                " [🎲 Aleatórias] "
+                lang.text(" [🎲 Random] ", " [🎲 Aleatórias] ")
             } else {
-                "  🎲 Aleatórias  "
+                lang.text("  🎲 Random  ", "  🎲 Aleatórias  ")
             },
             if app.subsonic_browser_tab == SubsonicTab::Random {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
@@ -849,22 +931,31 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let hint = Line::from(vec![
         Span::styled(" Tab", Style::default().fg(accent)),
-        Span::styled(" abas  ", Style::default().fg(muted)),
+        Span::styled(lang.text(" tabs  ", " abas  "), Style::default().fg(muted)),
         Span::styled("/", Style::default().fg(accent)),
-        Span::styled(" buscar  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" search  ", " buscar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Enter", Style::default().fg(accent)),
-        Span::styled(" tocar/abrir  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" play/open  ", " tocar/abrir  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("a", Style::default().fg(accent)),
-        Span::styled(" fila  ", Style::default().fg(muted)),
+        Span::styled(lang.text(" queue  ", " fila  "), Style::default().fg(muted)),
         Span::styled("Esc", Style::default().fg(accent)),
-        Span::styled(" fechar", Style::default().fg(muted)),
+        Span::styled(lang.text(" close", " fechar"), Style::default().fg(muted)),
     ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
         .title(Span::styled(
-            " ☁️ Subsonic / Navidrome Cloud Streaming ",
+            lang.text(
+                " ☁️ Subsonic / Navidrome Cloud Streaming ",
+                " ☁️ Subsonic / Navidrome — Transmissão na Nuvem ",
+            ),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ))
         .title_bottom(hint);
@@ -875,25 +966,40 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
         let msg = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  ⚠️ Servidor Subsonic / Navidrome não configurado.",
+                lang.text(
+                    "  ⚠️ Subsonic / Navidrome server not configured.",
+                    "  ⚠️ Servidor Subsonic / Navidrome não configurado.",
+                ),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  Configure no seu arquivo config.toml:",
+                lang.text(
+                    "  Configure in your config.toml file:",
+                    "  Configure no seu arquivo config.toml:",
+                ),
                 Style::default().fg(fg),
             )),
             Line::from(Span::styled("  [subsonic]", Style::default().fg(secondary))),
             Line::from(Span::styled(
-                "  server_url = \"http://seu-servidor:4533\"",
+                lang.text(
+                    "  server_url = \"http://your-server:4533\"",
+                    "  server_url = \"http://seu-servidor:4533\"",
+                ),
                 Style::default().fg(muted),
             )),
             Line::from(Span::styled(
-                "  username = \"seu_usuario\"",
+                lang.text(
+                    "  username = \"your_username\"",
+                    "  username = \"seu_usuario\"",
+                ),
                 Style::default().fg(muted),
             )),
             Line::from(Span::styled(
-                "  password = \"sua_senha\"",
+                lang.text(
+                    "  password = \"your_password\"",
+                    "  password = \"sua_senha\"",
+                ),
                 Style::default().fg(muted),
             )),
         ];
@@ -912,11 +1018,25 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
 
     // Search bar
     let query_display = if app.subsonic_browser_query_editing {
-        format!(" 🔍 Busca: {}█", app.subsonic_browser_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Search: {}█",
+            " 🔍 Busca: {}█",
+            app.subsonic_browser_query
+        )
     } else if app.subsonic_browser_query.is_empty() {
-        " Pressione / para buscar músicas no seu Navidrome/Subsonic…".to_string()
+        lang.text(
+            " Press / to search your Navidrome/Subsonic tracks…",
+            " Pressione / para buscar músicas no seu Navidrome/Subsonic…",
+        )
+        .to_string()
     } else {
-        format!(" 🔍 Busca: {}", app.subsonic_browser_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Search: {}",
+            " 🔍 Busca: {}",
+            app.subsonic_browser_query
+        )
     };
     f.render_widget(
         Paragraph::new(Span::styled(
@@ -940,9 +1060,15 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
             let results = &app.subsonic_browser_results;
             if results.is_empty() {
                 let msg = if app.subsonic_browser_tab == SubsonicTab::Random {
-                    "  Carregando músicas aleatórias…"
+                    lang.text(
+                        "  Loading random tracks…",
+                        "  Carregando músicas aleatórias…",
+                    )
                 } else {
-                    "  Nenhum resultado. Digite o termo de busca e pressione Enter."
+                    lang.text(
+                        "  No results. Type a query and press Enter.",
+                        "  Nenhum resultado. Digite o termo de busca e pressione Enter.",
+                    )
                 };
                 f.render_widget(
                     Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
@@ -994,7 +1120,10 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
             if app.subsonic_browser_albums.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
-                        "  Carregando álbuns do servidor…",
+                        lang.text(
+                            "  Loading server albums…",
+                            "  Carregando álbuns do servidor…",
+                        ),
                         Style::default().fg(muted),
                     )),
                     list_area,
@@ -1006,7 +1135,9 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
                     .enumerate()
                     .map(|(i, album)| {
                         let selected = i == app.subsonic_browser_row;
-                        let label = format!(
+                        let label = crate::localized_format!(
+                            lang,
+                            " {} {:<40} {:<24} ({} tracks)",
                             " {} {:<40} {:<24} ({} faixas)",
                             if selected { "▶" } else { " " },
                             album.display_title().chars().take(38).collect::<String>(),
@@ -1040,7 +1171,10 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
             if app.subsonic_browser_playlists.is_empty() {
                 f.render_widget(
                     Paragraph::new(Span::styled(
-                        "  Carregando playlists do servidor…",
+                        lang.text(
+                            "  Loading server playlists…",
+                            "  Carregando playlists do servidor…",
+                        ),
                         Style::default().fg(muted),
                     )),
                     list_area,
@@ -1052,7 +1186,9 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
                     .enumerate()
                     .map(|(i, pl)| {
                         let selected = i == app.subsonic_browser_row;
-                        let label = format!(
+                        let label = crate::localized_format!(
+                            lang,
+                            " {} {:<48} ({} tracks)",
                             " {} {:<48} ({} faixas)",
                             if selected { "▶" } else { " " },
                             pl.name.chars().take(46).collect::<String>(),
@@ -1079,6 +1215,7 @@ pub fn render_subsonic_browser(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 78.min(area.width.saturating_sub(2));
     let h = 22.min(area.height.saturating_sub(2));
@@ -1098,20 +1235,29 @@ pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
 
     let hint = Line::from(vec![
         Span::styled(" /", Style::default().fg(accent)),
-        Span::styled(" buscar  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" search  ", " buscar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Enter", Style::default().fg(accent)),
-        Span::styled(" tocar  ", Style::default().fg(muted)),
+        Span::styled(lang.text(" play  ", " tocar  "), Style::default().fg(muted)),
         Span::styled("a", Style::default().fg(accent)),
-        Span::styled(" enfileirar  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" enqueue  ", " enfileirar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Esc", Style::default().fg(accent)),
-        Span::styled(" fechar", Style::default().fg(muted)),
+        Span::styled(lang.text(" close", " fechar"), Style::default().fg(muted)),
     ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
         .title(Span::styled(
-            " ☁️ Cloud Audio Vault — Streaming Comunitário Direto ",
+            lang.text(
+                " ☁️ Cloud Audio Vault — Direct Community Streaming ",
+                " ☁️ Cloud Audio Vault — Streaming Comunitário Direto ",
+            ),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ))
         .title_bottom(hint);
@@ -1128,11 +1274,25 @@ pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
 
     // Search bar
     let query_display = if app.vault_query_editing {
-        format!(" 🔍 Busca no Vault: {}█", app.vault_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Vault search: {}█",
+            " 🔍 Busca no Vault: {}█",
+            app.vault_query
+        )
     } else if app.vault_query.is_empty() {
-        " Pressione / para pesquisar no catálogo em nuvem do Vault…".to_string()
+        lang.text(
+            " Press / to search the Vault cloud catalog…",
+            " Pressione / para pesquisar no catálogo em nuvem do Vault…",
+        )
+        .to_string()
     } else {
-        format!(" 🔍 Busca no Vault: {}", app.vault_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Vault search: {}",
+            " 🔍 Busca no Vault: {}",
+            app.vault_query
+        )
     };
     f.render_widget(
         Paragraph::new(Span::styled(
@@ -1146,7 +1306,10 @@ pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
     let list_area = chunks[1];
     let results = &app.vault_results;
     if results.is_empty() {
-        let msg = "  Nenhuma faixa encontrada no catálogo. Digite um termo e tecle Enter.";
+        let msg = lang.text(
+            "  No tracks found in the catalog. Type a query and press Enter.",
+            "  Nenhuma faixa encontrada no catálogo. Digite um termo e tecle Enter.",
+        );
         f.render_widget(
             Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
             list_area,
@@ -1195,6 +1358,7 @@ pub fn render_vault_browser(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 70.min(area.width.saturating_sub(4));
     let h = (app.device_list.len() as u16 + 4)
@@ -1225,7 +1389,7 @@ pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " select  ",
+            lang.text(" select  ", " selecionar  "),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
         Span::styled(
@@ -1233,7 +1397,7 @@ pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(parse_color(&theme.colors.accent)),
         ),
         Span::styled(
-            " close",
+            lang.text(" close", " fechar"),
             Style::default().fg(parse_color(&theme.colors.muted)),
         ),
     ]);
@@ -1243,7 +1407,10 @@ pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
-                .title(Span::styled(" Output Device ", theme.accent()))
+                .title(Span::styled(
+                    lang.text(" Output Device ", " Dispositivo de Saída "),
+                    theme.accent(),
+                ))
                 .title_bottom(hint),
         )
         .highlight_style(
@@ -1258,6 +1425,7 @@ pub fn render_device_selector(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let eq = app.player.eq().snapshot();
     let curve_h = 7usize;
@@ -1418,7 +1586,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     // 3. 10 Vertical Faders
     let fader_height = 5usize;
     // Row 0: DB Values
-    let mut db_spans: Vec<Span> = vec![Span::styled(" Gain: ", Style::default().fg(muted))];
+    let mut db_spans: Vec<Span> = vec![Span::styled(
+        lang.text(" Gain: ", " Ganho: "),
+        Style::default().fg(muted),
+    )];
     for (i, &gain) in eq.bands.iter().enumerate() {
         let is_sel = i == app.eq_tuner_band;
         let style = if is_sel {
@@ -1492,7 +1663,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
             .zip(eq.bands.iter())
             .all(|(a, b)| (a - b).abs() < 0.1)
     });
-    let mut preset_spans: Vec<Span> = vec![Span::styled(" Presets: ", Style::default().fg(muted))];
+    let mut preset_spans: Vec<Span> = vec![Span::styled(
+        lang.text(" Presets: ", " Predefinições: "),
+        Style::default().fg(muted),
+    )];
     for (i, (name, _)) in crate::eq::PRESETS.iter().enumerate().take(8) {
         let active = current == Some(i);
         let style = if active {
@@ -1511,17 +1685,23 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
     // 5. Controls hint
     lines.push(Line::from(vec![
         Span::styled(" ← → ", Style::default().fg(accent)),
-        Span::styled("banda  ", Style::default().fg(muted)),
+        Span::styled(lang.text("band  ", "banda  "), Style::default().fg(muted)),
         Span::styled("↑↓ ", Style::default().fg(accent)),
-        Span::styled("ganho (±1dB)  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text("gain (±1dB)  ", "ganho (±1dB)  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("0 ", Style::default().fg(accent)),
-        Span::styled("preset  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text("preset  ", "predefinição  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("r ", Style::default().fg(accent)),
-        Span::styled("flat  ", Style::default().fg(muted)),
+        Span::styled(lang.text("flat  ", "neutro  "), Style::default().fg(muted)),
         Span::styled("Ctrl+S ", Style::default().fg(accent)),
-        Span::styled("salvar  ", Style::default().fg(muted)),
+        Span::styled(lang.text("save  ", "salvar  "), Style::default().fg(muted)),
         Span::styled("Esc ", Style::default().fg(accent)),
-        Span::styled("fechar", Style::default().fg(muted)),
+        Span::styled(lang.text("close", "fechar"), Style::default().fg(muted)),
     ]));
 
     let p = Paragraph::new(Text::from(lines))
@@ -1531,7 +1711,10 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
                 .borders(Borders::ALL)
                 .border_style(theme.border(true))
                 .title(Span::styled(
-                    " 🎚️ Equalizador Gráfico de 10 Bandas (EQ Tuner) ",
+                    lang.text(
+                        " 🎚️ 10-Band Graphic Equalizer (EQ Tuner) ",
+                        " 🎚️ Equalizador Gráfico de 10 Bandas (EQ Tuner) ",
+                    ),
                     theme.accent(),
                 )),
         );
@@ -1539,6 +1722,7 @@ pub fn render_eq_tuner(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let eq = app.player.eq().snapshot();
     let vol_pct = (app.player.volume() * 100.0).round() as i32;
@@ -1557,22 +1741,22 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
 
     let rows: &[Row] = &[
         Row {
-            label: "EQ Low",
+            label: lang.text("EQ Low", "EQ Graves"),
             value: format!("{:+.0} dB", eq.low_db()),
             bar_pct: ((eq.low_db() + 12.0) / 24.0) as f64,
         },
         Row {
-            label: "EQ Mid",
+            label: lang.text("EQ Mid", "EQ Médios"),
             value: format!("{:+.0} dB", eq.mid_db()),
             bar_pct: ((eq.mid_db() + 12.0) / 24.0) as f64,
         },
         Row {
-            label: "EQ High",
+            label: lang.text("EQ High", "EQ Agudos"),
             value: format!("{:+.0} dB", eq.high_db()),
             bar_pct: ((eq.high_db() + 12.0) / 24.0) as f64,
         },
         Row {
-            label: "EQ Preset",
+            label: lang.text("EQ Preset", "Predefinição EQ"),
             value: preset_name.to_string(),
             bar_pct: app.eq_preset_idx as f64 / (crate::eq::PRESETS.len() - 1).max(1) as f64,
         },
@@ -1587,12 +1771,12 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
             bar_pct: (xf / 10.0) as f64,
         },
         Row {
-            label: "Viz Sens",
+            label: lang.text("Viz Sens", "Sens. Visual"),
             value: format!("×{:.1}", sens),
             bar_pct: ((sens - 0.1) / 2.9) as f64,
         },
         Row {
-            label: "Speed",
+            label: lang.text("Speed", "Velocidade"),
             value: format!("{:.2}×", app.player.speed()),
             bar_pct: ((app.player.speed() - 0.5) / 2.0) as f64,
         },
@@ -1607,7 +1791,10 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(theme.border(true))
         .title(Span::styled(
-            " Audio Panel — ↑↓ select  ←→ adjust  e/Esc close ",
+            lang.text(
+                " Audio Panel — ↑↓ select  ←→ adjust  e/Esc close ",
+                " Painel de Áudio — ↑↓ selecionar  ←→ ajustar  e/Esc fechar ",
+            ),
             theme.accent(),
         ));
     let inner = block.inner(area);
@@ -1668,7 +1855,10 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
             height: 1,
         };
         let hint = Paragraph::new(Line::from(vec![Span::styled(
-            "  ← / → to adjust  |  ↑↓ to navigate  |  e or Esc to close",
+            lang.text(
+                "  ← / → to adjust  |  ↑↓ to navigate  |  e or Esc to close",
+                "  ← / → ajustar  |  ↑↓ navegar  |  e ou Esc fechar",
+            ),
             Style::default().fg(muted),
         )]));
         f.render_widget(hint, hint_area);
@@ -1676,6 +1866,7 @@ pub fn render_audio_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let w = 80.min(area.width.saturating_sub(2));
     let h = 24.min(area.height.saturating_sub(2));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -1689,21 +1880,24 @@ pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
 
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
-            " Last.fm dashboard ",
+            lang.text(" Last.fm dashboard ", " Painel Last.fm "),
             Style::default()
                 .fg(parse_color(&app.theme.colors.accent))
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "Recent scrobbles",
+            lang.text("Recent scrobbles", "Scrobbles recentes"),
             Style::default()
                 .fg(parse_color(&app.theme.colors.accent))
                 .add_modifier(Modifier::BOLD),
         )),
     ];
     if app.lastfm_panel_recent.is_empty() {
-        lines.push(Line::from(" (loading or no scrobbles yet)"));
+        lines.push(Line::from(lang.text(
+            " (loading or no scrobbles yet)",
+            " (carregando ou nenhum scrobble ainda)",
+        )));
     } else {
         for t in &app.lastfm_panel_recent {
             lines.push(Line::from(format!(" • {} — {}", t.artist, t.title)));
@@ -1711,17 +1905,22 @@ pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Top artists (last month)",
+        lang.text(
+            "Top artists (last month)",
+            "Artistas mais ouvidos (último mês)",
+        ),
         Style::default()
             .fg(parse_color(&app.theme.colors.accent))
             .add_modifier(Modifier::BOLD),
     )));
     if app.lastfm_panel_top_artists.is_empty() {
-        lines.push(Line::from(" (loading)"));
+        lines.push(Line::from(lang.text(" (loading)", " (carregando)")));
     } else {
         for (i, a) in app.lastfm_panel_top_artists.iter().enumerate() {
-            lines.push(Line::from(format!(
+            lines.push(Line::from(crate::localized_format!(
+                lang,
                 " {:>2}. {} ({} plays)",
+                " {:>2}. {} ({} reproduções)",
                 i + 1,
                 a.name,
                 a.playcount
@@ -1730,7 +1929,7 @@ pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        " [Ctrl+L] close ",
+        lang.text(" [Ctrl+L] close ", " [Ctrl+L] fechar "),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     )));
 
@@ -1743,6 +1942,7 @@ pub fn render_lastfm(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let stats = &app.stats_snapshot;
 
     let w = 80.min(area.width.saturating_sub(2));
@@ -1761,9 +1961,14 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
 
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
-            format!(
+            crate::localized_format!(
+                lang,
                 " Listening stats — total {}h{:02}m, {} plays across {} tracks ",
-                listen_h, listen_m, stats.total_plays, stats.unique_tracks
+                " Estatísticas — total {}h{:02}m, {} reproduções de {} faixas ",
+                listen_h,
+                listen_m,
+                stats.total_plays,
+                stats.unique_tracks
             ),
             Style::default()
                 .fg(parse_color(&app.theme.colors.accent))
@@ -1771,15 +1976,17 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "Top tracks",
+            lang.text("Top tracks", "Faixas mais ouvidas"),
             Style::default()
                 .fg(parse_color(&app.theme.colors.accent))
                 .add_modifier(Modifier::BOLD),
         )),
     ];
     for (i, (display, _path, count)) in stats.top_tracks.iter().enumerate() {
-        lines.push(Line::from(format!(
+        lines.push(Line::from(crate::localized_format!(
+            lang,
             " {:>2}. {} ({} plays)",
+            " {:>2}. {} ({} reproduções)",
             i + 1,
             display,
             count
@@ -1787,14 +1994,16 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Top artists",
+        lang.text("Top artists", "Artistas mais ouvidos"),
         Style::default()
             .fg(parse_color(&app.theme.colors.accent))
             .add_modifier(Modifier::BOLD),
     )));
     for (i, (artist, count)) in stats.top_artists.iter().enumerate() {
-        lines.push(Line::from(format!(
+        lines.push(Line::from(crate::localized_format!(
+            lang,
             " {:>2}. {} ({} plays)",
+            " {:>2}. {} ({} reproduções)",
             i + 1,
             artist,
             count
@@ -1802,7 +2011,7 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Recently played",
+        lang.text("Recently played", "Tocadas recentemente"),
         Style::default()
             .fg(parse_color(&app.theme.colors.accent))
             .add_modifier(Modifier::BOLD),
@@ -1812,7 +2021,7 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        " [Ctrl+S] close ",
+        lang.text(" [Ctrl+S] close ", " [Ctrl+S] fechar "),
         Style::default().fg(parse_color(&app.theme.colors.muted)),
     )));
 
@@ -1820,11 +2029,15 @@ pub fn render_stats(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(app.theme.border(true))
-        .title(Span::styled(" Stats (#64) ", app.theme.accent()));
+        .title(Span::styled(
+            lang.text(" Stats (#64) ", " Estatísticas (#64) "),
+            app.theme.accent(),
+        ));
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 pub fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 60.min(area.width.saturating_sub(2));
     let h = 14.min(area.height.saturating_sub(2));
@@ -1840,13 +2053,22 @@ pub fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(theme.border(true))
         .title(Span::styled(
-            " Edit Tags — Tab/↑↓ field  Enter save  Esc cancel ",
+            lang.text(
+                " Edit Tags — Tab/↑↓ field  Enter save  Esc cancel ",
+                " Editar Tags — Tab/↑↓ campo  Enter salvar  Esc cancelar ",
+            ),
             theme.accent(),
         ));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let labels = ["Title", "Artist", "Album", "Genre", "Year"];
+    let labels = [
+        lang.text("Title", "Título"),
+        lang.text("Artist", "Artista"),
+        lang.text("Album", "Álbum"),
+        lang.text("Genre", "Gênero"),
+        lang.text("Year", "Ano"),
+    ];
     let accent = parse_color(&theme.colors.accent);
     let fg = parse_color(&theme.colors.foreground);
     let muted = parse_color(&theme.colors.muted);
@@ -1867,7 +2089,7 @@ pub fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
         let val_display = if selected {
             format!("{val}█")
         } else if val.is_empty() {
-            "<empty>".to_string()
+            lang.text("<empty>", "<vazio>").to_string()
         } else {
             val.clone()
         };
@@ -1893,6 +2115,7 @@ pub fn render_tag_editor(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 64.min(area.width.saturating_sub(2));
     let h = 10.min(area.height.saturating_sub(2));
@@ -1908,17 +2131,30 @@ pub fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(theme.border(true))
         .title(Span::styled(
-            " ✨ Adicionar Rádio — Tab/↑↓ campo · Enter salvar · Esc cancelar ",
+            lang.text(
+                " ✨ Add Radio — Tab/↑↓ field · Enter save · Esc cancel ",
+                " ✨ Adicionar Rádio — Tab/↑↓ campo · Enter salvar · Esc cancelar ",
+            ),
             theme.accent(),
         ));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let labels = ["Nome da Estação", "URL do Stream", "Gênero / Tags"];
+    let labels = [
+        lang.text("Station Name", "Nome da Estação"),
+        lang.text("Stream URL", "URL do Stream"),
+        lang.text("Genre / Tags", "Gênero / Tags"),
+    ];
     let placeholders = [
-        "Ex: Rádio Retrô FM",
-        "Ex: https://stream.exemplo.com/live.mp3",
-        "Ex: synthwave, 80s, instrumental",
+        lang.text("E.g.: Retro FM Radio", "Ex: Rádio Retrô FM"),
+        lang.text(
+            "E.g.: https://stream.example.com/live.mp3",
+            "Ex: https://stream.exemplo.com/live.mp3",
+        ),
+        lang.text(
+            "E.g.: synthwave, 80s, instrumental",
+            "Ex: synthwave, 80s, instrumental",
+        ),
     ];
     let accent = parse_color(&theme.colors.accent);
     let fg = parse_color(&theme.colors.foreground);
@@ -1963,6 +2199,7 @@ pub fn render_radio_custom_modal(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 84.min(area.width.saturating_sub(2));
     let h = 25.min(area.height.saturating_sub(2));
@@ -1975,7 +2212,7 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Clear, popup);
 
     let title =
-        " 📻 Radio-Browser Hub (+45k Rádios) — ←/→ Gênero · Enter Tocar · a Fila · f Fav · + Add · Esc Fechar ";
+        lang.text(" 📻 Radio-Browser Hub (+45k Stations) — ←/→ Genre · Enter Play · a Queue · f Fav · + Add · Esc Close ", " 📻 Radio-Browser Hub (+45k Rádios) — ←/→ Gênero · Enter Tocar · a Fila · f Fav · + Add · Esc Fechar ");
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
@@ -2009,12 +2246,12 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
         let is_selected = i == active_cat_idx;
         if is_selected {
             cat_spans.push(Span::styled(
-                format!("[ {} ] ", cat.label()),
+                format!("[ {} ] ", cat.localized_label(app.config.ui.language)),
                 Style::default().fg(accent).add_modifier(Modifier::BOLD),
             ));
         } else {
             cat_spans.push(Span::styled(
-                format!("{} ", cat.label()),
+                format!("{} ", cat.localized_label(app.config.ui.language)),
                 Style::default().fg(muted),
             ));
         }
@@ -2024,9 +2261,18 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
     // Search Bar
     let cursor = if app.radio_search_editing { "█" } else { "" };
     let search_text = if app.radio_search_query.is_empty() && !app.radio_search_editing {
-        " 🔍 Busca: (digite diretamente ou pressione / para pesquisar +45.000 rádios)".to_string()
+        lang.text(
+            " 🔍 Search: (type directly or press / to search +45,000 stations)",
+            " 🔍 Busca: (digite diretamente ou pressione / para pesquisar +45.000 rádios)",
+        )
+        .to_string()
     } else {
-        format!(" 🔍 Busca: {}{cursor}", app.radio_search_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Search: {}{cursor}",
+            " 🔍 Busca: {}{cursor}",
+            app.radio_search_query
+        )
     };
     let search_style = if app.radio_search_editing {
         Style::default().fg(fg).add_modifier(Modifier::BOLD)
@@ -2045,9 +2291,12 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
 
     if stations.is_empty() {
         let empty_msg = if app.radio_search_rx.is_some() {
-            "  ⏳ Conectando aos servidores do Radio-Browser e carregando estações…"
+            lang.text(
+                "  ⏳ Connecting to Radio-Browser servers and loading stations…",
+                "  ⏳ Conectando aos servidores do Radio-Browser e carregando estações…",
+            )
         } else {
-            "  Nenhuma estação encontrada. Digite um termo ou use ← / → para navegar entre os gêneros."
+            lang.text("  No stations found. Type a query or use ← / → to browse genres.", "  Nenhuma estação encontrada. Digite um termo ou use ← / → para navegar entre os gêneros.")
         };
         f.render_widget(
             Paragraph::new(Span::styled(empty_msg, Style::default().fg(muted))),
@@ -2081,7 +2330,7 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(fg)
         };
 
-        let country = st.country.as_deref().unwrap_or("World");
+        let country = st.country.as_deref().unwrap_or(lang.text("World", "Mundo"));
         let codec = st.codec.as_deref().unwrap_or("MP3");
         let bitrate_str = st
             .bitrate
@@ -2111,6 +2360,7 @@ pub fn render_radio_browser(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.config.ui.language;
     let w = 80.min(area.width.saturating_sub(4));
     let h = 24.min(area.height.saturating_sub(4));
     let popup = Rect {
@@ -2130,7 +2380,7 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_style(app.theme.border(true))
         .title(Span::styled(
-            " 🎤 Letras Sincronizadas / Karaoke [y/Esc: fechar · Enter: ir ao verso · k/j: rolar · c: auto-scroll · r: buscar] ",
+            lang.text(" 🎤 Synced Lyrics / Karaoke [y/Esc: close · Enter: seek to verse · k/j: scroll · c: auto-scroll · r: search] ", " 🎤 Letras Sincronizadas / Karaoke [y/Esc: fechar · Enter: ir ao verso · k/j: rolar · c: auto-scroll · r: buscar] "),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(popup);
@@ -2140,7 +2390,8 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
 
     if let Some(lyrics) = &app.lyrics {
         if lyrics.lines.is_empty() {
-            let p = Paragraph::new("Letra vazia.").style(Style::default().fg(muted));
+            let p = Paragraph::new(lang.text("Empty lyrics.", "Letra vazia."))
+                .style(Style::default().fg(muted));
             f.render_widget(p, inner);
             return;
         }
@@ -2207,12 +2458,18 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
             .player
             .current()
             .map(|t| t.display())
-            .unwrap_or_else(|| "Nenhuma música tocando".to_string());
+            .unwrap_or_else(|| {
+                lang.text("No track playing", "Nenhuma música tocando")
+                    .to_string()
+            });
 
         let msg = vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  Música: ", Style::default().fg(muted)),
+                Span::styled(
+                    lang.text("  Track: ", "  Música: "),
+                    Style::default().fg(muted),
+                ),
                 Span::styled(
                     current_display,
                     Style::default().fg(fg).add_modifier(Modifier::BOLD),
@@ -2220,16 +2477,25 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
             ]),
             Line::from(""),
             Line::from(Span::styled(
-                "  Nenhuma letra sincronizada encontrada para esta faixa.",
+                lang.text(
+                    "  No synchronized lyrics found for this track.",
+                    "  Nenhuma letra sincronizada encontrada para esta faixa.",
+                ),
                 Style::default().fg(muted),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  • Pressione 'r' para buscar novamente no LRCLIB.",
+                lang.text(
+                    "  • Press 'r' to search LRCLIB again.",
+                    "  • Pressione 'r' para buscar novamente no LRCLIB.",
+                ),
                 Style::default().fg(accent),
             )),
             Line::from(Span::styled(
-                "  • Ou coloque um arquivo .lrc com mesmo nome junto ao arquivo de áudio.",
+                lang.text(
+                    "  • Or place a .lrc file with the same name next to the audio file.",
+                    "  • Ou coloque um arquivo .lrc com mesmo nome junto ao arquivo de áudio.",
+                ),
                 Style::default().fg(fg),
             )),
         ];
@@ -2238,6 +2504,7 @@ pub fn render_lyrics_modal(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
+    let lang = app.config.ui.language;
     let w = 78.min(area.width.saturating_sub(2));
     let h = 18.min(area.height.saturating_sub(2));
     let popup = Rect {
@@ -2259,7 +2526,7 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
         .title(Span::styled(
             app.config.ui.language.text(
                 " Command palette | Esc: close | Enter: run | Up/Down: select ",
-                " 🔍 Command Palette [Ctrl+P / Esc: fechar · Enter: executar · ↑↓: navegar] ",
+                " 🔍 Paleta de Comandos [Ctrl+P / Esc: fechar · Enter: executar · ↑↓: navegar] ",
             ),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ));
@@ -2395,7 +2662,9 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     // 4. Footer
-    let footer_text = format!(
+    let footer_text = crate::localized_format!(
+        lang,
+        " {}/{} results ",
         " {}/{} resultados ",
         if total_matches > 0 {
             app.command_palette_row + 1
@@ -2411,6 +2680,7 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 70.min(area.width.saturating_sub(2));
     let h = 18.min(area.height.saturating_sub(2));
@@ -2430,7 +2700,10 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(accent))
-        .title(" Compartilhar Playlist (Enter: Publicar | Tab: Campo | Esc: Cancelar) ");
+        .title(lang.text(
+            " Share Playlist (Enter: Publish | Tab: Field | Esc: Cancel) ",
+            " Compartilhar Playlist (Enter: Publicar | Tab: Campo | Esc: Cancelar) ",
+        ));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     let chunks = Layout::default()
@@ -2452,10 +2725,13 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(muted)
         })
-        .title(" Título da Playlist ");
+        .title(lang.text(" Playlist Title ", " Título da Playlist "));
     let title_text = if app.share_playlist_title.is_empty() && app.share_modal_field != 0 {
         Span::styled(
-            " (Sem título - usará nome da fila) ",
+            lang.text(
+                " (Untitled - uses queue name) ",
+                " (Sem título - usará nome da fila) ",
+            ),
             Style::default().fg(muted),
         )
     } else {
@@ -2481,7 +2757,7 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(muted)
         })
-        .title(" Descrição (opcional) ");
+        .title(lang.text(" Description (optional) ", " Descrição (opcional) "));
     let desc_text = Span::styled(
         format!(
             " {}",
@@ -2503,11 +2779,29 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(muted)
         })
-        .title(" Visibilidade (Espaço para alternar) ");
+        .title(lang.text(
+            " Visibility (Space to toggle) ",
+            " Visibilidade (Espaço para alternar) ",
+        ));
     let (vis_label, vis_icon) = match app.share_playlist_visibility {
-        crate::share::Visibility::Public => ("Pública (visível no catálogo de descoberta)", "🌍"),
-        crate::share::Visibility::Unlisted => ("Não Listada (apenas quem tem o link/ID)", "🔗"),
-        crate::share::Visibility::Private => ("Privada (somente você)", "🔒"),
+        crate::share::Visibility::Public => (
+            lang.text(
+                "Public (visible in the discovery catalog)",
+                "Pública (visível no catálogo de descoberta)",
+            ),
+            "🌍",
+        ),
+        crate::share::Visibility::Unlisted => (
+            lang.text(
+                "Unlisted (only people with the link/ID)",
+                "Não Listada (apenas quem tem o link/ID)",
+            ),
+            "🔗",
+        ),
+        crate::share::Visibility::Private => (
+            lang.text("Private (only you)", "Privada (somente você)"),
+            "🔒",
+        ),
     };
     let vis_text = Span::styled(
         format!(" {vis_icon} {vis_label}"),
@@ -2529,7 +2823,7 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
         } else {
             Style::default().fg(muted)
         })
-        .title(" Tags (separadas por vírgula) ");
+        .title(lang.text(" Tags (comma-separated) ", " Tags (separadas por vírgula) "));
     let tags_text = Span::styled(
         format!(
             " {}",
@@ -2545,6 +2839,7 @@ pub fn render_share_modal(f: &mut Frame, area: Rect, app: &App) {
 }
 
 pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
+    let lang = app.config.ui.language;
     let theme = &app.theme;
     let w = 82.min(area.width.saturating_sub(2));
     let h = 22.min(area.height.saturating_sub(2));
@@ -2564,18 +2859,27 @@ pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
 
     let hint = Line::from(vec![
         Span::styled(" /", Style::default().fg(accent)),
-        Span::styled(" buscar  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" search  ", " buscar  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Enter / i", Style::default().fg(accent)),
-        Span::styled(" importar para fila  ", Style::default().fg(muted)),
+        Span::styled(
+            lang.text(" import to queue  ", " importar para fila  "),
+            Style::default().fg(muted),
+        ),
         Span::styled("Esc", Style::default().fg(accent)),
-        Span::styled(" fechar", Style::default().fg(muted)),
+        Span::styled(lang.text(" close", " fechar"), Style::default().fg(muted)),
     ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border(true))
         .title(Span::styled(
-            " 🌐 Descoberta de Playlists Públicas ",
+            lang.text(
+                " 🌐 Public Playlist Discovery ",
+                " 🌐 Descoberta de Playlists Públicas ",
+            ),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ))
         .title_bottom(hint);
@@ -2592,11 +2896,25 @@ pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
 
     // Search bar
     let query_display = if app.browse_search_editing {
-        format!(" 🔍 Buscar playlists: {}█", app.browse_search_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Search playlists: {}█",
+            " 🔍 Buscar playlists: {}█",
+            app.browse_search_query
+        )
     } else if app.browse_search_query.is_empty() {
-        " Pressione / para pesquisar playlists da comunidade…".to_string()
+        lang.text(
+            " Press / to search community playlists…",
+            " Pressione / para pesquisar playlists da comunidade…",
+        )
+        .to_string()
     } else {
-        format!(" 🔍 Buscar playlists: {}", app.browse_search_query)
+        crate::localized_format!(
+            lang,
+            " 🔍 Search playlists: {}",
+            " 🔍 Buscar playlists: {}",
+            app.browse_search_query
+        )
     };
     f.render_widget(
         Paragraph::new(Span::styled(
@@ -2610,7 +2928,10 @@ pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
     let list_area = chunks[1];
     let results = &app.browse_results;
     if results.is_empty() {
-        let msg = "  Nenhuma playlist encontrada. Digite um termo de busca e tecle Enter.";
+        let msg = lang.text(
+            "  No playlists found. Type a query and press Enter.",
+            "  Nenhuma playlist encontrada. Digite um termo de busca e tecle Enter.",
+        );
         f.render_widget(
             Paragraph::new(Span::styled(msg, Style::default().fg(muted))),
             list_area,
@@ -2626,8 +2947,10 @@ pub fn render_browse_modal(f: &mut Frame, area: Rect, app: &App) {
                 } else {
                     format!(" [{}]", pl.tags.join(", "))
                 };
-                let label = format!(
-                    " {} {:<32} by {:<16} ({} faixas) ♥ {}{}",
+                let label = crate::localized_format!(
+                    lang,
+                    " {} {:<32} by {:<16} ({} tracks) ♥ {}{}",
+                    " {} {:<32} por {:<16} ({} faixas) ♥ {}{}",
                     if selected { "▶" } else { " " },
                     pl.name.chars().take(30).collect::<String>(),
                     pl.author.display_name.chars().take(14).collect::<String>(),

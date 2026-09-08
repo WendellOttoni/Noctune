@@ -11,6 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 
 impl App {
     pub(crate) fn on_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
             self.should_quit = true;
             return;
@@ -178,18 +179,24 @@ impl App {
                 KeyCode::Esc => {
                     self.radio_seed_input.clear();
                     self.radio_seed_editing = false;
-                    self.set_info("Radio cancelled.");
+                    self.set_info(lang.text("Radio cancelled.", "Rádio cancelada."));
                 }
                 KeyCode::Enter => {
                     let seed = self.radio_seed_input.trim().to_string();
                     self.radio_seed_editing = false;
                     self.radio_seed_input.clear();
                     if seed.is_empty() {
-                        self.set_info("Radio: empty seed.");
+                        self.set_info(
+                            lang.text("Radio: empty seed.", "Rádio: termo inicial vazio."),
+                        );
                     } else {
                         self.radio_mode.seed = seed.clone();
                         self.radio_mode.active = true;
-                        self.set_info(format!("Radio: '{seed}' — fetching first batch…"));
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "Radio: '{seed}' — fetching first batch…",
+                            "Rádio: '{seed}' — buscando primeiras faixas…"
+                        ));
                     }
                 }
                 KeyCode::Backspace => {
@@ -359,9 +366,19 @@ impl App {
                     if let Some((p, name)) = maybe_station {
                         let is_now_fav = self.ratings.toggle_favorite(&p);
                         self.set_info(if is_now_fav {
-                            format!("Rádio favoritada: {} ♥", name)
+                            crate::localized_format!(
+                                lang,
+                                "Station favorited: {} ♥",
+                                "Rádio favoritada: {} ♥",
+                                name
+                            )
                         } else {
-                            format!("Rádio removida dos favoritos: {}", name)
+                            crate::localized_format!(
+                                lang,
+                                "Station removed from favorites: {}",
+                                "Rádio removida dos favoritos: {}",
+                                name
+                            )
                         });
                     }
                     return;
@@ -376,6 +393,7 @@ impl App {
     }
 
     pub(crate) fn run_action(&mut self, action: Action) {
+        let lang = self.config.ui.language;
         match action {
             Action::Quit => self.should_quit = true,
             Action::Help => self.show_help = true,
@@ -395,6 +413,12 @@ impl App {
                     crate::i18n::Language::En => crate::i18n::Language::PtBr,
                     _ => crate::i18n::Language::En,
                 };
+                self.set_info(
+                    self.config
+                        .ui
+                        .language
+                        .text("Language: English", "Idioma: Português do Brasil"),
+                );
                 if let Err(error) = self.config.save() {
                     self.set_error(format!("Config: {error}"));
                 }
@@ -413,8 +437,10 @@ impl App {
             }
             Action::CacheStatus | Action::ClearAudioCache => {
                 match crate::audio_cache::maintain(matches!(action, Action::ClearAudioCache)) {
-                    Ok(usage) => self.set_info(format!(
+                    Ok(usage) => self.set_info(crate::localized_format!(
+                        lang,
                         "Cache: {:.1} MiB, {} files, {} removed; active audio preserved.",
+                        "Cache: {:.1} MiB, {} arquivos, {} removidos; áudio ativo preservado.",
                         usage.bytes as f64 / 1048576.0,
                         usage.files,
                         usage.removed
@@ -435,19 +461,26 @@ impl App {
                 self.config.playback.shuffle = self.shuffle;
                 self.reset_shuffle_cycle();
                 self.update_prefetch_slots();
-                self.set_info(format!(
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Order: {}",
                     "Ordem: {}",
                     if self.shuffle {
-                        "aleatória"
+                        lang.text("random", "aleatória")
                     } else {
-                        "sequencial"
+                        lang.text("sequential", "sequencial")
                     }
                 ));
             }
             Action::Repeat => {
                 self.repeat = self.repeat.cycle();
                 self.update_prefetch_slots();
-                self.set_info(format!("Repeat: {}", self.repeat.label()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Repeat: {}",
+                    "Repetição: {}",
+                    self.repeat.localized_label(self.config.ui.language)
+                ));
             }
             Action::Sort => {
                 self.sort = self.sort.cycle();
@@ -457,13 +490,21 @@ impl App {
                 } else {
                     Some(0)
                 });
-                self.set_info(format!("Sort: {}", self.sort.label()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Sort: {}",
+                    "Ordenação: {}",
+                    self.sort.localized_label(self.config.ui.language)
+                ));
             }
             Action::SleepTimer => self.toggle_sleep_timer(),
             Action::SavePlaylist => {
                 self.playlist_name_editing = true;
                 self.playlist_name_input.clear();
-                self.set_info("Playlist name (Enter to save, Esc to cancel):");
+                self.set_info(lang.text(
+                    "Playlist name (Enter to save, Esc to cancel):",
+                    "Nome da playlist (Enter para salvar, Esc para cancelar):",
+                ));
             }
             Action::LoadPlaylist => {
                 self.open_playlist_browser();
@@ -490,9 +531,12 @@ impl App {
                             let _ = tx.send((recent, top));
                         });
                         self.show_lastfm_panel = true;
-                        self.set_info("Last.fm: loading…");
+                        self.set_info(lang.text("Last.fm: loading…", "Last.fm: carregando…"));
                     } else {
-                        self.set_error("Last.fm: not logged in — press Shift+F to authenticate");
+                        self.set_error(lang.text(
+                            "Last.fm: not logged in — press Shift+F to authenticate",
+                            "Last.fm: desconectado — pressione Shift+F para autenticar",
+                        ));
                     }
                 } else {
                     self.show_lastfm_panel = false;
@@ -501,16 +545,22 @@ impl App {
             Action::RadioMode => {
                 if self.radio_mode.active {
                     self.radio_mode.active = false;
-                    self.set_info("Radio Mode off.");
+                    self.set_info(lang.text("Radio Mode off.", "Modo Rádio desativado."));
                 } else {
                     self.radio_seed_editing = true;
                     self.radio_seed_input = self.radio_mode.seed.clone();
-                    self.set_info("Radio seed (Enter=confirm, Esc=cancel):");
+                    self.set_info(lang.text(
+                        "Radio seed (Enter=confirm, Esc=cancel):",
+                        "Termo inicial da rádio (Enter=confirmar, Esc=cancelar):",
+                    ));
                 }
             }
             Action::SpotifyBrowser => {
                 if self.spotify.is_none() {
-                    self.set_error("Spotify: not authorized — press Shift+P to login");
+                    self.set_error(lang.text(
+                        "Spotify: not authorized — press Shift+P to login",
+                        "Spotify: não autorizado — pressione Shift+P para entrar",
+                    ));
                 } else {
                     self.show_spotify_browser = true;
                     self.spotify_browser_tab = SpotifyTab::Search;
@@ -554,37 +604,45 @@ impl App {
                     self.browser_rows_cache = None;
                 }
                 self.library_state.select(Some(0));
-                self.set_info(format!("View: {}", self.view_mode.label()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "View: {}",
+                    "Visão: {}",
+                    self.view_mode.localized_label(self.config.ui.language)
+                ));
             }
             Action::EqLowUp => {
                 self.player.eq().adjust_low(1.0);
-                self.set_info("EQ low +1 dB");
+                self.set_info(lang.text("EQ low +1 dB", "EQ graves +1 dB"));
             }
             Action::EqLowDown => {
                 self.player.eq().adjust_low(-1.0);
-                self.set_info("EQ low -1 dB");
+                self.set_info(lang.text("EQ low -1 dB", "EQ graves -1 dB"));
             }
             Action::EqMidUp => {
                 self.player.eq().adjust_mid(1.0);
-                self.set_info("EQ mid +1 dB");
+                self.set_info(lang.text("EQ mid +1 dB", "EQ médios +1 dB"));
             }
             Action::EqMidDown => {
                 self.player.eq().adjust_mid(-1.0);
-                self.set_info("EQ mid -1 dB");
+                self.set_info(lang.text("EQ mid -1 dB", "EQ médios -1 dB"));
             }
             Action::EqHighUp => {
                 self.player.eq().adjust_high(1.0);
-                self.set_info("EQ high +1 dB");
+                self.set_info(lang.text("EQ high +1 dB", "EQ agudos +1 dB"));
             }
             Action::EqHighDown => {
                 self.player.eq().adjust_high(-1.0);
-                self.set_info("EQ high -1 dB");
+                self.set_info(lang.text("EQ high -1 dB", "EQ agudos -1 dB"));
             }
             Action::OpenUrl => {
                 self.url_editing = true;
-                self.status =
-                    "URL/search — YouTube, ytmsearch:..., Spotify, radio M3U/PLS — Enter/Esc"
-                        .into();
+                self.status = lang
+                    .text(
+                        "URL/search — YouTube, ytmsearch:..., Spotify, radio M3U/PLS — Enter/Esc",
+                        "URL/busca — YouTube, ytmsearch:..., Spotify, rádio M3U/PLS — Enter/Esc",
+                    )
+                    .into();
             }
             Action::EqPreset => {
                 let presets = crate::eq::PRESETS;
@@ -593,9 +651,17 @@ impl App {
                 self.player.eq().set(state);
                 self.config.playback.eq_preset = name.to_string();
                 if let Err(error) = self.config.save() {
-                    self.set_error(format!("EQ changed, but config was not saved: {error}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "EQ changed, but config was not saved: {error}",
+                        "Equalizador alterado, mas a configuração não foi salva: {error}"
+                    ));
                 } else {
-                    self.set_info(format!("EQ Preset: 🎚️ {name}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "EQ Preset: 🎚️ {name}",
+                        "Predefinição EQ: 🎚️ {name}"
+                    ));
                 }
             }
             Action::Rescan => self.start_async_scan(),
@@ -607,10 +673,15 @@ impl App {
             Action::RecentlyPlayed => {
                 if self.view_mode == ViewMode::RecentlyPlayed {
                     self.view_mode = ViewMode::Flat;
-                    self.set_info("View: library");
+                    self.set_info(lang.text("View: library", "Visão: biblioteca"));
                 } else {
                     self.view_mode = ViewMode::RecentlyPlayed;
-                    self.set_info(format!("Recently played ({} tracks)", self.history.len()));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Recently played ({} tracks)",
+                        "Tocadas recentemente ({} faixas)",
+                        self.history.len()
+                    ));
                 }
                 self.library_state
                     .select(if self.visible_library().is_empty() {
@@ -625,11 +696,20 @@ impl App {
             }
             Action::ReplayGain => {
                 self.replaygain_mode = self.replaygain_mode.cycle();
-                self.set_info(format!("ReplayGain: {}", self.replaygain_mode.label()));
+                self.set_info(format!(
+                    "ReplayGain: {}",
+                    self.replaygain_mode
+                        .localized_label(self.config.ui.language)
+                ));
             }
             Action::CycleVizMode => {
                 self.viz_mode = self.viz_mode.cycle();
-                self.set_info(format!("Visualizer: {}", self.viz_mode.label()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Visualizer: {}",
+                    "Visualizador: {}",
+                    self.viz_mode.localized_label(self.config.ui.language)
+                ));
             }
             Action::ToggleMini => {
                 self.mini_mode = !self.mini_mode;
@@ -655,9 +735,9 @@ impl App {
                 if let Some(p) = path {
                     let fav = self.ratings.toggle_favorite(&p);
                     self.set_info(if fav {
-                        "Added to favorites ♥"
+                        lang.text("Added to favorites ♥", "Adicionada aos favoritos ♥")
                     } else {
-                        "Removed from favorites"
+                        lang.text("Removed from favorites", "Removida dos favoritos")
                     });
                 }
             }
@@ -665,17 +745,20 @@ impl App {
             Action::RadioBrowser => {
                 self.view_mode = ViewMode::Radio;
                 self.focus = Pane::Library;
-                self.set_info("📻 Radio Mode — Tab switch pane · Enter play · / search");
+                self.set_info(lang.text(
+                    "📻 Radio Mode — Tab switch pane · Enter play · / search",
+                    "📻 Modo Rádio — Tab alternar painel · Enter tocar · / buscar",
+                ));
             }
             Action::SelfUpdate => self.handle_self_update(),
             Action::ViewLibrary => {
                 self.view_mode = ViewMode::Flat;
                 self.focus = Pane::Library;
-                self.set_info("View: Library (1)");
+                self.set_info(lang.text("View: Library (1)", "Visão: Biblioteca (1)"));
             }
             Action::ViewQueue => {
                 self.focus = Pane::Queue;
-                self.set_info("Focus: Queue (2)");
+                self.set_info(lang.text("Focus: Queue (2)", "Foco: Fila (2)"));
             }
             Action::ViewRadio => {
                 self.view_mode = ViewMode::Radio;
@@ -687,12 +770,18 @@ impl App {
                 if self.radio_search_results.is_empty() && self.radio_search_rx.is_none() {
                     self.trigger_radio_category_fetch(cat);
                 }
-                self.set_info("📻 Radio Mode (3) — Tab switch pane · Enter play · / search");
+                self.set_info(lang.text(
+                    "📻 Radio Mode (3) — Tab switch pane · Enter play · / search",
+                    "📻 Modo Rádio (3) — Tab alternar painel · Enter tocar · / buscar",
+                ));
             }
             Action::ViewBrowser => {
                 self.view_mode = ViewMode::Browser;
                 self.focus = Pane::Library;
-                self.set_info("View: Folders Browser (4)");
+                self.set_info(lang.text(
+                    "View: Folders Browser (4)",
+                    "Visão: Explorador de Pastas (4)",
+                ));
             }
             Action::ShowLyrics => {
                 self.show_lyrics = !self.show_lyrics;
@@ -732,12 +821,14 @@ impl App {
             }
             Action::ToggleEndlessMode => {
                 self.endless_mode = !self.endless_mode;
-                self.set_info(format!(
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Endless Mode (Auto-Play): {}",
                     "Modo Infinito (Auto-Play): {}",
                     if self.endless_mode {
-                        "Ativado (♾️)"
+                        lang.text("Enabled (♾️)", "Ativado (♾️)")
                     } else {
-                        "Desativado"
+                        lang.text("Disabled", "Desativado")
                     }
                 ));
             }
@@ -794,6 +885,7 @@ impl App {
     }
 
     pub(crate) fn execute_palette_action(&mut self, action: crate::app::types::PaletteAction) {
+        let lang = self.config.ui.language;
         use crate::app::types::PaletteAction;
         match action {
             PaletteAction::Execute(act) => self.run_action(act),
@@ -803,7 +895,12 @@ impl App {
             PaletteAction::SetViewMode(mode) => {
                 self.view_mode = mode;
                 self.focus = Pane::Library;
-                self.set_info(format!("View: {}", mode.label()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "View: {}",
+                    "Visão: {}",
+                    mode.localized_label(self.config.ui.language)
+                ));
             }
             PaletteAction::PluginCommand(id) => {
                 if let Some(engine) = &self.plugins {
@@ -816,30 +913,52 @@ impl App {
     }
 
     pub(crate) fn apply_theme_by_name(&mut self, name: &str) {
+        let lang = self.config.ui.language;
         match crate::theme::Theme::load(name) {
             Ok(t) => {
                 self.theme = t;
                 self.config.theme = name.to_string();
                 if let Err(error) = self.config.save() {
-                    self.set_error(format!("Tema aplicado, mas não salvo: {error}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Theme applied, but not saved: {error}",
+                        "Tema aplicado, mas não salvo: {error}"
+                    ));
                 } else {
-                    self.set_info(format!("Tema aplicado: 🎨 {name}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Theme applied: 🎨 {name}",
+                        "Tema aplicado: 🎨 {name}"
+                    ));
                 }
             }
-            Err(e) => self.set_error(format!("Erro ao carregar tema {name}: {e}")),
+            Err(e) => self.set_error(crate::localized_format!(
+                lang,
+                "Error loading theme {name}: {e}",
+                "Erro ao carregar tema {name}: {e}"
+            )),
         }
     }
 
     pub(crate) fn apply_eq_preset_by_idx(&mut self, idx: usize) {
+        let lang = self.config.ui.language;
         let presets = crate::eq::PRESETS;
         if let Some((name, state)) = presets.get(idx) {
             self.eq_preset_idx = idx;
             self.player.eq().set(*state);
             self.config.playback.eq_preset = name.to_string();
             if let Err(error) = self.config.save() {
-                self.set_error(format!("Equalizador alterado, mas não salvo: {error}"));
+                self.set_error(crate::localized_format!(
+                    lang,
+                    "Equalizer changed, but not saved: {error}",
+                    "Equalizador alterado, mas não salvo: {error}"
+                ));
             } else {
-                self.set_info(format!("Equalizador: 🎚️ {name}"));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Equalizer: 🎚️ {name}",
+                    "Equalizador: 🎚️ {name}"
+                ));
             }
         }
     }
@@ -859,6 +978,7 @@ impl App {
     }
 
     pub(crate) fn update_command_palette_matches(&mut self) {
+        let lang = self.config.ui.language;
         use crate::app::types::{PaletteAction, PaletteCategory, PaletteItem};
 
         let raw_query = self.command_palette_input.trim();
@@ -886,38 +1006,47 @@ impl App {
         let views = [
             (
                 "view-library",
-                "Visão: Biblioteca Flat",
-                "Ver lista completa de músicas",
+                lang.text("View: Flat Library", "Visão: Biblioteca Flat"),
+                lang.text("Show all tracks", "Ver lista completa de músicas"),
                 ViewMode::Flat,
             ),
             (
                 "view-albums",
-                "Visão: Por Álbuns",
-                "Ver biblioteca agrupada por álbum",
+                lang.text("View: Albums", "Visão: Por Álbuns"),
+                lang.text(
+                    "Show library grouped by album",
+                    "Ver biblioteca agrupada por álbum",
+                ),
                 ViewMode::Albums,
             ),
             (
                 "view-smart",
-                "Visão: Playlists Inteligentes",
-                "Mais tocadas, favoritas e recentes",
+                lang.text("View: Smart Playlists", "Visão: Playlists Inteligentes"),
+                lang.text(
+                    "Most played, favorites and recent",
+                    "Mais tocadas, favoritas e recentes",
+                ),
                 ViewMode::Smart,
             ),
             (
                 "view-browser",
-                "Visão: Explorador de Pastas",
-                "Navegar no sistema de arquivos",
+                lang.text("View: Folder Browser", "Visão: Explorador de Pastas"),
+                lang.text("Browse the filesystem", "Navegar no sistema de arquivos"),
                 ViewMode::Browser,
             ),
             (
                 "view-radio",
-                "Visão: Hub de Rádios",
-                "Painel dedicado para estações online",
+                lang.text("View: Radio Hub", "Visão: Hub de Rádios"),
+                lang.text(
+                    "Dedicated panel for online stations",
+                    "Painel dedicado para estações online",
+                ),
                 ViewMode::Radio,
             ),
             (
                 "view-recent",
-                "Visão: Tocadas Recentemente",
-                "Histórico de reprodução",
+                lang.text("View: Recently Played", "Visão: Tocadas Recentemente"),
+                lang.text("Playback history", "Histórico de reprodução"),
                 ViewMode::RecentlyPlayed,
             ),
         ];
@@ -935,8 +1064,10 @@ impl App {
         for t in crate::theme::Theme::available_names() {
             items.push(PaletteItem {
                 id: format!("theme-{t}"),
-                title: format!("Tema: {t}"),
-                description: "Aplicar tema visual".to_string(),
+                title: crate::localized_format!(lang, "Theme: {t}", "Tema: {t}"),
+                description: lang
+                    .text("Apply visual theme", "Aplicar tema visual")
+                    .to_string(),
                 category: PaletteCategory::Theme,
                 action: PaletteAction::SetTheme(t),
             });
@@ -946,8 +1077,14 @@ impl App {
         for (i, (name, st)) in crate::eq::PRESETS.iter().enumerate() {
             items.push(PaletteItem {
                 id: format!("eq-{name}"),
-                title: format!("EQ Preset: {name}"),
-                description: format!(
+                title: crate::localized_format!(
+                    lang,
+                    "EQ Preset: {name}",
+                    "Predefinição EQ: {name}"
+                ),
+                description: crate::localized_format!(
+                    lang,
+                    "Low {:+.0}dB · Mid {:+.0}dB · High {:+.0}dB",
                     "Graves {:+.0}dB · Médios {:+.0}dB · Agudos {:+.0}dB",
                     st.low_db(),
                     st.mid_db(),
@@ -1014,7 +1151,9 @@ impl App {
                     .unwrap_or_else(|| "--:--".into());
                 let desc = format!(
                     "{} • {}",
-                    t.album.as_deref().unwrap_or("Sem Álbum"),
+                    t.album
+                        .as_deref()
+                        .unwrap_or(lang.text("No Album", "Sem Álbum")),
                     dur_str
                 );
                 items.push(PaletteItem {
@@ -1049,7 +1188,9 @@ impl App {
                 .filter_map(|item| {
                     let score_title = fuzzy_score(query, &item.title);
                     let score_desc = fuzzy_score(query, &item.description).map(|s| s / 2);
-                    let best = score_title.max(score_desc);
+                    // Stable IDs such as :language work regardless of the translated title.
+                    let score_id = fuzzy_score(query, &item.id);
+                    let best = score_title.max(score_desc).max(score_id);
                     best.map(|s| (s, item))
                 })
                 .collect();
@@ -1107,6 +1248,7 @@ impl App {
     }
 
     pub(crate) fn handle_radio_browser_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         if self.radio_search_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1206,9 +1348,19 @@ impl App {
                     let p = std::path::PathBuf::from(&st.url);
                     let fav = self.ratings.toggle_favorite(&p);
                     self.set_info(if fav {
-                        format!("Rádio favoritada: {} ♥", st.name)
+                        crate::localized_format!(
+                            lang,
+                            "Station favorited: {} ♥",
+                            "Rádio favoritada: {} ♥",
+                            st.name
+                        )
                     } else {
-                        format!("Rádio removida dos favoritos: {}", st.name)
+                        crate::localized_format!(
+                            lang,
+                            "Station removed from favorites: {}",
+                            "Rádio removida dos favoritos: {}",
+                            st.name
+                        )
                     });
                 }
             }
@@ -1259,6 +1411,7 @@ impl App {
     }
 
     pub(crate) fn handle_device_selector_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         match key.code {
             KeyCode::Esc | KeyCode::Char('D') => {
                 self.show_device_selector = false;
@@ -1275,8 +1428,16 @@ impl App {
                 self.show_device_selector = false;
                 if let Some(name) = self.device_list.get(self.device_selector_row).cloned() {
                     match self.player.switch_device(&name) {
-                        Ok(_) => self.set_info(format!("Output device: {name}")),
-                        Err(e) => self.set_info(format!("Device error: {e}")),
+                        Ok(_) => self.set_info(crate::localized_format!(
+                            lang,
+                            "Output device: {name}",
+                            "Dispositivo de saída: {name}"
+                        )),
+                        Err(e) => self.set_info(crate::localized_format!(
+                            lang,
+                            "Device error: {e}",
+                            "Erro no dispositivo: {e}"
+                        )),
                     }
                 }
             }
@@ -1285,6 +1446,7 @@ impl App {
     }
 
     pub(crate) fn handle_eq_tuner_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
             self.eq_preset_name_editing = true;
             self.eq_preset_name_input.clear();
@@ -1314,7 +1476,7 @@ impl App {
             }
             KeyCode::Char('r') => {
                 eq.set(crate::eq::EqState::default());
-                self.set_info("Equalizador: Flat (0 dB)");
+                self.set_info(lang.text("Equalizer: Flat (0 dB)", "Equalizador: Flat (0 dB)"));
             }
             KeyCode::Char('0') => {
                 let snap = eq.snapshot();
@@ -1339,13 +1501,19 @@ impl App {
                     .map(|i| (i + 1) % all.len())
                     .unwrap_or(0);
                 eq.set(all[next].1);
-                self.set_info(format!("EQ Preset: 🎚️ {}", all[next].0));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "EQ Preset: 🎚️ {}",
+                    "Predefinição EQ: 🎚️ {}",
+                    all[next].0
+                ));
             }
             _ => {}
         }
     }
 
     pub(crate) fn handle_playlist_browser_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         match key.code {
             KeyCode::Esc => {
                 self.show_playlist_browser = false;
@@ -1376,7 +1544,12 @@ impl App {
                             self.playlist_browser_entries.remove(row);
                             self.playlist_browser_row =
                                 row.min(self.playlist_browser_entries.len().saturating_sub(1));
-                            self.set_info(format!("Deleted: {}", entry.name));
+                            self.set_info(crate::localized_format!(
+                                lang,
+                                "Deleted: {}",
+                                "Excluído: {}",
+                                entry.name
+                            ));
                             if self.active_playlist_name.as_deref() == Some(&entry.name) {
                                 self.active_playlist_name = None;
                             }
@@ -1388,7 +1561,10 @@ impl App {
                     }
                 } else {
                     self.playlist_browser_delete_confirm = Some(row);
-                    self.set_info("Press Shift+D again to confirm deletion.");
+                    self.set_info(lang.text(
+                        "Press Shift+D again to confirm deletion.",
+                        "Pressione Shift+D novamente para confirmar a exclusão.",
+                    ));
                 }
             }
             _ => {}
@@ -1396,6 +1572,7 @@ impl App {
     }
 
     pub(crate) fn handle_profile_browser_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.show_profile_browser = false;
@@ -1417,7 +1594,10 @@ impl App {
                 self.show_profile_browser = false;
                 self.profile_name_editing = true;
                 self.profile_name_input.clear();
-                self.set_info("Profile name (Enter to save, Esc to cancel):");
+                self.set_info(lang.text(
+                    "Profile name (Enter to save, Esc to cancel):",
+                    "Nome do perfil (Enter para salvar, Esc para cancelar):",
+                ));
             }
             KeyCode::Char('D') if self.profile_browser_row < self.profiles.len() => {
                 let mut profiles = self.profiles.clone();
@@ -1431,10 +1611,19 @@ impl App {
                         if self.profile_browser_row > 0 {
                             self.profile_browser_row -= 1;
                         }
-                        self.set_info(format!("Profile '{}' deleted.", removed.name));
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "Profile '{}' deleted.",
+                            "Perfil '{}' excluído.",
+                            removed.name
+                        ));
                     }
                     Err(error) => {
-                        self.set_error(format!("Could not delete profile: {error}"));
+                        self.set_error(crate::localized_format!(
+                            lang,
+                            "Could not delete profile: {error}",
+                            "Não foi possível excluir o perfil: {error}"
+                        ));
                     }
                 }
             }
@@ -1443,6 +1632,7 @@ impl App {
     }
 
     pub(crate) fn handle_spotify_browser_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         if self.spotify_browser_query_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1560,7 +1750,7 @@ impl App {
                         .cloned()
                     {
                         self.queue.push(t);
-                        self.set_info("Added to queue.");
+                        self.set_info(lang.text("Added to queue.", "Adicionada à fila."));
                     }
                 }
             },
@@ -1569,6 +1759,7 @@ impl App {
     }
 
     pub(crate) fn handle_vault_browser_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         if self.vault_query_editing {
             match key.code {
                 KeyCode::Esc => {
@@ -1622,7 +1813,10 @@ impl App {
             KeyCode::Char('a') => {
                 if let Some(track) = self.vault_results.get(self.vault_row).cloned() {
                     self.queue.push(track);
-                    self.set_info("Faixa do Vault adicionada à fila.");
+                    self.set_info(lang.text(
+                        "Vault track added to queue.",
+                        "Faixa do Vault adicionada à fila.",
+                    ));
                 }
             }
             _ => {}
@@ -1733,6 +1927,7 @@ impl App {
     }
 
     pub(crate) fn handle_subsonic_browser_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         use crate::app::types::SubsonicTab;
         if self.subsonic_browser_query_editing {
             match key.code {
@@ -1847,7 +2042,9 @@ impl App {
                         .cloned()
                     {
                         self.queue.push(track);
-                        self.set_info("Faixa adicionada à fila.");
+                        self.set_info(
+                            lang.text("Track added to queue.", "Faixa adicionada à fila."),
+                        );
                     }
                 }
                 _ => {}
@@ -1857,6 +2054,7 @@ impl App {
     }
 
     pub(crate) fn handle_lyrics_key(&mut self, key: KeyEvent) {
+        let lang = self.config.ui.language;
         match key.code {
             KeyCode::Esc | KeyCode::Char('y') | KeyCode::Char('q') => {
                 self.show_lyrics = false;
@@ -1877,12 +2075,17 @@ impl App {
             }
             KeyCode::Char('c') | KeyCode::Char('a') => {
                 self.lyrics_auto_scroll = true;
-                self.set_info("Karaoke: auto-scroll ativado");
+                self.set_info(lang.text(
+                    "Karaoke: auto-scroll enabled",
+                    "Karaoke: auto-scroll ativado",
+                ));
             }
             KeyCode::Char('r') => {
                 if let Some(track) = self.player.current().cloned() {
                     self.spawn_lyrics_fetch(&track);
-                    self.set_info("Buscando letras no LRCLIB…");
+                    self.set_info(
+                        lang.text("Searching LRCLIB for lyrics…", "Buscando letras no LRCLIB…"),
+                    );
                 }
             }
             KeyCode::Enter => {
@@ -1893,7 +2096,12 @@ impl App {
                 if let Some(dur) = target_dur {
                     self.seek_to_async(dur);
                     self.lyrics_auto_scroll = true;
-                    self.set_info(format!("Letra: saltou para {}", format_duration(dur)));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Lyrics: jumped to {}",
+                        "Letra: saltou para {}",
+                        format_duration(dur)
+                    ));
                 }
             }
             _ => {}
@@ -1901,6 +2109,7 @@ impl App {
     }
 
     pub(crate) fn on_mouse(&mut self, m: MouseEvent) {
+        let lang = self.config.ui.language;
         if self.url_editing || self.url_rx.is_some() {
             return;
         }
@@ -1994,7 +2203,11 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 if let Some(frac) = self.pending_drag_seek.take() {
                     if let Err(e) = self.seek_fraction_async(frac) {
-                        self.set_info(format!("Seek error: {e}"));
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "Seek error: {e}",
+                            "Erro ao alterar posição: {e}"
+                        ));
                     }
                 }
             }
@@ -2020,6 +2233,7 @@ impl App {
     }
 
     pub(crate) fn handle_click(&mut self, x: u16, y: u16) {
+        let lang = self.config.ui.language;
         let lib = self.layout.library;
         let q = self.layout.queue;
         let prog = self.layout.progress;
@@ -2077,7 +2291,11 @@ impl App {
         if rect_contains(prog, x, y) && prog.width > 0 {
             let frac = progress_fraction(prog, x);
             if let Err(e) = self.seek_fraction_async(frac) {
-                self.set_info(format!("Seek error: {e}"));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Seek error: {e}",
+                    "Erro ao alterar posição: {e}"
+                ));
             }
         }
     }

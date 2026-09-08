@@ -56,19 +56,21 @@ impl RadioCategory {
         RadioCategory::Search,
     ];
 
-    pub fn label(&self) -> &'static str {
+    pub fn localized_label(&self, language: crate::i18n::Language) -> &'static str {
         match self {
-            RadioCategory::TopVoted => "🔥 Top 100 Globais",
+            RadioCategory::TopVoted => language.text("🔥 Global Top 100", "🔥 Top 100 Globais"),
             RadioCategory::Lofi => "☕ Lo-Fi & Beats",
             RadioCategory::Rock => "🎸 Rock & Metal",
             RadioCategory::Jazz => "🎷 Jazz & Blues",
             RadioCategory::Synthwave => "⚡ Synthwave & Retrowave",
-            RadioCategory::Brazil => "🇧🇷 Brasil & MPB",
-            RadioCategory::Classical => "🎻 Clássica & Piano",
-            RadioCategory::Curated => "★ Seleção Manual",
-            RadioCategory::Custom => "✨ Minhas Rádios",
-            RadioCategory::Favorites => "♥ Favoritas",
-            RadioCategory::Search => "🔍 Busca Livre (+45k)",
+            RadioCategory::Brazil => language.text("🇧🇷 Brazil & MPB", "🇧🇷 Brasil & MPB"),
+            RadioCategory::Classical => {
+                language.text("🎻 Classical & Piano", "🎻 Clássica & Piano")
+            }
+            RadioCategory::Curated => language.text("★ Curated", "★ Seleção Manual"),
+            RadioCategory::Custom => language.text("✨ My Stations", "✨ Minhas Rádios"),
+            RadioCategory::Favorites => language.text("♥ Favorites", "♥ Favoritas"),
+            RadioCategory::Search => language.text("🔍 Search (+45k)", "🔍 Busca Livre (+45k)"),
         }
     }
 }

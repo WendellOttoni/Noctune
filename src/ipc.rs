@@ -127,21 +127,36 @@ impl IpcClient {
             DEFAULT_IPC_PORT
         };
 
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
-            .map_err(|e| format!("Could not connect to Noctune instance on port {port}: {e}"))?;
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).map_err(|e| {
+            crate::localized_format!(
+                crate::i18n::Language::configured(),
+                "Could not connect to Noctune instance on port {port}: {e}",
+                "Não foi possível conectar ao Noctune na porta {port}: {e}"
+            )
+        })?;
 
         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
 
         stream
             .write_all(format!("{cmd}\n").as_bytes())
-            .map_err(|e| format!("Failed to send command: {e}"))?;
+            .map_err(|e| {
+                crate::localized_format!(
+                    crate::i18n::Language::configured(),
+                    "Failed to send command: {e}",
+                    "Falha ao enviar comando: {e}"
+                )
+            })?;
 
         let mut reader = BufReader::new(stream);
         let mut response = String::new();
-        reader
-            .read_line(&mut response)
-            .map_err(|e| format!("Failed to read response: {e}"))?;
+        reader.read_line(&mut response).map_err(|e| {
+            crate::localized_format!(
+                crate::i18n::Language::configured(),
+                "Failed to read response: {e}",
+                "Falha ao ler resposta: {e}"
+            )
+        })?;
 
         Ok(response.trim().to_string())
     }

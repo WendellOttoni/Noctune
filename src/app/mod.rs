@@ -267,13 +267,14 @@ impl App {
     }
 
     pub(crate) fn toggle_sleep_timer(&mut self) {
+        let lang = self.config.ui.language;
         if self.sleep_until.is_some() {
             self.sleep_until = None;
-            self.set_info("Sleep timer cancelled.");
+            self.set_info(lang.text("Sleep timer cancelled.", "Temporizador de sono cancelado."));
         } else {
             let when = std::time::Instant::now() + Duration::from_secs(30 * 60);
             self.sleep_until = Some(when);
-            self.set_info("Sleep timer: 30 min.");
+            self.set_info(lang.text("Sleep timer: 30 min.", "Temporizador de sono: 30 min."));
         }
     }
 
@@ -294,6 +295,7 @@ impl App {
     }
 
     pub fn new(config: Config, theme: Theme, art_picker: ArtPicker) -> Result<Self> {
+        let lang = config.ui.language;
         crate::ytdlp::configure_retries(config.ytdlp.clone());
         crate::audio_cache::configure(config.cache.clone());
         let history_cfg = config.history.clone();
@@ -397,7 +399,9 @@ impl App {
             queue_state: ListState::default(),
             focus: Pane::Library,
             queue_index: None,
-            status: "Scanning library…".into(),
+            status: lang
+                .text("Scanning library…", "Buscando músicas na biblioteca…")
+                .into(),
             status_kind: StatusKind::Info,
             should_quit: false,
             search: String::new(),
@@ -670,6 +674,7 @@ impl App {
     }
 
     fn tick(&mut self) -> Result<()> {
+        let lang = self.config.ui.language;
         self.tick_count = self.tick_count.wrapping_add(1);
 
         crate::media_session::pump_messages();
@@ -686,11 +691,19 @@ impl App {
                     let n = tracks.len();
                     self.spotify_browser_results = tracks;
                     self.spotify_browser_row = 0;
-                    self.set_info(format!("Spotify: {n} results."));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Spotify: {n} results.",
+                        "Spotify: {n} resultados."
+                    ));
                     self.spotify_search_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Spotify: search failed — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Spotify: search failed — {e}",
+                        "Spotify: falha na busca — {e}"
+                    ));
                     self.spotify_search_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -721,25 +734,41 @@ impl App {
                             let n = tracks.len();
                             self.subsonic_browser_results = tracks;
                             self.subsonic_browser_row = 0;
-                            self.set_info(format!("Subsonic: {n} faixa(s) encontradas."));
+                            self.set_info(crate::localized_format!(
+                                lang,
+                                "Subsonic: {n} track(s) found.",
+                                "Subsonic: {n} faixa(s) encontradas."
+                            ));
                         }
                         crate::subsonic::SubsonicFetchResult::Albums(albums) => {
                             let n = albums.len();
                             self.subsonic_browser_albums = albums;
                             self.subsonic_browser_row = 0;
-                            self.set_info(format!("Subsonic: {n} álbum(ns) carregados."));
+                            self.set_info(crate::localized_format!(
+                                lang,
+                                "Subsonic: {n} album(s) loaded.",
+                                "Subsonic: {n} álbum(ns) carregados."
+                            ));
                         }
                         crate::subsonic::SubsonicFetchResult::Playlists(playlists) => {
                             let n = playlists.len();
                             self.subsonic_browser_playlists = playlists;
                             self.subsonic_browser_row = 0;
-                            self.set_info(format!("Subsonic: {n} playlist(s) carregadas."));
+                            self.set_info(crate::localized_format!(
+                                lang,
+                                "Subsonic: {n} playlist(s) loaded.",
+                                "Subsonic: {n} playlist(s) carregadas."
+                            ));
                         }
                     }
                     self.subsonic_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Subsonic: erro — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Subsonic: error — {e}",
+                        "Subsonic: erro — {e}"
+                    ));
                     self.subsonic_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -755,11 +784,19 @@ impl App {
                     let n = tracks.len();
                     self.vault_results = tracks;
                     self.vault_row = 0;
-                    self.set_info(format!("Cloud Vault: {n} faixa(s) encontradas."));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Cloud Vault: {n} track(s) found.",
+                        "Cloud Vault: {n} faixa(s) encontradas."
+                    ));
                     self.vault_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Cloud Vault: erro — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Cloud Vault: error — {e}",
+                        "Cloud Vault: erro — {e}"
+                    ));
                     self.vault_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -775,11 +812,19 @@ impl App {
                     let n = items.len();
                     self.browse_results = items;
                     self.browse_row = 0;
-                    self.set_info(format!("Descoberta: {n} playlist(s) públicas encontradas."));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Discovery: {n} public playlist(s) found.",
+                        "Descoberta: {n} playlist(s) públicas encontradas."
+                    ));
                     self.browse_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Descoberta: erro — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Discovery: error — {e}",
+                        "Descoberta: erro — {e}"
+                    ));
                     self.browse_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -792,12 +837,20 @@ impl App {
         if let Some(rx) = &self.share_publish_rx {
             match rx.try_recv() {
                 Ok(Ok(id)) => {
-                    self.set_info(format!("Playlist publicada com sucesso! ID: {id}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Playlist published successfully! ID: {id}",
+                        "Playlist publicada com sucesso! ID: {id}"
+                    ));
                     self.show_share_modal = false;
                     self.share_publish_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Publicação: erro — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Publishing: error — {e}",
+                        "Publicação: erro — {e}"
+                    ));
                     self.share_publish_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -816,19 +869,27 @@ impl App {
                     if was_empty {
                         self.queue_state.select(Some(0));
                     }
-                    self.set_info(format!("Added {n} track(s) to queue."));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Added {n} track(s) to queue.",
+                        "{n} faixa(s) adicionadas à fila."
+                    ));
                     self.url_rx = None;
                     self.url_input.clear();
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Playlist: load failed — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Playlist: load failed — {e}",
+                        "Playlist: falha ao carregar — {e}"
+                    ));
                     self.url_rx = None;
                     self.url_input.clear();
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.set_error(
-                        "yt-dlp: worker disconnected — check yt-dlp install (see README)",
+                        lang.text("yt-dlp: worker disconnected — check yt-dlp install (see README)", "yt-dlp: processo desconectado — confira a instalação do yt-dlp (veja README)"),
                     );
                     self.url_rx = None;
                     self.url_input.clear();
@@ -851,12 +912,21 @@ impl App {
                         {
                             Ok(_) => {
                                 if seek_offset.is_some() {
-                                    self.set_info(format!("Playing: {}", t.display()));
+                                    self.set_info(crate::localized_format!(
+                                        lang,
+                                        "Playing: {}",
+                                        "Tocando: {}",
+                                        t.display()
+                                    ));
                                 } else {
                                     self.on_track_started(t);
                                 }
                             }
-                            Err(e) => self.set_error(format!("Playback: {e}")),
+                            Err(e) => self.set_error(crate::localized_format!(
+                                lang,
+                                "Playback: {e}",
+                                "Reprodução: {e}"
+                            )),
                         }
                     }
                 }
@@ -873,10 +943,16 @@ impl App {
                         self.load_rx = None;
                         self.loading_track = None;
                         self.pending_seek_offset = None;
-                        self.set_error(format!("Seek: {e}"));
+                        self.set_error(crate::localized_format!(
+                            lang,
+                            "Seek: {e}",
+                            "Avanço/retrocesso: {e}"
+                        ));
                     } else if is_stream && self.stream_reconnect_attempts < 3 {
                         self.stream_reconnect_attempts += 1;
-                        self.set_info(format!(
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "⏳ Radio connection unstable. Reconnecting ({}/3)…",
                             "⏳ Conexão com a rádio oscilou. Reconectando ({}/3)…",
                             self.stream_reconnect_attempts
                         ));
@@ -887,7 +963,11 @@ impl App {
                     } else {
                         self.stream_reconnect_attempts = 0;
                         self.stop_playback();
-                        self.set_error(format!("Playlist/Stream: falha ao carregar — {e}"));
+                        self.set_error(crate::localized_format!(
+                            lang,
+                            "Playlist/Stream: failed to load — {e}",
+                            "Playlist/Stream: falha ao carregar — {e}"
+                        ));
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -897,10 +977,16 @@ impl App {
                     self.loading_track = None;
                     self.pending_seek_offset = None;
                     if was_seek {
-                        self.set_error("Seek loader disconnected.");
+                        self.set_error(lang.text(
+                            "Seek loader disconnected.",
+                            "Carregador de avanço/retrocesso desconectado.",
+                        ));
                     } else {
                         self.stop_playback();
-                        self.set_error("Playback loader disconnected.");
+                        self.set_error(lang.text(
+                            "Playback loader disconnected.",
+                            "Carregador de reprodução desconectado.",
+                        ));
                     }
                 }
             }
@@ -955,11 +1041,19 @@ impl App {
                     let n = stations.len();
                     self.radio_search_results = stations;
                     self.radio_row = 0;
-                    self.set_info(format!("Radio: found {n} stations."));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Radio: found {n} stations.",
+                        "Rádio: {n} estações encontradas."
+                    ));
                     self.radio_search_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Radio search error: {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Radio search error: {e}",
+                        "Erro na busca de rádios: {e}"
+                    ));
                     self.radio_search_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -972,8 +1066,10 @@ impl App {
         if let Some(rx) = &self.update_check_rx {
             match rx.try_recv() {
                 Ok(Ok(Some(info))) => {
-                    self.set_info(format!(
+                    self.set_info(crate::localized_format!(
+                        lang,
                         "✨ Update v{} available! Press Shift+U to update.",
+                        "✨ Atualização v{} disponível! Pressione Shift+U para atualizar.",
                         info.latest_version
                     ));
                     self.update_info = Some(info);
@@ -997,13 +1093,20 @@ impl App {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     self.is_updating = false;
-                    self.set_info("✅ Noctune updated successfully! Restart the app to apply.");
+                    self.set_info(lang.text(
+                        "✅ Noctune updated successfully! Restart the app to apply.",
+                        "✅ Noctune atualizado com sucesso! Reinicie o app para aplicar.",
+                    ));
                     self.update_info = None;
                     self.update_apply_rx = None;
                 }
                 Ok(Err(e)) => {
                     self.is_updating = false;
-                    self.set_error(format!("Update failed: {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Update failed: {e}",
+                        "Falha na atualização: {e}"
+                    ));
                     self.update_apply_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -1066,7 +1169,12 @@ impl App {
                         current.duration,
                     );
                 }
-                self.set_info(format!("Radio: {}", current.display()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Radio: {}",
+                    "Rádio: {}",
+                    current.display()
+                ));
             }
         }
 
@@ -1103,7 +1211,7 @@ impl App {
                     self.lastfm_panel_recent = recent;
                     self.lastfm_panel_top_artists = top;
                     self.lastfm_panel_rx = None;
-                    self.set_info("Last.fm: ready.");
+                    self.set_info(lang.text("Last.fm: ready.", "Last.fm: pronto."));
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -1119,7 +1227,11 @@ impl App {
                         let lrc_path = track_path.with_extension("lrc");
                         if !lrc_path.exists() {
                             if let Err(error) = lyrics.save_to_file(&lrc_path) {
-                                self.set_error(format!("Could not save lyrics: {error}"));
+                                self.set_error(crate::localized_format!(
+                                    lang,
+                                    "Could not save lyrics: {error}",
+                                    "Não foi possível salvar a letra: {error}"
+                                ));
                             }
                         }
                     }
@@ -1200,11 +1312,19 @@ impl App {
                         let _ = db.sync_tracks(&[track]);
                     }
                     self.library_revision = self.library_revision.wrapping_add(1);
-                    self.set_info(format!("💾 Download concluído e salvo: {file_name}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "💾 Download completed and saved: {file_name}",
+                        "💾 Download concluído e salvo: {file_name}"
+                    ));
                     self.download_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Falha no download: {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Download failed: {e}",
+                        "Falha no download: {e}"
+                    ));
                     self.download_rx = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -1228,22 +1348,22 @@ impl App {
                     if self.player.is_paused() {
                         self.player.toggle();
                     }
-                    "OK: Playing".to_string()
+                    lang.text("OK: Playing", "OK: Tocando").to_string()
                 }
                 C::Pause => {
                     if !self.player.is_paused() {
                         self.player.toggle();
                     }
-                    "OK: Paused".to_string()
+                    lang.text("OK: Paused", "OK: Pausado").to_string()
                 }
                 C::Toggle => {
                     self.player.toggle();
                     format!(
                         "OK: {}",
                         if self.player.is_paused() {
-                            "Paused"
+                            lang.text("Paused", "Pausado")
                         } else {
-                            "Playing"
+                            lang.text("Playing", "Tocando")
                         }
                     )
                 }
@@ -1253,8 +1373,12 @@ impl App {
                         .player
                         .current()
                         .map(|t| t.title.clone())
-                        .unwrap_or_else(|| "None".into());
-                    format!("OK: Next track -> {title}")
+                        .unwrap_or_else(|| lang.text("None", "Nenhuma").into());
+                    crate::localized_format!(
+                        lang,
+                        "OK: Next track -> {title}",
+                        "OK: Próxima faixa -> {title}"
+                    )
                 }
                 C::Prev => {
                     self.prev();
@@ -1262,12 +1386,16 @@ impl App {
                         .player
                         .current()
                         .map(|t| t.title.clone())
-                        .unwrap_or_else(|| "None".into());
-                    format!("OK: Prev track -> {title}")
+                        .unwrap_or_else(|| lang.text("None", "Nenhuma").into());
+                    crate::localized_format!(
+                        lang,
+                        "OK: Prev track -> {title}",
+                        "OK: Faixa anterior -> {title}"
+                    )
                 }
                 C::Stop => {
                     self.stop_playback();
-                    "OK: Stopped".to_string()
+                    lang.text("OK: Stopped", "OK: Parado").to_string()
                 }
                 C::Volume(arg) => {
                     let cur_vol = self.player.volume();
@@ -1290,23 +1418,30 @@ impl App {
                         self.player.set_volume(target);
                         format!("Volume: {:.0}%", self.player.volume() * 100.0)
                     } else {
-                        "ERROR: Invalid volume argument".to_string()
+                        lang.text(
+                            "ERROR: Invalid volume argument",
+                            "ERROR: Argumento de volume inválido",
+                        )
+                        .to_string()
                     }
                 }
                 C::Status => {
                     let cur_vol = self.player.volume();
                     if let Some(t) = self.player.current() {
                         let state = if self.player.is_paused() {
-                            "⏸ Paused"
+                            lang.text("⏸ Paused", "⏸ Pausado")
                         } else {
-                            "▶ Playing"
+                            lang.text("▶ Playing", "▶ Tocando")
                         };
                         let el = self.player.elapsed();
                         let dur_str = t
                             .duration
                             .map(|d| format!("{:02}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
                             .unwrap_or_else(|| "--:--".into());
-                        let artist = t.artist.as_deref().unwrap_or("Unknown Artist");
+                        let artist = t
+                            .artist
+                            .as_deref()
+                            .unwrap_or(lang.text("Unknown Artist", "Artista desconhecido"));
                         format!(
                             "{state}: {} - {} [{:02}:{:02}/{dur_str}] (Vol: {:.0}%)",
                             artist,
@@ -1316,7 +1451,11 @@ impl App {
                             cur_vol * 100.0
                         )
                     } else {
-                        "⏹ Stopped: No track playing".to_string()
+                        lang.text(
+                            "⏹ Stopped: No track playing",
+                            "⏹ Parado: Nenhuma faixa tocando",
+                        )
+                        .to_string()
                     }
                 }
                 C::StatusJson => {
@@ -1350,7 +1489,10 @@ impl App {
             if std::time::Instant::now() >= when {
                 self.stop_playback();
                 self.sleep_until = None;
-                self.set_info("Sleep timer reached — playback stopped.");
+                self.set_info(lang.text(
+                    "Sleep timer reached — playback stopped.",
+                    "Tempo de sono atingido — reprodução interrompida.",
+                ));
                 return Ok(());
             }
         }
@@ -1362,7 +1504,12 @@ impl App {
                     self.queue_state.select(Some(idx));
                     if let Some(t) = self.player.current().cloned() {
                         self.lyrics = crate::lyrics::Lyrics::for_track(&t.path);
-                        self.set_info(format!("Playing: {}", t.display()));
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "Playing: {}",
+                            "Tocando: {}",
+                            t.display()
+                        ));
                         self.on_track_started(t);
                     }
                 }
@@ -1442,12 +1589,20 @@ impl App {
                 Ok(Ok(mut tracks)) => {
                     let n = tracks.len();
                     self.queue.append(&mut tracks);
-                    self.set_info(format!("Radio: +{n} tracks."));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Radio: +{n} tracks.",
+                        "Rádio: +{n} faixas."
+                    ));
                     self.radio_mode.is_fetching = false;
                     self.radio_fetch_rx = None;
                 }
                 Ok(Err(e)) => {
-                    self.set_error(format!("Radio: fetch failed — {e}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Radio: fetch failed — {e}",
+                        "Rádio: falha ao buscar — {e}"
+                    ));
                     self.radio_mode.is_fetching = false;
                     self.radio_fetch_rx = None;
                 }
@@ -1487,7 +1642,9 @@ impl App {
                     && !self.player.is_paused()
                 {
                     self.stream_reconnect_attempts += 1;
-                    self.set_info(format!(
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "⏳ Radio signal interrupted. Reconnecting ({}/3)…",
                         "⏳ Sinal da rádio interrompido. Reconectando ({}/3)…",
                         self.stream_reconnect_attempts
                     ));

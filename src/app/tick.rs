@@ -6,6 +6,7 @@ use super::{util::sort_tracks, App};
 
 impl App {
     pub(crate) fn poll_service_events(&mut self) {
+        let lang = self.config.ui.language;
         while let Ok(event) = self.service_rx.try_recv() {
             match event {
                 crate::app::ServiceEvent::SpotifyLogin(result) => match result {
@@ -13,9 +14,15 @@ impl App {
                         self.spotify = Some(
                             api.with_legacy_playlists(self.config.spotify.legacy_playlist_api),
                         );
-                        self.set_info("Spotify login complete.");
+                        self.set_info(
+                            lang.text("Spotify login complete.", "Login do Spotify concluído."),
+                        );
                     }
-                    Err(error) => self.set_error(format!("Spotify login failed: {error}")),
+                    Err(error) => self.set_error(crate::localized_format!(
+                        lang,
+                        "Spotify login failed: {error}",
+                        "Falha no login do Spotify: {error}"
+                    )),
                 },
                 crate::app::ServiceEvent::SpotifyToggle(result) => match result {
                     Ok((api, message)) => {
@@ -40,25 +47,48 @@ impl App {
                         );
                         let _ = webbrowser::open(&url);
                         self.lastfm_pending_token = Some(token);
-                        self.set_info("Last.fm: authorize in browser, then press F again.");
+                        self.set_info(lang.text(
+                            "Last.fm: authorize in browser, then press F again.",
+                            "Last.fm: autorize no navegador e pressione F novamente.",
+                        ));
                     }
-                    Err(error) => self.set_error(format!("Last.fm token error: {error}")),
+                    Err(error) => self.set_error(crate::localized_format!(
+                        lang,
+                        "Last.fm token error: {error}",
+                        "Erro no token do Last.fm: {error}"
+                    )),
                 },
                 crate::app::ServiceEvent::LastfmSession(result) => match result {
                     Ok((client, username)) => {
                         self.lastfm = Some(client);
-                        self.set_info(format!("Last.fm connected as {username}."));
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "Last.fm connected as {username}.",
+                            "Last.fm conectado como {username}."
+                        ));
                     }
-                    Err(error) => self.set_error(format!("Last.fm auth error: {error}")),
+                    Err(error) => self.set_error(crate::localized_format!(
+                        lang,
+                        "Last.fm auth error: {error}",
+                        "Erro na autenticação do Last.fm: {error}"
+                    )),
                 },
                 crate::app::ServiceEvent::BrowseImport(result) => match result {
                     Ok(tracks) => {
                         let count = tracks.len();
                         self.queue.extend(tracks);
                         self.show_browse_modal = false;
-                        self.set_info(format!("Importadas {count} faixas para a fila!"));
+                        self.set_info(crate::localized_format!(
+                            lang,
+                            "Imported {count} tracks into the queue!",
+                            "Importadas {count} faixas para a fila!"
+                        ));
                     }
-                    Err(error) => self.set_error(format!("Erro ao importar playlist: {error}")),
+                    Err(error) => self.set_error(crate::localized_format!(
+                        lang,
+                        "Playlist import error: {error}",
+                        "Erro ao importar playlist: {error}"
+                    )),
                 },
                 crate::app::ServiceEvent::PlaylistLoaded {
                     result,
@@ -69,7 +99,11 @@ impl App {
                         let loaded = tracks.len();
                         self.push_undo_snapshot(format!(
                             "{} playlist '{}'",
-                            if append { "appended" } else { "loaded" },
+                            if append {
+                                lang.text("appended", "adicionou")
+                            } else {
+                                lang.text("loaded", "carregou")
+                            },
                             entry.name
                         ));
                         if !append {
@@ -96,9 +130,19 @@ impl App {
                         }
                         self.show_playlist_browser = false;
                         self.set_info(if append {
-                            format!("Appended {loaded} tracks from '{}'", entry.name)
+                            crate::localized_format!(
+                                lang,
+                                "Appended {loaded} tracks from '{}'",
+                                "Adicionadas {loaded} faixas de '{}'",
+                                entry.name
+                            )
                         } else {
-                            format!("Loaded {loaded} tracks from '{}'", entry.name)
+                            crate::localized_format!(
+                                lang,
+                                "Loaded {loaded} tracks from '{}'",
+                                "Carregadas {loaded} faixas de '{}'",
+                                entry.name
+                            )
                         });
                     }
                     Err(error) => self.set_error(error),
@@ -123,6 +167,7 @@ impl App {
     }
 
     pub(super) fn poll_library_scan(&mut self) {
+        let lang = self.config.ui.language;
         if let Some(receiver) = &self.scan_progress_rx {
             while let Ok(progress) = receiver.try_recv() {
                 self.scan_progress = Some(progress);
@@ -182,23 +227,41 @@ impl App {
                             removed_from_queue,
                         ) {
                             (0, 0) if previous_count > 0 => {
-                                format!("Library: {track_count} tracks (unchanged).")
+                                crate::localized_format!(
+                                    lang,
+                                    "Library: {track_count} tracks (unchanged).",
+                                    "Biblioteca: {track_count} faixas (sem alterações)."
+                                )
                             }
                             (difference, 0) if difference > 0 => {
-                                format!("Library: +{difference} → {track_count} tracks.")
+                                crate::localized_format!(
+                                    lang,
+                                    "Library: +{difference} → {track_count} tracks.",
+                                    "Biblioteca: +{difference} → {track_count} faixas."
+                                )
                             }
                             (difference, 0) if difference < 0 => {
-                                format!("Library: {difference} → {track_count} tracks.")
+                                crate::localized_format!(
+                                    lang,
+                                    "Library: {difference} → {track_count} tracks.",
+                                    "Biblioteca: {difference} → {track_count} faixas."
+                                )
                             }
-                            (_, removed) if removed > 0 => format!(
-                                "Library: {track_count} tracks ({removed} dropped from queue)."
+                            (_, removed) if removed > 0 => crate::localized_format!(
+                                lang,
+                                "Library: {track_count} tracks ({removed} dropped from queue).",
+                                "Biblioteca: {track_count} faixas ({removed} removidas da fila)."
                             ),
-                            _ => format!("Library: {track_count} tracks."),
+                            _ => crate::localized_format!(
+                                lang,
+                                "Library: {track_count} tracks.",
+                                "Biblioteca: {track_count} faixas."
+                            ),
                         },
                     );
                     self.scan_rx = None;
                     if !scan.unavailable_roots.is_empty() {
-                        self.set_error(format!("Library: {} root(s) unavailable; existing entries preserved. Reconnect and rescan.", scan.unavailable_roots.len()));
+                        self.set_error(crate::localized_format!(lang, "Library: {} root(s) unavailable; existing entries preserved. Reconnect and rescan.", "Biblioteca: {} pasta(s) indisponíveis; entradas existentes preservadas. Reconecte e busque novamente.", scan.unavailable_roots.len()));
                     }
                     self.scan_progress_rx = None;
                     self.scan_progress = None;
@@ -222,7 +285,7 @@ impl App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.set_error(
-                        "Library: scan failed — check permissions on music_dirs in config.toml",
+                        lang.text("Library: scan failed — check permissions on music_dirs in config.toml", "Biblioteca: falha na busca — confira as permissões de music_dirs no config.toml"),
                     );
                     self.scan_rx = None;
                     self.scan_progress_rx = None;
@@ -233,6 +296,7 @@ impl App {
     }
 
     pub(super) fn poll_watchers(&mut self) {
+        let lang = self.config.ui.language;
         if let Some(receiver) = &self.fs_event_rx {
             loop {
                 match receiver.try_recv() {
@@ -281,16 +345,25 @@ impl App {
 
             if reload_config {
                 if let Ok((new_config, warnings)) = crate::config::Config::load_or_default() {
+                    let lang = new_config.ui.language;
                     for warning in &warnings {
                         tracing::warn!(target: "config", "hot-reload warning: {warning}");
                     }
                     if new_config.theme != self.theme.name {
                         if let Ok(theme) = crate::theme::Theme::load(&new_config.theme) {
                             self.theme = theme;
-                            self.set_info(format!("Config & Tema: 🎨 {}", new_config.theme));
+                            self.set_info(crate::localized_format!(
+                                lang,
+                                "Config & Theme: 🎨 {}",
+                                "Config & Tema: 🎨 {}",
+                                new_config.theme
+                            ));
                         }
                     } else {
-                        self.set_info("Configuração recarregada (config.toml)");
+                        self.set_info(lang.text(
+                            "Configuration reloaded (config.toml)",
+                            "Configuração recarregada (config.toml)",
+                        ));
                     }
                     let (bindings, _) = Bindings::from_config(&new_config.keybinds);
                     self.bindings = bindings;
@@ -301,12 +374,19 @@ impl App {
                 let name = self.theme.name.clone();
                 if let Ok(theme) = crate::theme::Theme::load(&name) {
                     self.theme = theme;
-                    self.set_info(format!("Tema recarregado: 🎨 {name}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Theme reloaded: 🎨 {name}",
+                        "Tema recarregado: 🎨 {name}"
+                    ));
                 }
                 self.theme_names = crate::theme::Theme::available_names();
             } else if reload_presets {
                 self.custom_eq_presets = crate::config::EqPresets::load().presets;
-                self.set_info("Presets de equalização recarregados");
+                self.set_info(lang.text(
+                    "Equalizer presets reloaded",
+                    "Presets de equalização recarregados",
+                ));
             }
         }
 
@@ -314,7 +394,10 @@ impl App {
             if std::time::Instant::now() >= deadline && self.scan_rx.is_none() {
                 self.rescan_debounce_until = None;
                 self.start_async_scan();
-                self.set_info("Library changed — rescanning…");
+                self.set_info(lang.text(
+                    "Library changed — rescanning…",
+                    "Biblioteca alterada — buscando novamente…",
+                ));
             }
         }
     }

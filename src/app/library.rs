@@ -77,6 +77,7 @@ impl App {
     /// re-running `to_lowercase` across the whole library on every frame.
     pub(crate) fn library_rows_cached(&mut self) -> &[LibraryRow] {
         let fp = LibraryViewFingerprint {
+            language: self.config.ui.language,
             library_revision: self.library_revision,
             history_revision: self.history_revision,
             view_mode: self.view_mode,
@@ -101,6 +102,7 @@ impl App {
     }
 
     pub(crate) fn build_library_rows(&self) -> Vec<LibraryRow> {
+        let lang = self.config.ui.language;
         let visible = self.visible_library();
         if self.view_mode == ViewMode::Flat
             || self.view_mode == ViewMode::RecentlyPlayed
@@ -114,7 +116,10 @@ impl App {
         let mut out = Vec::with_capacity(visible.len() + 16);
         let mut last_album: Option<String> = None;
         for t in visible {
-            let album = t.album.clone().unwrap_or_else(|| "Unknown Album".into());
+            let album = t
+                .album
+                .clone()
+                .unwrap_or_else(|| lang.text("Unknown Album", "Álbum desconhecido").into());
             if last_album.as_deref() != Some(album.as_str()) {
                 out.push(LibraryRow::Header(album.clone()));
                 last_album = Some(album);
@@ -132,7 +137,8 @@ impl App {
     pub(crate) fn smart_rows_cached(&mut self) -> &[LibraryRow] {
         let stale = match &self.smart_cache {
             Some(c) => {
-                c.library_revision != self.library_revision
+                c.language != self.config.ui.language
+                    || c.library_revision != self.library_revision
                     || c.history_revision != self.history_revision
                     || c.play_history_revision != self.play_history_revision
                     || c.expanded != self.smart_expanded
@@ -142,6 +148,7 @@ impl App {
         if stale {
             let rows = self.build_smart_rows();
             self.smart_cache = Some(SmartRowsCache {
+                language: self.config.ui.language,
                 library_revision: self.library_revision,
                 history_revision: self.history_revision,
                 play_history_revision: self.play_history_revision,
@@ -157,6 +164,7 @@ impl App {
     }
 
     pub(crate) fn build_smart_rows(&self) -> Vec<LibraryRow> {
+        let lang = self.config.ui.language;
         const LIMIT: usize = 50;
         let track_map: std::collections::HashMap<String, &Track> = self
             .library
@@ -208,10 +216,26 @@ impl App {
         };
 
         let categories: [(&str, &Vec<Track>, bool); 4] = [
-            ("Most Played", &most_played, self.smart_expanded[0]),
-            ("Recently Played", &recently_played, self.smart_expanded[1]),
-            ("Recently Added", &recently_added, self.smart_expanded[2]),
-            ("Never Played", &never_played, self.smart_expanded[3]),
+            (
+                lang.text("Most Played", "Mais Tocadas"),
+                &most_played,
+                self.smart_expanded[0],
+            ),
+            (
+                lang.text("Recently Played", "Tocadas Recentemente"),
+                &recently_played,
+                self.smart_expanded[1],
+            ),
+            (
+                lang.text("Recently Added", "Adicionadas Recentemente"),
+                &recently_added,
+                self.smart_expanded[2],
+            ),
+            (
+                lang.text("Never Played", "Nunca Tocadas"),
+                &never_played,
+                self.smart_expanded[3],
+            ),
         ];
 
         let mut out = Vec::new();

@@ -11,7 +11,7 @@ use ratatui::{
 use crate::{app::App, theme::parse_color};
 
 pub fn render_visualizer(f: &mut Frame, area: Rect, app: &App) {
-    let mode_label = app.viz_mode.label();
+    let mode_label = app.viz_mode.localized_label(app.config.ui.language);
     let title = format!(" {} (×{:.1}) [v] ", mode_label, app.tap.sensitivity());
     let block = Block::default()
         .borders(Borders::ALL)
@@ -238,7 +238,7 @@ fn render_viz_vu(f: &mut Frame, inner: Rect, app: &App) {
     bar_row(
         f,
         mid,
-        "Peak",
+        app.config.ui.language.text("Peak", "Pico"),
         peak,
         if peak > 0.75 { accent } else { primary },
     );

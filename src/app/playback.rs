@@ -56,32 +56,58 @@ impl App {
     }
 
     pub(crate) fn adjust_viz_sensitivity(&mut self, delta: f32) {
+        let lang = self.config.ui.language;
         let new_val = self.tap.adjust_sensitivity(delta);
         self.config.visualizer.sensitivity = new_val;
-        self.set_info(format!("Visualizer sensitivity: ×{:.1}", new_val));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Visualizer sensitivity: ×{:.1}",
+            "Sensibilidade do visualizador: ×{:.1}",
+            new_val
+        ));
         if let Err(e) = self.config.save() {
-            self.set_info(format!("sensitivity saved in memory only ({e})"));
+            self.set_info(crate::localized_format!(
+                lang,
+                "sensitivity saved in memory only ({e})",
+                "sensibilidade salva apenas na memória ({e})"
+            ));
         }
     }
 
     pub const AUDIO_PANEL_ROWS: usize = 8;
 
     pub(crate) fn audio_panel_adjust(&mut self, dir: i32) {
+        let lang = self.config.ui.language;
         match self.audio_panel_row {
             0 => {
                 self.player.eq().adjust_low(dir as f32);
                 let db = self.player.eq().snapshot().low_db();
-                self.set_info(format!("EQ Low: {:+.0} dB", db));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "EQ Low: {:+.0} dB",
+                    "EQ Graves: {:+.0} dB",
+                    db
+                ));
             }
             1 => {
                 self.player.eq().adjust_mid(dir as f32);
                 let db = self.player.eq().snapshot().mid_db();
-                self.set_info(format!("EQ Mid: {:+.0} dB", db));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "EQ Mid: {:+.0} dB",
+                    "EQ Médios: {:+.0} dB",
+                    db
+                ));
             }
             2 => {
                 self.player.eq().adjust_high(dir as f32);
                 let db = self.player.eq().snapshot().high_db();
-                self.set_info(format!("EQ High: {:+.0} dB", db));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "EQ High: {:+.0} dB",
+                    "EQ Agudos: {:+.0} dB",
+                    db
+                ));
             }
             3 => {
                 let presets = crate::eq::PRESETS;
@@ -94,9 +120,17 @@ impl App {
                 self.player.eq().set(state);
                 self.config.playback.eq_preset = name.to_string();
                 if let Err(error) = self.config.save() {
-                    self.set_error(format!("EQ changed, but config was not saved: {error}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "EQ changed, but config was not saved: {error}",
+                        "Equalizador alterado, mas a configuração não foi salva: {error}"
+                    ));
                 } else {
-                    self.set_info(format!("EQ Preset: 🎚️ {name}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "EQ Preset: 🎚️ {name}",
+                        "Predefinição EQ: 🎚️ {name}"
+                    ));
                 }
             }
             4 => {
@@ -110,8 +144,10 @@ impl App {
                 self.player.crossfade_secs = xf;
                 self.config.playback.crossfade_secs = xf;
                 if let Err(error) = self.config.save() {
-                    self.set_error(format!(
-                        "Crossfade changed, but config was not saved: {error}"
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Crossfade changed, but config was not saved: {error}",
+                        "Transição alterada, mas a configuração não foi salva: {error}"
                     ));
                 } else {
                     self.set_info(format!("Crossfade: {:.1}s", xf));
@@ -123,13 +159,19 @@ impl App {
             7 => {
                 let s = (self.player.speed() + dir as f32 * 0.05).clamp(0.5, 2.5);
                 self.player.set_speed(s);
-                self.set_info(format!("Playback speed: {:.2}×", s));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Playback speed: {:.2}×",
+                    "Velocidade de reprodução: {:.2}×",
+                    s
+                ));
             }
             _ => {}
         }
     }
 
     pub(crate) fn cycle_theme(&mut self) {
+        let lang = self.config.ui.language;
         if self.theme_names.is_empty() {
             let names = crate::theme::Theme::available_names();
             self.theme_idx = names
@@ -151,12 +193,24 @@ impl App {
                 self.config.theme = name.clone();
                 self.theme = theme;
                 if let Err(error) = self.config.save() {
-                    self.set_error(format!("Theme changed, but config was not saved: {error}"));
+                    self.set_error(crate::localized_format!(
+                        lang,
+                        "Theme changed, but config was not saved: {error}",
+                        "Tema alterado, mas a configuração não foi salva: {error}"
+                    ));
                 } else {
-                    self.set_info(format!("Tema: 🎨 {name}"));
+                    self.set_info(crate::localized_format!(
+                        lang,
+                        "Theme: 🎨 {name}",
+                        "Tema: 🎨 {name}"
+                    ));
                 }
             }
-            Err(e) => self.set_info(format!("Erro no tema: {e}")),
+            Err(e) => self.set_info(crate::localized_format!(
+                lang,
+                "Theme error: {e}",
+                "Erro no tema: {e}"
+            )),
         }
     }
 
@@ -259,11 +313,15 @@ impl App {
     }
 
     pub(crate) fn seek_relative_async(&mut self, delta_secs: i64) {
+        let lang = self.config.ui.language;
         let Some(track) = self.player.current().cloned() else {
             return;
         };
         if Self::track_is_live_radio(&track) {
-            self.set_info("Seek is unavailable for live radio.");
+            self.set_info(lang.text(
+                "Seek is unavailable for live radio.",
+                "Avanço/retrocesso indisponível para rádio ao vivo.",
+            ));
             return;
         }
         let target = super::util::seek_target(
@@ -295,6 +353,7 @@ impl App {
     }
 
     pub(crate) fn spawn_seek_load(&mut self, track: Track, offset: Duration) {
+        let lang = self.config.ui.language;
         let stream_err = self.player.stream_err_handle();
         let stream_title = self.player.stream_title_handle();
         let t_clone = track.clone();
@@ -305,7 +364,7 @@ impl App {
         self.load_rx = Some(rx);
         self.loading_track = Some(track);
         self.pending_seek_offset = Some(offset);
-        self.set_info("Seeking…");
+        self.set_info(lang.text("Seeking…", "Alterando posição…"));
     }
 
     pub(crate) fn pick_next_index(&self, current: usize) -> Option<usize> {
@@ -384,6 +443,7 @@ impl App {
     }
 
     pub(crate) fn enqueue_endless_recommendations(&mut self) -> usize {
+        let lang = self.config.ui.language;
         if self.library.is_empty() {
             return 0;
         }
@@ -452,7 +512,10 @@ impl App {
         }
 
         if added > 0 {
-            self.set_info("♾️ Auto-Play: faixas similares adicionadas à fila.");
+            self.set_info(lang.text(
+                "♾️ Auto-Play: similar tracks added to queue.",
+                "♾️ Auto-Play: faixas similares adicionadas à fila.",
+            ));
         }
         added
     }
@@ -498,15 +561,25 @@ impl App {
     }
 
     pub(crate) fn save_playlist_named(&mut self, name: String) {
+        let lang = self.config.ui.language;
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
-                self.set_info(format!("Playlist dir error: {e}"));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Playlist dir error: {e}",
+                    "Erro na pasta de playlists: {e}"
+                ));
                 return;
             }
         };
         if std::fs::create_dir_all(&dir).is_err() {
-            self.set_info(format!("Could not create {}", dir.display()));
+            self.set_info(crate::localized_format!(
+                lang,
+                "Could not create {}",
+                "Não foi possível criar {}",
+                dir.display()
+            ));
             return;
         }
         let safe_name = if name.is_empty() {
@@ -542,17 +615,30 @@ impl App {
         match std::fs::write(&path, text) {
             Ok(_) => {
                 self.active_playlist_name = Some(safe_name.clone());
-                self.set_info(format!("Saved: {safe_name}.m3u"));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Saved: {safe_name}.m3u",
+                    "Salvo: {safe_name}.m3u"
+                ));
             }
-            Err(e) => self.set_info(format!("Save error: {e}")),
+            Err(e) => self.set_info(crate::localized_format!(
+                lang,
+                "Save error: {e}",
+                "Erro ao salvar: {e}"
+            )),
         }
     }
 
     pub(crate) fn open_playlist_browser(&mut self) {
+        let lang = self.config.ui.language;
         let dir = match crate::config::playlists_dir() {
             Ok(p) => p,
             Err(e) => {
-                self.set_info(format!("Playlist dir error: {e}"));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Playlist dir error: {e}",
+                    "Erro na pasta de playlists: {e}"
+                ));
                 return;
             }
         };
@@ -600,7 +686,7 @@ impl App {
             lb.cmp(&la).then_with(|| a.name.cmp(&b.name))
         });
         if entries.is_empty() {
-            self.set_info("No playlists saved yet.");
+            self.set_info(lang.text("No playlists saved yet.", "Nenhuma playlist salva ainda."));
             return;
         }
         self.playlist_browser_entries = entries;
@@ -610,6 +696,7 @@ impl App {
     }
 
     pub(crate) fn load_playlist_at_row(&mut self, append: bool) {
+        let lang = self.config.ui.language;
         let Some(entry) = self
             .playlist_browser_entries
             .get(self.playlist_browser_row)
@@ -617,12 +704,24 @@ impl App {
         else {
             return;
         };
-        self.set_info(format!("Loading playlist '{}'…", entry.name));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Loading playlist '{}'…",
+            "Carregando playlist '{}'…",
+            entry.name
+        ));
         let event_entry = entry.clone();
         let tx = self.service_tx.clone();
         std::thread::spawn(move || {
             let result = std::fs::read_to_string(&entry.path)
-                .map_err(|error| format!("Could not read {}: {error}", entry.path.display()))
+                .map_err(|error| {
+                    crate::localized_format!(
+                        lang,
+                        "Could not read {}: {error}",
+                        "Não foi possível ler {}: {error}",
+                        entry.path.display()
+                    )
+                })
                 .map(|text| {
                     let mut tracks = Vec::new();
                     let mut pending_extinf = None;
@@ -672,6 +771,7 @@ impl App {
     }
 
     pub(crate) fn save_eq_preset(&mut self, name: String) {
+        let lang = self.config.ui.language;
         if name.is_empty() {
             return;
         }
@@ -692,12 +792,21 @@ impl App {
             presets: self.custom_eq_presets.clone(),
         };
         match store.save() {
-            Ok(_) => self.set_info(format!("EQ preset '{name}' saved.")),
-            Err(e) => self.set_info(format!("EQ preset save error: {e}")),
+            Ok(_) => self.set_info(crate::localized_format!(
+                lang,
+                "EQ preset '{name}' saved.",
+                "Predefinição EQ '{name}' salva."
+            )),
+            Err(e) => self.set_info(crate::localized_format!(
+                lang,
+                "EQ preset save error: {e}",
+                "Erro ao salvar predefinição EQ: {e}"
+            )),
         }
     }
 
     pub(crate) fn save_profile(&mut self, name: String) {
+        let lang = self.config.ui.language;
         if name.is_empty() {
             return;
         }
@@ -722,12 +831,21 @@ impl App {
             profiles: self.profiles.clone(),
         };
         match store.save() {
-            Ok(_) => self.set_info(format!("Profile '{name}' saved.")),
-            Err(e) => self.set_info(format!("Profile save error: {e}")),
+            Ok(_) => self.set_info(crate::localized_format!(
+                lang,
+                "Profile '{name}' saved.",
+                "Perfil '{name}' salvo."
+            )),
+            Err(e) => self.set_info(crate::localized_format!(
+                lang,
+                "Profile save error: {e}",
+                "Erro ao salvar perfil: {e}"
+            )),
         }
     }
 
     pub(crate) fn apply_profile(&mut self, idx: usize) {
+        let lang = self.config.ui.language;
         let Some(p) = self.profiles.get(idx).cloned() else {
             return;
         };
@@ -749,9 +867,18 @@ impl App {
             }
         }
         if let Err(error) = self.config.save() {
-            self.set_error(format!("Profile loaded, but config was not saved: {error}"));
+            self.set_error(crate::localized_format!(
+                lang,
+                "Profile loaded, but config was not saved: {error}",
+                "Perfil carregado, mas a configuração não foi salva: {error}"
+            ));
         } else {
-            self.set_info(format!("Profile '{}' loaded.", p.name));
+            self.set_info(crate::localized_format!(
+                lang,
+                "Profile '{}' loaded.",
+                "Perfil '{}' carregado.",
+                p.name
+            ));
         }
     }
 
@@ -822,9 +949,15 @@ impl App {
     }
 
     pub(crate) fn enqueue_selection(&mut self) {
+        let lang = self.config.ui.language;
         if self.focus == Pane::Library {
             if let Some(t) = self.selected_library_track() {
-                self.set_info(format!("Queued: {}", t.display()));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Queued: {}",
+                    "Na fila: {}",
+                    t.display()
+                ));
                 self.queue.push(t);
                 if self.queue_state.selected().is_none() {
                     self.queue_state.select(Some(0));
@@ -834,10 +967,16 @@ impl App {
     }
 
     pub(crate) fn remove_from_queue(&mut self) {
+        let lang = self.config.ui.language;
         if self.focus == Pane::Queue {
             if let Some(i) = self.queue_state.selected() {
                 if i < self.queue.len() {
-                    let label = format!("removed '{}'", self.queue[i].display());
+                    let label = crate::localized_format!(
+                        lang,
+                        "removed '{}'",
+                        "removeu '{}'",
+                        self.queue[i].display()
+                    );
                     self.push_undo_snapshot(label);
                     if self.queue_index == Some(i) {
                         self.stop_playback();
@@ -860,6 +999,7 @@ impl App {
     }
 
     pub(crate) fn clear_queue(&mut self) {
+        let lang = self.config.ui.language;
         if self.queue.is_empty() {
             return;
         }
@@ -870,15 +1010,21 @@ impl App {
             .unwrap_or(false);
         if !confirmed {
             self.clear_confirm_until = Some(now + Duration::from_secs(3));
-            self.set_info(format!(
+            self.set_info(crate::localized_format!(
+                lang,
                 "Press c again within 3s to clear {} tracks",
+                "Pressione c novamente em até 3s para limpar {} faixas",
                 self.queue.len()
             ));
             return;
         }
         self.clear_confirm_until = None;
         let n = self.queue.len();
-        self.push_undo_snapshot(format!("cleared queue ({n} tracks)"));
+        self.push_undo_snapshot(crate::localized_format!(
+            lang,
+            "cleared queue ({n} tracks)",
+            "limpou a fila ({n} faixas)"
+        ));
         self.queue.clear();
         self.queue_state.select(None);
         self.queue_index = None;
@@ -886,7 +1032,11 @@ impl App {
         self.album_art = None;
         self.art_generation = self.art_generation.wrapping_add(1);
         self.art_picker.invalidate();
-        self.set_info(format!("Queue cleared ({n} tracks). Press u to undo."));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Queue cleared ({n} tracks). Press u to undo.",
+            "Fila limpa ({n} faixas). Pressione u para desfazer."
+        ));
     }
 
     pub(crate) fn push_undo_snapshot(&mut self, label: String) {
@@ -901,8 +1051,9 @@ impl App {
     }
 
     pub(crate) fn undo_queue_action(&mut self) {
+        let lang = self.config.ui.language;
         let Some(snapshot) = self.undo_stack.pop_back() else {
-            self.set_info("Nothing to undo.");
+            self.set_info(lang.text("Nothing to undo.", "Nada para desfazer."));
             return;
         };
         self.queue = snapshot.queue;
@@ -913,10 +1064,16 @@ impl App {
             Some(self.queue_index.unwrap_or(0).min(self.queue.len() - 1))
         });
         self.update_prefetch_slots();
-        self.set_info(format!("Undo: {}", snapshot.label));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Undo: {}",
+            "Desfazer: {}",
+            snapshot.label
+        ));
     }
 
     pub(crate) fn play_instant(&mut self, source: crate::audio::SymphoniaSource, track: Track) {
+        let lang = self.config.ui.language;
         self.cancel_pending_playback();
         self.current_play_recorded = false;
         self.lastfm_scrobbled = false;
@@ -929,13 +1086,18 @@ impl App {
                 self.on_track_started(track);
             }
             Err(e) => {
-                self.set_error(format!("Playback: {e}"));
+                self.set_error(crate::localized_format!(
+                    lang,
+                    "Playback: {e}",
+                    "Reprodução: {e}"
+                ));
                 self.play_current();
             }
         }
     }
 
     pub(crate) fn play_current(&mut self) {
+        let lang = self.config.ui.language;
         self.cancel_pending_playback();
         self.current_play_recorded = false;
         self.lastfm_scrobbled = false;
@@ -956,10 +1118,17 @@ impl App {
                         self.set_info(format!("Spotify ▶ {}", t.display()));
                         self.push_history(t);
                     }
-                    Err(e) => self.set_info(format!("Spotify play error: {e}")),
+                    Err(e) => self.set_info(crate::localized_format!(
+                        lang,
+                        "Spotify play error: {e}",
+                        "Erro na reprodução do Spotify: {e}"
+                    )),
                 }
             } else {
-                self.set_error("Spotify: not authorized — press Shift+P to login");
+                self.set_error(lang.text(
+                    "Spotify: not authorized — press Shift+P to login",
+                    "Spotify: não autorizado — pressione Shift+P para entrar",
+                ));
             }
             return;
         }
@@ -980,10 +1149,16 @@ impl App {
         });
         self.load_rx = Some(rx);
         self.loading_track = Some(t.clone());
-        self.set_info(format!("Loading: {}…", t.display()));
+        self.set_info(crate::localized_format!(
+            lang,
+            "Loading: {}…",
+            "Carregando: {}…",
+            t.display()
+        ));
     }
 
     pub(crate) fn toggle_favorite(&mut self) {
+        let lang = self.config.ui.language;
         let path = match self.focus {
             Pane::Library => self.selected_library_track().map(|t| t.path),
             Pane::Queue => self
@@ -995,14 +1170,15 @@ impl App {
         if let Some(p) = path {
             let fav = self.ratings.toggle_favorite(&p);
             self.set_info(if fav {
-                "Added to favorites ♥"
+                lang.text("Added to favorites ♥", "Adicionada aos favoritos ♥")
             } else {
-                "Removed from favorites"
+                lang.text("Removed from favorites", "Removida dos favoritos")
             });
         }
     }
 
     pub(crate) fn set_rating(&mut self, rating: u8) {
+        let lang = self.config.ui.language;
         let path = match self.focus {
             Pane::Library => self.selected_library_track().map(|t| t.path),
             Pane::Queue => self
@@ -1014,10 +1190,14 @@ impl App {
         if let Some(p) = path {
             self.ratings.set(&p, rating);
             if rating == 0 {
-                self.set_info("Rating removed");
+                self.set_info(lang.text("Rating removed", "Avaliação removida"));
             } else {
                 let stars = "★".repeat(rating as usize);
-                self.set_info(format!("Rating: {stars} ({rating}/5)"));
+                self.set_info(crate::localized_format!(
+                    lang,
+                    "Rating: {stars} ({rating}/5)",
+                    "Avaliação: {stars} ({rating}/5)"
+                ));
             }
         }
     }
