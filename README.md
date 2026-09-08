@@ -6,33 +6,59 @@
       ▒██░   ▓██░░ ████▓▒░▒ ▓███▀ ░  ▒██▒ ░ ▒▒█████▓ ▒██░   ▓██░░▒████▒
 </pre>
 
-A fully customizable terminal music player in Rust. ASCII-art TUI, multi-format playback, theme system via TOML.
+<div align="center">
+
+### Keep the music. Close the browser.
+
+**A fast, customizable music player built for developers who live in the terminal.**
+
+Written in Rust · Keyboard-first · Local music · Streaming · Equalizer · Themes
+
+[Installation](#installation) · [Features](#features) · [Configuration](#configuration) · [Roadmap](#roadmap)
+
+</div>
+
+---
+
+## Why Noctune?
+
+I spend a lot of time programming with music playing in the background.
+
+What I did not like was keeping an entire browser — and sometimes several heavy web processes — running for hours just to listen to music.
+
+So I built **Noctune**.
+
+Noctune is a terminal-native music player designed to stay open next to your editor without requiring a browser tab or a heavyweight desktop interface.
+
+It gives you a full music library, queue, audio visualizers, equalizer, themes, streaming integrations and keyboard-driven controls — directly inside your terminal.
+
+```text
+Editor + Terminal + Noctune.
+
+That's it.
+```
 
 ## Demo
 
-
 https://github.com/user-attachments/assets/6c468eff-b23e-4064-b64a-c916262e46b4
 
-
-> Development hardening is not yet released. See [implementation status](docs/implementation-status.md).
+---
 
 ## Installation
 
-### Windows — install script (recommended)
+### Windows
+
+Run the installer from PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/WendellOttoni/Noctune/main/install.ps1 | iex
 ```
 
-Downloads the binary and adds it to your PATH. Open a new terminal and run `noctune`.
+Then open a new terminal and run:
 
-### Linux / macOS — install script
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/WendellOttoni/Noctune/main/install.sh | sh
+```powershell
+noctune
 ```
-
-Installs to `~/.local/bin/noctune`.
 
 ### Windows — Scoop
 
@@ -41,101 +67,466 @@ scoop bucket add noctune https://github.com/WendellOttoni/Noctune
 scoop install noctune
 ```
 
-### Build from source (requires Rust)
+### Linux / macOS
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/WendellOttoni/Noctune/main/install.sh | sh
+```
+
+Then:
+
+```sh
+noctune
+```
+
+Noctune is installed to `~/.local/bin/noctune`.
+
+### Build from source
+
+Requires Rust.
 
 ```sh
 cargo install --git https://github.com/WendellOttoni/Noctune
 ```
 
-Or clone and build locally:
+Or clone the repository:
 
 ```sh
 git clone https://github.com/WendellOttoni/Noctune
 cd Noctune
 cargo build --release --locked
+```
+
+Run:
+
+```sh
 ./target/release/noctune
 ```
 
-### Manual download
+### Pre-built binaries
 
-Pre-compiled binaries for Windows, Linux, and macOS (ARM) are available on the [Releases page](https://github.com/WendellOttoni/Noctune/releases).
+Pre-compiled binaries are also available on the [Releases page](https://github.com/WendellOttoni/Noctune/releases).
 
 ---
 
-> **Note:** YouTube streaming requires [yt-dlp](https://github.com/yt-dlp/yt-dlp) installed and available in your PATH.
+## Quick start
 
-## Features
+On the first launch, Noctune can guide you through the initial setup.
 
-- Plays MP3, FLAC, WAV, OGG, Opus, M4A, AAC (via Symphonia + rodio)
-- TUI built on ratatui + crossterm
-- Library / queue / now-playing panes with focus-aware borders
-- Waveform and spectrum visualizer
-- Theme files in TOML: colors, symbols, ASCII art logo
-- 3-band equalizer with presets
-- YouTube / HTTP stream playback via yt-dlp
-- Spotify remote control via Web API
-- Discord Rich Presence
-- Config at `~/.config/noctune/config.toml` (or platform equivalent)
-- Themes at `~/.config/noctune/themes/<name>.toml`
-
-## Keybindings
-
-Press `?` for help or open the command palette. Help, palette actions and the
-`noctune commands` Markdown export share one registry and reflect your configured
-`[keybinds]` overrides.
-
-## Setup and diagnostics
+You can also configure your music directory manually:
 
 ```sh
 noctune setup --music "/path/to/music"
-noctune doctor
-noctune doctor --json
+```
+
+Then simply run:
+
+```sh
+noctune
+```
+
+Press:
+
+```text
+?
+```
+
+at any time to open the help interface.
+
+---
+
+## Features
+
+### 🎵 Playback
+
+* MP3
+* FLAC
+* WAV
+* OGG
+* Opus
+* M4A
+* AAC
+* Local music libraries
+* Playback queue
+* Now-playing view
+* Seek controls
+* Pause / resume
+* Audio caching for downloaded streams
+
+Playback is powered by **Symphonia** and **Rodio**.
+
+### 📊 Audio visualization
+
+Noctune includes terminal-native audio visualization:
+
+* Waveform visualization
+* Spectrum visualization
+* Live playback feedback
+
+No browser canvas. No desktop GUI.
+
+Just your terminal.
+
+### 🎚 Equalizer
+
+Built-in **3-band equalizer** with configurable presets.
+
+Adjust your sound without depending on an external audio player.
+
+### 🎨 Themes
+
+The entire interface can be customized through TOML theme files.
+
+Themes can control:
+
+* Colors
+* Symbols
+* Borders
+* ASCII artwork
+* UI appearance
+
+Theme files live at:
+
+```text
+~/.config/noctune/themes/
+```
+
+Create your own:
+
+```sh
+cp themes/default.toml themes/my-theme.toml
+```
+
+Then configure:
+
+```toml
+theme = "my-theme"
+```
+
+Noctune is designed to look like it belongs in **your terminal**.
+
+### ⌨ Keyboard-first interface
+
+Noctune is built around keyboard navigation.
+
+Press:
+
+```text
+?
+```
+
+to view available shortcuts.
+
+You can also open the command palette or export the currently configured command registry:
+
+```sh
 noctune commands
 ```
 
-Interactive first launch offers setup. `doctor --test-audio` optionally plays a short
-tone; normal diagnostics do not play audio. JSON diagnostics omit credentials,
-URLs, usernames and local paths.
+Keybindings can be overridden through configuration.
 
-In your existing configuration, set `language = "pt-BR"` (or `"en"`) and
-`simple_symbols = true` under `[ui]` for the core UI. Some integration messages
-remain untranslated. Audio downloads have separate `[cache]` settings:
-`audio_max_size_mb = 1024` and `audio_expire_days = 30`.
-Cache status and cleanup are available in the palette; active files are protected.
+### 🌐 Streaming
 
-## Spotify integration
+Noctune supports HTTP and YouTube-based streaming through `yt-dlp`.
 
-Noctune can control your active Spotify Connect device via the Web API.
+> YouTube streaming requires [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) to be installed and available in your `PATH`.
 
-1. Create an app at https://developer.spotify.com/dashboard
-2. Add redirect URI `http://127.0.0.1:8888/callback`
-3. Put the Client ID in `config.toml`:
-   ```toml
-   [spotify]
-   client_id = "your_client_id"
-   redirect_port = 8888
-   ```
-4. Press `Shift+P` — browser opens, you authorize, tokens are stored automatically.
+Streaming audio can be cached locally according to configurable storage and expiration limits.
 
-## Customizing themes
+### 🟢 Spotify integration
 
-Copy `themes/default.toml` to `themes/<your-theme>.toml`, edit colors, symbols, and the ASCII art logo, then set `theme = "<your-theme>"` in `config.toml`.
+Noctune can control an active **Spotify Connect** device through the Spotify Web API.
+
+You can:
+
+* Authenticate with Spotify
+* Control playback
+* Interact with your active Spotify device
+* Use Spotify from the Noctune interface
+
+> Noctune currently controls Spotify remotely. Native Spotify audio playback inside Noctune is not currently implemented.
+
+### 🎮 Discord Rich Presence
+
+Optionally display what you are listening to through Discord Rich Presence.
+
+### 🌎 Language support
+
+Core interface flows support:
+
+```text
+English
+Português do Brasil
+```
+
+Configure:
+
+```toml
+[ui]
+language = "pt-BR"
+```
+
+or:
+
+```toml
+[ui]
+language = "en"
+```
+
+Some integration-specific messages may still remain untranslated.
+
+---
+
+## Built for the terminal
+
+Noctune uses:
+
+* **Rust**
+* **Ratatui**
+* **Crossterm**
+* **Rodio**
+* **Symphonia**
+
+The goal is not to recreate a desktop music player inside a terminal.
+
+The goal is to provide the things you actually need while working:
+
+```text
+Music
+Library
+Queue
+Streaming
+Equalizer
+Visualizer
+Themes
+Keyboard controls
+```
+
+without requiring another large graphical application to stay open beside your development environment.
+
+---
+
+## Configuration
+
+Configuration is stored in:
+
+```text
+~/.config/noctune/config.toml
+```
+
+or the equivalent platform-specific configuration directory.
+
+Themes are stored in:
+
+```text
+~/.config/noctune/themes/
+```
+
+Example UI configuration:
+
+```toml
+[ui]
+language = "en"
+simple_symbols = false
+```
+
+For terminals with limited Unicode support:
+
+```toml
+[ui]
+simple_symbols = true
+```
+
+### Audio cache
+
+Downloaded audio has independent cache limits.
+
+Example:
+
+```toml
+[cache]
+audio_max_size_mb = 1024
+audio_expire_days = 30
+```
+
+Cache inspection and cleanup are available through the command palette.
+
+Files currently being used for playback are protected from cleanup.
+
+---
+
+## Spotify setup
+
+Noctune uses Spotify's Web API to control your active Spotify Connect device.
+
+### 1. Create an application
+
+Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
+
+### 2. Add the redirect URI
+
+```text
+http://127.0.0.1:8888/callback
+```
+
+### 3. Configure Noctune
+
+Add your Client ID:
+
+```toml
+[spotify]
+client_id = "your_client_id"
+redirect_port = 8888
+```
+
+### 4. Authenticate
+
+Inside Noctune, press:
+
+```text
+Shift + P
+```
+
+Your browser will open for authorization.
+
+After authentication, Noctune stores the required tokens automatically.
+
+---
+
+## Diagnostics
+
+Something not working?
+
+Run:
+
+```sh
+noctune doctor
+```
+
+For machine-readable diagnostics:
+
+```sh
+noctune doctor --json
+```
+
+To test audio output explicitly:
+
+```sh
+noctune doctor --test-audio
+```
+
+Normal diagnostics do **not** play audio.
+
+The JSON diagnostic output is designed to avoid exposing credentials, URLs, usernames and local paths.
+
+---
+
+## Project status
+
+Noctune is actively evolving.
+
+The project includes automated tests covering areas such as:
+
+* Playback behavior
+* Credentials
+* Cache handling
+* HTTP behavior
+* Spotify contracts
+* Queue management
+* Unicode layout behavior
+* Process handling
+* Update validation
+
+Development hardening and platform-specific validation are still ongoing.
+
+For the detailed implementation state and known limitations, see:
+
+[Implementation status](docs/implementation-status.md)
+
+For the engineering review behind recent improvements:
+
+[Noctune improvement report](docs/melhorias-noctune-2026-09-07.md)
+
+---
+
+## Release integrity
+
+Noctune's current release workflow includes additional integrity protections.
+
+The updater and installers expect matching `.sha256` sidecar files and preserve a backup while replacing an installation.
+
+Releases built through the updated workflow also produce build attestations.
+
+Older releases that do not provide the expected checksum may be intentionally rejected by the new updater.
+
+> Checksums protect against accidental corruption. They do not protect against a compromised publisher or release infrastructure.
+
+---
 
 ## Roadmap
 
-- Embedded Spotify playback via Librespot — [#24](https://github.com/WendellOttoni/Noctune/issues/24)
-- YouTube Music via yt-dlp — [#25](https://github.com/WendellOttoni/Noctune/issues/25)
-- HTTP radio streaming (Icecast/Shoutcast) — [#20](https://github.com/WendellOttoni/Noctune/issues/20)
+Some of the next areas being explored:
 
-See all open issues at https://github.com/WendellOttoni/Noctune/issues
-## Release integrity
+* [Embedded Spotify playback via Librespot](https://github.com/WendellOttoni/Noctune/issues/24)
+* [YouTube Music support](https://github.com/WendellOttoni/Noctune/issues/25)
+* [Icecast / Shoutcast internet radio](https://github.com/WendellOttoni/Noctune/issues/20)
 
-The new updater and installers require a matching `.sha256` sidecar and preserve
-a backup during replacement. Older releases without that file are intentionally
-refused; build from source until a release from the new workflow is published.
-Checksums detect corruption, not a compromised publisher. The workflow also
-produces build attestations. Native Spotify audio is not implemented: use an
-active Spotify Connect device.
+See all open issues:
 
-See [the research report](docs/melhorias-noctune-2026-09-07.md) and
-[implementation status](docs/implementation-status.md) for coverage and limitations.
+https://github.com/WendellOttoni/Noctune/issues
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+If you find a bug, have an idea or want to improve Noctune, feel free to:
+
+* Open an issue
+* Suggest a feature
+* Submit a pull request
+* Improve documentation
+* Create a theme
+
+Before making larger architectural changes, opening an issue first is recommended so the idea can be discussed.
+
+---
+
+## Philosophy
+
+Noctune started from a simple idea:
+
+> **Music should not require a heavyweight application sitting beside your development environment all day.**
+
+Noctune is built for people who already spend most of their time inside editors, shells and terminals.
+
+No accounts are required for local playback.
+
+No browser UI is required for your local library.
+
+Open the terminal.
+
+Start Noctune.
+
+Keep coding.
+
+---
+
+## License
+
+Noctune is open source and distributed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+
+### Keep the music. Close the browser.
+
+If Noctune is useful to you, consider giving the repository a ⭐.
+
+It helps more developers discover the project.
+
+**[⭐ Star Noctune](https://github.com/WendellOttoni/Noctune)**
+
+</div>
