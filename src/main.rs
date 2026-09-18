@@ -13,6 +13,7 @@ mod diagnostics;
 mod discord;
 mod downloader;
 mod eq;
+mod glassline;
 mod history;
 mod i18n;
 mod ipc;

@@ -10,6 +10,54 @@ use crate::{
 };
 
 impl App {
+    pub(crate) fn sync_glassline(&mut self) {
+        let snapshot = self.player.current().map(|track| {
+            crate::glassline::PlaybackSnapshot {
+                track_id: format!("{}\u{1f}{}", track.path.to_string_lossy(), track.title),
+                title: track.title.clone(),
+                artist: track.artist.clone().unwrap_or_default(),
+                album: track.album.clone().unwrap_or_default(),
+                artwork_path: None,
+                duration: track.duration.unwrap_or_default(),
+                position: self.player.elapsed(),
+                playing: !self.player.is_paused(),
+            }
+        });
+        self.glassline.publish(snapshot);
+
+        let commands = self.glassline.drain_commands();
+        for (id, command) in commands {
+            let success = match command {
+                crate::glassline::Command::Previous => {
+                    if self.queue.is_empty() {
+                        false
+                    } else {
+                        self.prev();
+                        true
+                    }
+                }
+                crate::glassline::Command::TogglePlayback => {
+                    if self.player.current().is_none() {
+                        false
+                    } else {
+                        self.player.toggle();
+                        true
+                    }
+                }
+                crate::glassline::Command::Next => {
+                    if self.queue.is_empty() {
+                        false
+                    } else {
+                        self.next();
+                        true
+                    }
+                }
+                crate::glassline::Command::ShowNoctune => crate::glassline::show_noctune(),
+            };
+            self.glassline.complete_command(id, success);
+        }
+    }
+
     pub(crate) fn start_async_scan(&mut self) {
         let lang = self.config.ui.language;
         if self.scan_rx.is_some() {

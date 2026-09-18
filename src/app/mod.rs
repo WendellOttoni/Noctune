@@ -122,6 +122,7 @@ pub struct App {
     pub media_session: Option<crate::media_session::MediaSession>,
     pub media_session_rx: Option<std::sync::mpsc::Receiver<souvlaki::MediaControlEvent>>,
     pub ipc_server: Option<crate::ipc::IpcServer>,
+    pub glassline: crate::glassline::GlasslineBridge,
     pub rescan_debounce_until: Option<std::time::Instant>,
     pub tick_count: u64,
     pub hover_x: Option<u16>,
@@ -507,6 +508,7 @@ impl App {
             lastfm_scrobbled: false,
             discord_tx,
             ipc_server: crate::ipc::IpcServer::start(),
+            glassline: crate::glassline::GlasslineBridge::start(),
             show_device_selector: false,
             device_list: Vec::new(),
             device_selector_row: 0,
@@ -1204,6 +1206,8 @@ impl App {
                 s.update_playback(!self.player.is_paused(), self.player.elapsed());
             }
         }
+
+        self.sync_glassline();
 
         if let Some(rx) = &self.lastfm_panel_rx {
             match rx.try_recv() {
